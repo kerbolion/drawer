@@ -11,7 +11,8 @@ La interfaz usa Ant Design `5.29.3`, la misma versión instalada en `workspace-a
 - Muestra relaciones padre-hijo en ambos sentidos, como `Contactos -> Servicios` y `Servicios -> Contactos`.
 - Presenta los relacionados en vista **Deck** o **Tabla**, con paginación y una preferencia persistente por relación.
 - Muestra accesos de **Kanban** y **Calendario** en el encabezado cuando la hoja tiene columnas configuradas como Estado y Fecha.
-- Kanban agrupa toda la hoja por Estado, permite buscar y mover fichas entre columnas; cada movimiento escribe únicamente la celda de Estado y se verifica en segundo plano.
+- Kanban coloca primero los registros sin Estado, permite buscar y arrastrar la ficha completa entre columnas con una previsualización animada; cada movimiento escribe únicamente la celda de Estado y se verifica en segundo plano.
+- El drawer de Kanban puede ampliarse a todo el ancho de la hoja y recuerda esa preferencia para el documento.
 - Calendario permite elegir la columna de Fecha, navegar por mes y abrir la fila asociada desde cada evento.
 - Abre cada tarjeta Deck en un segundo drawer de Ant Design, igual que Workspace; en equipos de escritorio se abre con doble clic y en dispositivos táctiles con un toque.
 - Permite editar los relacionados directamente en las celdas de la vista Tabla o desde su drawer usando los mismos controles tipados del formulario principal.

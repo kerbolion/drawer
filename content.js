@@ -26,6 +26,8 @@ import {
   DeleteOutlined,
   DownOutlined,
   DragOutlined,
+  FullscreenExitOutlined,
+  FullscreenOutlined,
   LeftOutlined,
   LinkOutlined,
   MailOutlined,
@@ -36,6 +38,23 @@ import {
   TableOutlined,
   UnorderedListOutlined
 } from "@ant-design/icons";
+import {
+  DndContext,
+  DragOverlay,
+  PointerSensor,
+  closestCorners,
+  pointerWithin,
+  rectIntersection,
+  useDroppable,
+  useSensor,
+  useSensors
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  useSortable,
+  verticalListSortingStrategy
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import esES from "antd/es/locale/es_ES.js";
 import dayjs from "dayjs";
 import "dayjs/locale/es.js";
@@ -160,7 +179,9 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
       position: fixed; inset: 0 0 0 auto; z-index: 2147483647;
       width: min(720px, 94vw); height: 100vh; border: 0; background: ${antdTokens.colorBgElevated};
       box-shadow: ${antdTokens.boxShadowSecondary};
+      transition: width 180ms cubic-bezier(.2, 0, 0, 1);
     }
+    .panel-frame.is-sheet-view-expanded { width: 100vw; }
     .panel-frame[hidden], .reopen[hidden] { display: none; }
     .reopen {
       box-sizing: border-box; position: fixed; z-index: 2147483646;
@@ -567,6 +588,7 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
     .related-drawer-footer .ant-btn { min-height: ${antdTokens.controlHeightLG}px; font-weight: 600; }
     .relation-pagination { display: flex; justify-content: center; padding: 12px 14px 0; }
     .sheet-view-drawer-root .ant-drawer-content-wrapper { width: min(720px, 100%) !important; }
+    .sheet-view-drawer-root.is-expanded .ant-drawer-content-wrapper { width: 100% !important; }
     .sheet-view-drawer .ant-drawer-header { background: var(--workspace-surface); border-bottom-color: var(--workspace-border-soft); }
     .sheet-view-drawer .ant-drawer-body {
       min-width: 0; min-height: 0; overflow: hidden; padding: 0; background: var(--workspace-bg);
@@ -596,16 +618,26 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
     .kanban-column-title .ant-tag { max-width: 190px; margin-inline-end: 0; overflow: hidden; text-overflow: ellipsis; }
     .kanban-count { color: var(--workspace-text-muted); font-size: 12px; }
     .kanban-cards { display: flex; flex-direction: column; gap: 8px; }
-    .kanban-card-shell { cursor: pointer; }
+    .kanban-card-shell {
+      cursor: grab; touch-action: none; user-select: none;
+    }
+    .kanban-card-shell:active { cursor: grabbing; }
+    .kanban-card-shell.is-dragging { opacity: .28; }
     .kanban-card-shell.is-moving { opacity: .55; pointer-events: none; }
-    .kanban-card { border-color: var(--workspace-border); background: var(--workspace-surface); }
+    .kanban-card-shell.is-moving:not(.is-dragging) { animation: kanban-card-settle 180ms cubic-bezier(.2, 0, 0, 1); }
+    .kanban-card { border-color: var(--workspace-border); background: var(--workspace-surface); transition: border-color 140ms ease, box-shadow 140ms ease, transform 140ms ease; }
     .kanban-card:hover { border-color: var(--workspace-primary-border); box-shadow: 0 8px 22px var(--workspace-shadow); }
+    .kanban-card-overlay { cursor: grabbing; animation: kanban-card-lift 140ms cubic-bezier(.2, 0, 0, 1); }
+    .kanban-card-overlay .kanban-card {
+      border-color: var(--workspace-primary-border); box-shadow: 0 18px 42px rgba(15, 23, 42, .22);
+      transform: rotate(.35deg) scale(1.015);
+    }
     .kanban-card .ant-card-head { min-height: 38px; padding: 0 10px; }
     .kanban-card .ant-card-head-title { padding: 8px 0; }
     .kanban-card .ant-card-body { padding: 10px; }
     .kanban-card-title { display: flex; min-width: 0; align-items: center; gap: 6px; color: var(--workspace-text); font-weight: 700; }
     .kanban-card-title > span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .kanban-card-drag { display: inline-flex; color: var(--workspace-text-muted); cursor: grab; }
+    .kanban-card-drag { display: inline-flex; color: var(--workspace-text-muted); pointer-events: none; }
     .kanban-field {
       display: grid; min-width: 0; grid-template-columns: auto minmax(0, 1fr); align-items: center;
       gap: 2px 8px; margin-top: 8px;
@@ -616,6 +648,17 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
     .kanban-empty-drop {
       display: flex; min-height: 80px; align-items: center; justify-content: center; padding: 12px;
       border: 1px dashed var(--workspace-border-soft); border-radius: 6px; color: var(--workspace-text-muted); font-size: 12px;
+    }
+    @keyframes kanban-card-lift {
+      from { opacity: .75; transform: scale(.97); }
+      to { opacity: 1; transform: scale(1); }
+    }
+    @keyframes kanban-card-settle {
+      from { transform: scale(.98); }
+      to { transform: scale(1); }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .panel-frame, .kanban-card, .kanban-card-overlay, .kanban-card-shell.is-moving { animation: none !important; transition: none !important; }
     }
     .kanban-footer { display: flex; flex: 0 0 auto; justify-content: flex-end; padding: 10px 12px; border-top: 1px solid var(--workspace-border); background: var(--workspace-surface); }
     .month-controls { display: flex; align-items: center; gap: 8px; }
@@ -886,6 +929,133 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
     );
   }
 
+  const kanbanCardDragId = (rowNumber) => `sheet-kanban-card:${rowNumber}`;
+  const kanbanGroupDropId = (groupId) => `sheet-kanban-group:${groupId}`;
+
+  function kanbanCollisionDetection(args) {
+    const pointerCollisions = pointerWithin(args);
+    if (pointerCollisions.length) return pointerCollisions;
+    const intersections = rectIntersection(args);
+    return intersections.length ? intersections : closestCorners(args);
+  }
+
+  function KanbanCardContent({ columns, row, statusColumn, titleColumn }) {
+    const fields = columns.filter((column) => (
+      column.index !== statusColumn.index
+      && column.index !== titleColumn?.index
+      && String(row.cells[column.index] || "").trim()
+    )).slice(0, 3);
+
+    return React.createElement(
+      Card,
+      {
+        className: "kanban-card",
+        size: "small",
+        title: React.createElement(
+          "div",
+          { className: "kanban-card-title" },
+          React.createElement(
+            "span",
+            { className: "kanban-card-drag", "aria-hidden": "true" },
+            React.createElement(DragOutlined)
+          ),
+          React.createElement("span", null, sheetViewRowTitle(row, columns))
+        )
+      },
+      ...fields.map((column) => React.createElement(
+        "div",
+        { className: "kanban-field", key: column.id },
+        React.createElement("span", { className: "property-type-icon" }, typeBadge(column.type, 12)),
+        React.createElement("span", null, column.name),
+        React.createElement("strong", null, sheetViewCellLabel(row.cells[column.index], column) || "Sin valor")
+      ))
+    );
+  }
+
+  function SortableKanbanCard({ activeRowNumber, columns, groupId, moving, onOpenRow, row, statusColumn, suppressOpenRef, titleColumn }) {
+    const {
+      attributes,
+      listeners,
+      setNodeRef,
+      transform,
+      transition,
+      isDragging
+    } = useSortable({
+      id: kanbanCardDragId(row.number),
+      data: { type: "card", row, groupId },
+      disabled: moving
+    });
+
+    return React.createElement(
+      "div",
+      {
+        ...attributes,
+        ...listeners,
+        ref: setNodeRef,
+        className: ["kanban-card-shell", isDragging || activeRowNumber === row.number ? "is-dragging" : "", moving ? "is-moving" : ""].filter(Boolean).join(" "),
+        "data-sheet-row": String(row.number),
+        style: { transform: CSS.Transform.toString(transform), transition },
+        onClick: () => {
+          if (suppressOpenRef.current === row.number) {
+            suppressOpenRef.current = null;
+            return;
+          }
+          onOpenRow(row.number);
+        },
+        onKeyDown: (event) => {
+          if (event.key === "Enter" || event.key === " ") onOpenRow(row.number);
+        }
+      },
+      React.createElement(KanbanCardContent, { columns, row, statusColumn, titleColumn })
+    );
+  }
+
+  function KanbanColumn({ activeRowNumber, columns, dragOverGroup, group, groupRows, movingRow, onOpenRow, statusColumn, suppressOpenRef, titleColumn, visibleRows }) {
+    const { setNodeRef, isOver } = useDroppable({
+      id: kanbanGroupDropId(group.id),
+      data: { type: "group", groupId: group.id }
+    });
+
+    return React.createElement(
+      "section",
+      {
+        ref: setNodeRef,
+        className: `kanban-column ${isOver || dragOverGroup === group.id ? "is-drag-over" : ""}`.trim(),
+        "data-kanban-group": group.id
+      },
+      React.createElement(
+        "div",
+        { className: "kanban-column-header" },
+        React.createElement(
+          "div",
+          { className: "kanban-column-title" },
+          group.color ? optionTag(group.label, group.color) : React.createElement("span", null, group.label)
+        ),
+        React.createElement("span", { className: "kanban-count" }, String(groupRows.length))
+      ),
+      React.createElement(
+        SortableContext,
+        { items: visibleRows.map((row) => kanbanCardDragId(row.number)), strategy: verticalListSortingStrategy },
+        React.createElement(
+          "div",
+          { className: "kanban-cards" },
+          ...(visibleRows.length ? visibleRows.map((row) => React.createElement(SortableKanbanCard, {
+            activeRowNumber,
+            columns,
+            groupId: group.id,
+            key: row.number,
+            moving: movingRow === row.number,
+            onOpenRow,
+            row,
+            statusColumn,
+            suppressOpenRef,
+            titleColumn
+          })) : [React.createElement("div", { className: "kanban-empty-drop", key: "empty" }, "Arrastra registros aquí.")])
+        )
+      )
+    );
+  }
+
   function SheetKanban({ table, columns, initialColumnId, movingRow, onColumnChange, onMoveRow, onOpenRow }) {
     const statusColumns = columns.filter((column) => column.type === "status");
     const [columnId, setColumnId] = React.useState(() => (
@@ -893,7 +1063,10 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
     ));
     const [search, setSearch] = React.useState("");
     const [page, setPage] = React.useState(1);
+    const [activeRow, setActiveRow] = React.useState(null);
     const [dragOverGroup, setDragOverGroup] = React.useState("");
+    const suppressOpenRef = React.useRef(null);
+    const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
     const pageSize = 8;
     const statusColumn = statusColumns.find((column) => column.id === columnId) || statusColumns[0];
     const rows = sheetViewRows(table);
@@ -926,7 +1099,11 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
       knownGroups.add(value);
       inferredGroups.push({ id: value, label: value, color: "" });
     }
-    const groups = [...configuredGroups, ...inferredGroups, { id: "__empty__", label: "Sin selección", color: "" }];
+    const groups = [
+      { id: "__empty__", label: "Sin selección", color: "" },
+      ...configuredGroups,
+      ...inferredGroups
+    ];
     const groupedRows = Object.fromEntries(groups.map((group) => [group.id, []]));
     for (const row of filteredRows) {
       const value = String(row.cells[statusColumn.index] || "").trim();
@@ -941,6 +1118,43 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
     const selectColumn = (nextColumnId) => {
       setColumnId(nextColumnId);
       onColumnChange(nextColumnId);
+    };
+
+    const releaseSuppressedOpen = () => {
+      panelDocument.defaultView.setTimeout(() => {
+        suppressOpenRef.current = null;
+      }, 200);
+    };
+
+    const handleDragStart = ({ active }) => {
+      const row = active.data.current?.row || null;
+      suppressOpenRef.current = row?.number || null;
+      setActiveRow(row);
+      setDragOverGroup(active.data.current?.groupId || "");
+    };
+
+    const handleDragOver = ({ over }) => {
+      setDragOverGroup(over?.data.current?.groupId || "");
+    };
+
+    const handleDragCancel = () => {
+      setActiveRow(null);
+      setDragOverGroup("");
+      releaseSuppressedOpen();
+    };
+
+    const handleDragEnd = ({ active, over }) => {
+      const row = active.data.current?.row;
+      const groupId = over?.data.current?.groupId || "";
+      setActiveRow(null);
+      setDragOverGroup("");
+      releaseSuppressedOpen();
+      if (!row || !groupId) return;
+      const group = groups.find((candidate) => candidate.id === groupId);
+      if (!group) return;
+      const nextValue = group.id === "__empty__" ? "" : group.label;
+      if (String(row.cells[statusColumn.index] || "").trim() === nextValue) return;
+      void onMoveRow(row, statusColumn, nextValue);
     };
 
     return React.createElement(
@@ -965,108 +1179,56 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
         })
       ),
       React.createElement(
-        "div",
-        { className: "kanban-board" },
-        ...groups.map((group) => {
-          const groupRows = groupedRows[group.id] || [];
-          const visibleRows = groupRows.slice((safePage - 1) * pageSize, safePage * pageSize);
-          return React.createElement(
-            "section",
-            {
-              className: `kanban-column ${dragOverGroup === group.id ? "is-drag-over" : ""}`.trim(),
-              "data-kanban-group": group.id,
+        DndContext,
+        {
+          collisionDetection: kanbanCollisionDetection,
+          sensors,
+          onDragStart: handleDragStart,
+          onDragOver: handleDragOver,
+          onDragCancel: handleDragCancel,
+          onDragEnd: handleDragEnd
+        },
+        React.createElement(
+          "div",
+          { className: "kanban-board" },
+          ...groups.map((group) => {
+            const groupRows = groupedRows[group.id] || [];
+            const visibleRows = groupRows.slice((safePage - 1) * pageSize, safePage * pageSize);
+            return React.createElement(KanbanColumn, {
+              activeRowNumber: activeRow?.number || null,
+              columns,
+              dragOverGroup,
+              group,
+              groupRows,
               key: group.id,
-              onDragEnter: (event) => {
-                event.preventDefault();
-                setDragOverGroup(group.id);
-              },
-              onDragOver: (event) => event.preventDefault(),
-              onDragLeave: (event) => {
-                if (!event.currentTarget.contains(event.relatedTarget)) setDragOverGroup("");
-              },
-              onDrop: (event) => {
-                event.preventDefault();
-                setDragOverGroup("");
-                const rowNumber = Number(event.dataTransfer.getData("text/sheets-row-number"));
-                const row = rows.find((candidate) => candidate.number === rowNumber);
-                if (!row) return;
-                const nextValue = group.id === "__empty__" ? "" : group.label;
-                if (String(row.cells[statusColumn.index] || "").trim() === nextValue) return;
-                void onMoveRow(row, statusColumn, nextValue);
-              }
-            },
-            React.createElement(
+              movingRow,
+              onOpenRow,
+              statusColumn,
+              suppressOpenRef,
+              titleColumn,
+              visibleRows
+            });
+          })
+        ),
+        React.createElement(
+          DragOverlay,
+          {
+            adjustScale: false,
+            dropAnimation: { duration: 180, easing: "cubic-bezier(.2, 0, 0, 1)" }
+          },
+          activeRow
+            ? React.createElement(
               "div",
-              { className: "kanban-column-header" },
-              React.createElement(
-                "div",
-                { className: "kanban-column-title" },
-                group.color ? optionTag(group.label, group.color) : React.createElement("span", null, group.label)
-              ),
-              React.createElement("span", { className: "kanban-count" }, String(groupRows.length))
-            ),
-            React.createElement(
-              "div",
-              { className: "kanban-cards" },
-              ...(visibleRows.length ? visibleRows.map((row) => {
-                const fields = columns.filter((column) => (
-                  column.index !== statusColumn.index
-                  && column.index !== titleColumn?.index
-                  && String(row.cells[column.index] || "").trim()
-                )).slice(0, 3);
-                return React.createElement(
-                  "div",
-                  {
-                    className: `kanban-card-shell ${movingRow === row.number ? "is-moving" : ""}`.trim(),
-                    "data-sheet-row": String(row.number),
-                    key: row.number,
-                    role: "button",
-                    tabIndex: 0,
-                    onClick: () => onOpenRow(row.number),
-                    onKeyDown: (event) => {
-                      if (event.key === "Enter" || event.key === " ") onOpenRow(row.number);
-                    }
-                  },
-                  React.createElement(
-                    Card,
-                    {
-                      className: "kanban-card",
-                      size: "small",
-                      title: React.createElement(
-                        "div",
-                        { className: "kanban-card-title" },
-                        React.createElement(
-                          "span",
-                          {
-                            className: "kanban-card-drag",
-                            draggable: true,
-                            title: "Mover ficha",
-                            "aria-label": "Mover ficha",
-                            onClick: (event) => event.stopPropagation(),
-                            onDragStart: (event) => {
-                              event.stopPropagation();
-                              event.dataTransfer.effectAllowed = "move";
-                              event.dataTransfer.setData("text/sheets-row-number", String(row.number));
-                            }
-                          },
-                          React.createElement(DragOutlined)
-                        ),
-                        React.createElement("span", null, sheetViewRowTitle(row, columns))
-                      )
-                    },
-                    ...fields.map((column) => React.createElement(
-                      "div",
-                      { className: "kanban-field", key: column.id },
-                      React.createElement("span", { className: "property-type-icon" }, typeBadge(column.type, 12)),
-                      React.createElement("span", null, column.name),
-                      React.createElement("strong", null, sheetViewCellLabel(row.cells[column.index], column) || "Sin valor")
-                    ))
-                  )
-                );
-              }) : [React.createElement("div", { className: "kanban-empty-drop", key: "empty" }, "Arrastra registros aquí.")])
+              { className: "kanban-card-shell kanban-card-overlay", "data-drag-overlay": "" },
+              React.createElement(KanbanCardContent, {
+                columns,
+                row: activeRow,
+                statusColumn,
+                titleColumn
+              })
             )
-          );
-        })
+            : null
+        )
       ),
       longestGroup > pageSize
         ? React.createElement(
@@ -1199,6 +1361,7 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
     const [loading, setLoading] = React.useState(false);
     const [error, setError] = React.useState("");
     const [movingRow, setMovingRow] = React.useState(null);
+    const [kanbanExpanded, setKanbanExpanded] = React.useState(() => settings.kanbanExpanded === true);
     const activeSheetKey = React.useRef(sheetKey);
     activeSheetKey.current = sheetKey;
     const statusColumns = columns.filter((column) => column.type === "status");
@@ -1209,7 +1372,15 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
       setTable(null);
       setError("");
       setMovingRow(null);
+      setKanbanExpanded(settings.kanbanExpanded === true);
     }, [sheetKey]);
+
+    const expandedKanban = view === "kanban" && kanbanExpanded;
+
+    React.useEffect(() => {
+      panelFrame.classList.toggle("is-sheet-view-expanded", expandedKanban);
+      return () => panelFrame.classList.remove("is-sheet-view-expanded");
+    }, [expandedKanban]);
 
     React.useEffect(() => {
       if (!view) return undefined;
@@ -1239,6 +1410,12 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
       if (view === "kanban" && !statusColumns.length) setView("");
       if (view === "calendar" && !dateColumns.length) setView("");
     }, [view, statusColumns.length, dateColumns.length]);
+
+    const toggleKanbanExpanded = () => {
+      const next = !kanbanExpanded;
+      setKanbanExpanded(next);
+      setCurrentSheetViewSetting("kanbanExpanded", next);
+    };
 
     const openRow = async (rowNumber) => {
       if (collectPendingChanges().length || state.relatedDrafts.size) {
@@ -1348,12 +1525,22 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
         {
           open: Boolean(view),
           onClose: () => setView(""),
-          width: 720,
+          width: expandedKanban ? "100%" : 720,
           destroyOnClose: true,
           className: "sheet-view-drawer",
-          rootClassName: "sheet-view-drawer-root",
+          rootClassName: `sheet-view-drawer-root ${expandedKanban ? "is-expanded" : ""}`.trim(),
           getContainer: () => panelDocument.body,
-          title: `${view === "kanban" ? "Kanban" : "Calendario"} · ${sheetName}`
+          title: `${view === "kanban" ? "Kanban" : "Calendario"} · ${sheetName}`,
+          extra: view === "kanban" ? React.createElement(Button, {
+            type: "default",
+            shape: "circle",
+            size: "small",
+            icon: React.createElement(expandedKanban ? FullscreenExitOutlined : FullscreenOutlined),
+            title: expandedKanban ? "Restaurar" : "Ampliar",
+            "aria-label": expandedKanban ? "Restaurar" : "Ampliar",
+            "data-kanban-expand": expandedKanban ? "expanded" : "compact",
+            onClick: toggleKanbanExpanded
+          }) : null
         },
         React.createElement(
           "div",
@@ -1935,7 +2122,8 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
       if (!view || typeof view !== "object") continue;
       clean.sheetViews[String(key)] = {
         calendarColumnId: String(view.calendarColumnId || ""),
-        kanbanColumnId: String(view.kanbanColumnId || "")
+        kanbanColumnId: String(view.kanbanColumnId || ""),
+        kanbanExpanded: view.kanbanExpanded === true
       };
     }
     for (const [gid, sheet] of Object.entries(workspace.sheets || {})) {
@@ -2007,8 +2195,12 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
       if (!normalized.customName) normalized.name = cleanHeader || defaultProperty(index).name;
       return normalized;
     });
-    const next = { name: sheetName, columns, updatedAt: Date.now() };
     const changed = !previous || previous.name !== sheetName || !sameValues(previous.columns, columns);
+    const next = {
+      name: sheetName,
+      columns,
+      updatedAt: changed ? Date.now() : Number(previous.updatedAt || Date.now())
+    };
     state.workspace.sheets[key] = next;
     if (changed) void writeWorkspace();
     return next;
@@ -2028,7 +2220,10 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
     const key = String(currentGid());
     const previous = state.workspace.sheetViews[key] || {};
     if (previous[name] === value) return;
-    state.workspace.sheetViews[key] = { ...previous, [name]: String(value || "") };
+    state.workspace.sheetViews[key] = {
+      ...previous,
+      [name]: typeof value === "boolean" ? value : String(value || "")
+    };
     void writeWorkspace();
   }
 

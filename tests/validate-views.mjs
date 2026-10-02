@@ -234,19 +234,97 @@ try {
     if (kanban.rows?.length === 3) break;
     await delay(100);
   }
-  if (!kanban.title.includes("Kanban") || kanban.rows.length !== 3 || !kanban.groups.some((group) => group.id === "Nuevo" && group.count === 1) || !kanban.groups.some((group) => group.id === "__empty__" && group.count === 1)) {
+  if (!kanban.title.includes("Kanban") || kanban.rows.length !== 3 || kanban.groups[0]?.id !== "__empty__" || !kanban.groups.some((group) => group.id === "Nuevo" && group.count === 1) || !kanban.groups.some((group) => group.id === "__empty__" && group.count === 1)) {
     throw new Error(`Kanban no represento toda la hoja: ${JSON.stringify(kanban)}`);
   }
 
-  await cdp.evaluate(panelExpression(`
+  await cdp.evaluate(panelExpression('panel.querySelector("[data-kanban-expand]").click();'));
+  await delay(250);
+  let expanded = await cdp.evaluate(`(() => {
+    const root = document.getElementById("sheets-session-probe").shadowRoot;
+    const panel = root.querySelector(".panel-frame").contentDocument;
+    return {
+      frame: root.querySelector(".panel-frame").classList.contains("is-sheet-view-expanded"),
+      drawer: panel.querySelector(".sheet-view-drawer-root")?.classList.contains("is-expanded") || false,
+      action: panel.querySelector("[data-kanban-expand]")?.getAttribute("aria-label") || ""
+    };
+  })()`);
+  if (!expanded.frame || !expanded.drawer || expanded.action !== "Restaurar") {
+    throw new Error(`Kanban no se amplio a todo el sitio: ${JSON.stringify(expanded)}`);
+  }
+
+  await cdp.evaluate(panelExpression('panel.querySelector(".sheet-view-drawer .ant-drawer-close").click();'));
+  await delay(250);
+  await cdp.evaluate(panelExpression('panel.querySelector("[data-sheet-view=kanban]").click();'));
+  const reopenedDeadline = Date.now() + 5_000;
+  while (Date.now() < reopenedDeadline) {
+    expanded = await cdp.evaluate(`(() => {
+      const root = document.getElementById("sheets-session-probe").shadowRoot;
+      const panel = root.querySelector(".panel-frame").contentDocument;
+      return {
+        frame: root.querySelector(".panel-frame").classList.contains("is-sheet-view-expanded"),
+        action: panel.querySelector("[data-kanban-expand]")?.getAttribute("aria-label") || "",
+        rows: panel.querySelectorAll(".sheet-view-drawer .kanban-card-shell:not(.kanban-card-overlay)").length
+      };
+    })()`);
+    if (expanded.frame && expanded.action === "Restaurar" && expanded.rows === 3) break;
+    await delay(100);
+  }
+  if (!expanded.frame || expanded.action !== "Restaurar" || expanded.rows !== 3) {
+    throw new Error(`El modo ampliado de Kanban no persistio al reabrir: ${JSON.stringify(expanded)}`);
+  }
+  await delay(250);
+
+  const dragPoint = await cdp.evaluate(`(() => {
+    const frame = document.getElementById("sheets-session-probe").shadowRoot.querySelector(".panel-frame");
+    const frameRect = frame.getBoundingClientRect();
+    const panel = frame.contentDocument;
     const card = panel.querySelector('.kanban-card-shell[data-sheet-row="2"]');
-    const handle = card.querySelector(".kanban-card-drag");
     const target = Array.from(panel.querySelectorAll("[data-kanban-group]")).find(group => group.dataset.kanbanGroup === "En proceso");
-    const transfer = new panel.defaultView.DataTransfer();
-    handle.dispatchEvent(new panel.defaultView.DragEvent("dragstart", { bubbles: true, cancelable: true, dataTransfer: transfer }));
-    target.dispatchEvent(new panel.defaultView.DragEvent("dragenter", { bubbles: true, cancelable: true, dataTransfer: transfer }));
-    target.dispatchEvent(new panel.defaultView.DragEvent("drop", { bubbles: true, cancelable: true, dataTransfer: transfer }));
-  `));
+    const start = card.getBoundingClientRect();
+    const end = target.getBoundingClientRect();
+    return {
+      startX: frameRect.left + start.left + start.width / 2,
+      startY: frameRect.top + start.top + start.height / 2,
+      endX: frameRect.left + end.left + end.width / 2,
+      endY: frameRect.top + end.top + Math.min(120, end.height / 2),
+      frameLeft: frameRect.left,
+      frameWidth: frameRect.width,
+      viewportWidth: innerWidth,
+      cardLeft: start.left,
+      targetLeft: end.left
+    };
+  })()`);
+  await cdp.command("Input.dispatchMouseEvent", {
+    type: "mousePressed", x: dragPoint.startX, y: dragPoint.startY, button: "left", buttons: 1, clickCount: 1
+  });
+  await cdp.command("Input.dispatchMouseEvent", {
+    type: "mouseMoved", x: dragPoint.startX + 12, y: dragPoint.startY + 4, button: "left", buttons: 1
+  });
+  await delay(120);
+  const dragVisual = await cdp.evaluate(panelExpression(`return {
+    overlay: Boolean(panel.querySelector("[data-drag-overlay]")),
+    source: Array.from(panel.querySelectorAll('.kanban-card-shell[data-sheet-row="2"]')).some(card => card.classList.contains("is-dragging")),
+    classes: Array.from(panel.querySelectorAll('.kanban-card-shell[data-sheet-row="2"]'), card => card.className),
+    drawers: panel.querySelectorAll(".sheet-view-drawer").length
+  };`));
+  if (!dragVisual.overlay) {
+    throw new Error(`Kanban no mostro la animacion de arrastre: ${JSON.stringify(dragVisual)}`);
+  }
+  await cdp.command("Input.dispatchMouseEvent", {
+    type: "mouseMoved", x: dragPoint.endX, y: dragPoint.endY, button: "left", buttons: 1
+  });
+  await delay(100);
+  const dragTarget = await cdp.evaluate(panelExpression(`return Array.from(panel.querySelectorAll("[data-kanban-group]"), group => ({
+    id: group.dataset.kanbanGroup,
+    active: group.classList.contains("is-drag-over")
+  }));`));
+  if (!dragTarget.some((group) => group.id === "En proceso" && group.active)) {
+    throw new Error(`Kanban no detecto la columna de destino: ${JSON.stringify({ dragPoint, dragTarget })}`);
+  }
+  await cdp.command("Input.dispatchMouseEvent", {
+    type: "mouseReleased", x: dragPoint.endX, y: dragPoint.endY, button: "left", buttons: 0, clickCount: 1
+  });
   const pasteDeadline = Date.now() + 4_000;
   let paste;
   while (Date.now() < pasteDeadline) {
