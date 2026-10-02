@@ -529,12 +529,13 @@ try {
     return {
       row: host.dataset.row,
       pending: host.dataset.hasPendingChanges,
+      selection: document.getElementById("t-name-box")?.value || "",
       value: panel.querySelector('[data-related-sheet="Servicios"][data-related-row="2"][data-related-column="3"] input')?.value,
       note: panel.querySelector('[data-related-sheet="Servicios"][data-related-row="2"][data-related-column="4"] input')?.value,
       saveDisabled: panel.querySelector(".save").disabled
     };
   })()`);
-  if (relatedSaved.row !== "2" || relatedSaved.pending !== "false" || relatedSaved.value !== "Limpieza premium" || relatedSaved.note !== "Nota relacionada" || !relatedSaved.saveDisabled) {
+  if (relatedSaved.row !== "2" || relatedSaved.pending !== "false" || relatedSaved.selection !== "'Servicios'!C2" || relatedSaved.value !== "Limpieza premium" || relatedSaved.note !== "Nota relacionada" || !relatedSaved.saveDisabled) {
     throw new Error(`La actualización relacionada no quedó confirmada: ${JSON.stringify(relatedSaved)}`);
   }
 
@@ -925,6 +926,7 @@ try {
     }, { capture: true, once: true });
     const panel = document.getElementById("sheets-session-probe").shadowRoot.querySelector(".panel-frame").contentDocument;
     const input = panel.querySelector('[data-column="4"] input');
+    window.__primaryClearInput = input;
     const setter = Object.getOwnPropertyDescriptor(panel.defaultView.HTMLInputElement.prototype, "value").set;
     setter.call(input, "Solo cambio");
     input.dispatchEvent(new panel.defaultView.Event("input", { bubbles: true }));
@@ -979,10 +981,12 @@ try {
     return {
       value: panel.querySelector('[data-column="4"]').dataset.serializedValue,
       pending: host.dataset.hasPendingChanges,
+      selection: document.getElementById("t-name-box")?.value || "",
+      sameInput: panel.querySelector('[data-column="4"] input') === window.__primaryClearInput,
       saveDisabled: panel.querySelector(".save").disabled
     };
   })()`);
-  if (clearedPrimary.value !== "" || clearedPrimary.pending !== "false" || !clearedPrimary.saveDisabled) {
+  if (clearedPrimary.value !== "" || clearedPrimary.pending !== "false" || clearedPrimary.selection !== "'Servicios'!D2" || !clearedPrimary.sameInput || !clearedPrimary.saveDisabled) {
     throw new Error(`El campo vacio no quedo sincronizado: ${JSON.stringify(clearedPrimary)}`);
   }
 

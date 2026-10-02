@@ -3981,7 +3981,8 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
   }
 
   function scheduleSheetViewMutationFlush(delay = 180) {
-    if (state.sheetViewMutationRunning || state.sheetViewMutationTimer) return;
+    if (state.sheetViewMutationRunning) return;
+    if (state.sheetViewMutationTimer) clearTimeout(state.sheetViewMutationTimer);
     state.sheetViewMutationTimer = setTimeout(() => {
       state.sheetViewMutationTimer = null;
       void flushSheetViewMutations();
@@ -4356,14 +4357,12 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
       return;
     }
 
-    const selectedReference = nameBoxValue().split("!").pop() || `A${state.row}`;
-    const restoreReference = qualifiedReference(state.sheetName, selectedReference);
     const changeCount = (primaryPlan?.changes.length || 0) + requestedRelatedDrafts.length;
     state.saving = true;
     notifyRelatedDrafts();
     setStatus(`Guardando ${changeCount} campo(s)…`, "busy");
     try {
-      await writeRanges(operations, restoreReference);
+      await writeRanges(operations);
       registerPrimaryWrite(primaryPlan);
       registerRelatedWrites(relatedPlan.rowPlans);
       host.dataset.writeVerification = "pending";
@@ -4595,8 +4594,6 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
     }
 
     const targetSheet = String(params.sheet || activeSheetName()).trim();
-    const selectedReference = nameBoxValue().split("!").pop() || `A${state.row || 1}`;
-    const restoreReference = qualifiedReference(activeSheetName(), selectedReference);
     let range;
     let expectedRows;
     let operation;
@@ -4620,13 +4617,10 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
       operation = { action: "clear", reference: qualifiedReference(targetSheet, range) };
     }
 
-    await writeRanges([operation], restoreReference);
+    await writeRanges([operation]);
     state.headerCache.clear();
     state.sheetCache.clear();
     const verification = await verifyBridgeMutation({ ...params, sheet: targetSheet }, range, expectedRows);
-    if (normalizedColumn(targetSheet) === normalizedColumn(activeSheetName()) && state.row) {
-      void loadRow(state.row, true);
-    }
     return {
       spreadsheetId: spreadsheetId(),
       gid: String(params.gid || currentGid()),
@@ -4679,13 +4673,14 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
   function pollSelection() {
     if (state.saving || state.writeInteractionDepth > 0) return;
     const reference = nameBoxValue();
+    if (!reference) return;
     const gid = currentGid();
     const normalizedReference = reference.split("!").pop().replace(/\$/g, "");
-    const signature = `${gid}:${normalizedReference}`;
-    if (!reference || signature === state.lastSelection) return;
+    const row = selectedRow(reference);
+    const signature = row ? `${gid}:row:${row}` : `${gid}:reference:${normalizedReference}`;
+    if (signature === state.lastSelection) return;
     state.lastSelection = signature;
     if (state.propertyColumn !== null) closePropertyEditor();
-    const row = selectedRow(reference);
     if (!row) {
       clearRelations();
       setRelatedStatus("Selecciona una fila para buscar relaciones.");

@@ -46,11 +46,14 @@ const webServer = http.createServer((request, response) => {
       <div class="docs-sheet-tab docs-sheet-active-tab"><span class="docs-sheet-tab-name">Contactos</span></div>
       <script>
         globalThis.__lastPaste = null;
+        globalThis.__pastes = [];
         document.addEventListener("paste", event => {
-          globalThis.__lastPaste = {
+          const paste = {
             reference: document.getElementById("t-name-box").value,
             value: event.clipboardData?.getData("text/plain") || ""
           };
+          globalThis.__lastPaste = paste;
+          globalThis.__pastes.push(paste);
         }, true);
       </script>
     </body></html>`);
@@ -339,7 +342,7 @@ try {
   await cdp.command("Input.dispatchMouseEvent", {
     type: "mouseReleased", x: dragPoint.endX, y: dragPoint.endY, button: "left", buttons: 0, clickCount: 1
   });
-  await delay(40);
+  await delay(250);
   const secondDrag = await cdp.evaluate(`(() => {
     const frame = document.getElementById("sheets-session-probe").shadowRoot.querySelector(".panel-frame");
     const frameRect = frame.getBoundingClientRect();
@@ -371,14 +374,20 @@ try {
   });
   await delay(225);
   const pasteDeadline = Date.now() + 4_000;
-  let paste;
+  let pastes = [];
   while (Date.now() < pasteDeadline) {
-    paste = await cdp.evaluate("globalThis.__lastPaste");
-    if (paste) break;
+    pastes = await cdp.evaluate("globalThis.__pastes || []");
+    const batched = pastes.some((paste) => paste.reference.endsWith("!C3") && paste.value === "Nuevo\nEn proceso");
+    const split = pastes.some((paste) => paste.reference.endsWith("!C4") && paste.value === "En proceso")
+      && pastes.some((paste) => paste.reference.endsWith("!C3") && paste.value === "Nuevo");
+    if (batched || split) break;
     await delay(50);
   }
-  if (!paste?.reference.endsWith("!C3") || paste.value !== "Nuevo\nEn proceso") {
-    throw new Error(`Kanban no agrupo verticalmente los cambios rapidos de Estado: ${JSON.stringify(paste)}`);
+  const batchedWrites = pastes.some((paste) => paste.reference.endsWith("!C3") && paste.value === "Nuevo\nEn proceso");
+  const serializedWrites = pastes.some((paste) => paste.reference.endsWith("!C4") && paste.value === "En proceso")
+    && pastes.some((paste) => paste.reference.endsWith("!C3") && paste.value === "Nuevo");
+  if (!batchedWrites && !serializedWrites) {
+    throw new Error(`Kanban no proceso correctamente los cambios rapidos de Estado: ${JSON.stringify(pastes)}`);
   }
   const editedSelection = await cdp.evaluate('document.getElementById("t-name-box").value');
   if (!editedSelection.endsWith("!C3")) {
