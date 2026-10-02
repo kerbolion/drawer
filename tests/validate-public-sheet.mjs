@@ -187,7 +187,7 @@ try {
         nameBox: document.getElementById("t-name-box")?.value || null,
         themeSource: host?.dataset.themeSource || null,
         saveState: host?.dataset.saveState || null,
-        drawerWidth: host ? Math.round(host.shadowRoot.querySelector(".panel-frame").getBoundingClientRect().width) : 0,
+        drawerHidden: host?.shadowRoot?.querySelector(".panel-frame")?.hidden ?? null,
         primaryToken: panel ? getComputedStyle(panel.documentElement).getPropertyValue("--workspace-primary").trim() : null
       };
     })()`);
@@ -200,7 +200,7 @@ try {
   if (result.row !== "2") throw new Error(`Se esperaba la fila 2 y se obtuvo ${result.row}`);
   if (!result.fields.includes("Alexandra")) throw new Error("La fila leida no contiene el valor esperado");
   if (!result.statusHidden || result.saveState !== "saved") throw new Error("El estado rutinario no se movio al icono del encabezado");
-  if (result.themeSource !== "workspace-antd" || result.drawerWidth < 700 || result.drawerWidth > 720 || result.primaryToken !== "#1677ff") {
+  if (result.themeSource !== "workspace-antd" || result.drawerHidden !== true || result.primaryToken !== "#1677ff") {
     throw new Error(`El tema de workspace-antd no se aplico correctamente: ${JSON.stringify(result)}`);
   }
 
@@ -227,6 +227,21 @@ try {
   }
   if (!launcherPlacement?.ownedByExtension || !launcherPlacement.googleTreeUntouched || !launcherPlacement.belowAdd || launcherPlacement.initiallyHidden !== false) {
     throw new Error(`El lanzador no quedó debajo de Obtener Complementos: ${JSON.stringify(launcherPlacement)}`);
+  }
+
+  const initiallyOpenedDrawer = await cdp.evaluate(`(() => {
+    const host = document.getElementById("sheets-session-probe");
+    const frame = host.shadowRoot.querySelector(".panel-frame");
+    const launcher = host.shadowRoot.querySelector(".reopen");
+    launcher.click();
+    return {
+      drawerHidden: frame.hidden,
+      launcherHidden: launcher.hidden,
+      drawerWidth: Math.round(frame.getBoundingClientRect().width)
+    };
+  })()`);
+  if (initiallyOpenedDrawer.drawerHidden || initiallyOpenedDrawer.launcherHidden || initiallyOpenedDrawer.drawerWidth < 700 || initiallyOpenedDrawer.drawerWidth > 720) {
+    throw new Error(`El botón lateral no abrió el drawer inicialmente cerrado: ${JSON.stringify(initiallyOpenedDrawer)}`);
   }
 
   const closedDrawer = await cdp.evaluate(`(() => {

@@ -175,6 +175,7 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
   const panelFrame = document.createElement("iframe");
   panelFrame.className = "panel-frame";
   panelFrame.title = "Detalles de la fila";
+  panelFrame.hidden = true;
   shadow.appendChild(panelFrame);
 
   const reopen = document.createElement("button");

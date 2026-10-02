@@ -230,6 +230,17 @@ try {
   })()`, isolated.executionContextId);
   await cdp.evaluate(await readFile(path.join(extensionDir, "dist", "content.js"), "utf8"), isolated.executionContextId);
 
+  const drawerStartup = await cdp.evaluate(`(() => {
+    const host = document.getElementById("sheets-session-probe");
+    const frame = host.shadowRoot.querySelector(".panel-frame");
+    const initiallyHidden = frame.hidden;
+    host.shadowRoot.querySelector(".reopen").click();
+    return { initiallyHidden, opened: !frame.hidden };
+  })()`);
+  if (!drawerStartup.initiallyHidden || !drawerStartup.opened) {
+    throw new Error(`El drawer no respetó el inicio cerrado: ${JSON.stringify(drawerStartup)}`);
+  }
+
   const snapshot = `(() => {
     const host = document.getElementById("sheets-session-probe");
     const panel = host?.shadowRoot?.querySelector(".panel-frame")?.contentDocument;
