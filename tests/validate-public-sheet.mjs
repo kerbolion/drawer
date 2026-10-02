@@ -434,6 +434,72 @@ try {
   })()`);
   if (configured !== "longText") throw new Error("El drawer de propiedad no aplico el tipo configurado");
 
+  await cdp.evaluate(`(() => {
+    const box = document.getElementById("t-name-box");
+    box.focus();
+    box.value = "A100";
+    box.dispatchEvent(new Event("input", { bubbles: true }));
+    box.dispatchEvent(new KeyboardEvent("keydown", {
+      key: "Enter", code: "Enter", keyCode: 13, which: 13, bubbles: true, cancelable: true
+    }));
+  })()`);
+  const emptyDeadline = Date.now() + 15_000;
+  let emptyResult;
+  while (Date.now() < emptyDeadline) {
+    emptyResult = await cdp.evaluate(`(() => {
+      const host = document.getElementById("sheets-session-probe");
+      const panel = host?.shadowRoot?.querySelector(".panel-frame")?.contentDocument;
+      return {
+        status: host?.dataset.status || null,
+        empty: host?.dataset.empty || null,
+        saveState: host?.dataset.saveState || null,
+        row: host?.dataset.row || null,
+        fieldCount: panel?.querySelectorAll(".field").length ?? -1,
+        fieldsHidden: panel?.querySelector(".fields")?.hidden ?? false,
+        relatedHidden: panel?.querySelector(".related")?.hidden ?? false,
+        emptyHidden: panel?.querySelector(".empty-state")?.hidden ?? true,
+        description: panel?.querySelector(".empty-state .ant-empty-description")?.textContent || "",
+        errorVisible: !(panel?.querySelector(".status")?.hidden ?? true)
+      };
+    })()`);
+    if (emptyResult?.status === "empty" && emptyResult?.row === "100") break;
+    await delay(250);
+  }
+  if (
+    emptyResult?.empty !== "true"
+    || emptyResult.saveState !== "saved"
+    || emptyResult.fieldCount !== 0
+    || !emptyResult.fieldsHidden
+    || !emptyResult.relatedHidden
+    || emptyResult.emptyHidden
+    || emptyResult.description !== "Nada para mostrar"
+    || emptyResult.errorVisible
+  ) {
+    throw new Error(`La fila vacía no mostró el estado Empty esperado: ${JSON.stringify(emptyResult)}`);
+  }
+
+  await cdp.evaluate(`(() => {
+    const box = document.getElementById("t-name-box");
+    box.focus();
+    box.value = "A3";
+    box.dispatchEvent(new Event("input", { bubbles: true }));
+    box.dispatchEvent(new KeyboardEvent("keydown", {
+      key: "Enter", code: "Enter", keyCode: 13, which: 13, bubbles: true, cancelable: true
+    }));
+  })()`);
+  const restoredDeadline = Date.now() + 10_000;
+  while (Date.now() < restoredDeadline) {
+    const restored = await cdp.evaluate(`(() => {
+      const host = document.getElementById("sheets-session-probe");
+      const panel = host?.shadowRoot?.querySelector(".panel-frame")?.contentDocument;
+      return host?.dataset.row === "3"
+        && host?.dataset.status === "ok"
+        && panel?.querySelector('[data-column="1"]')?.dataset.fieldType === "longText";
+    })()`);
+    if (restored) break;
+    await delay(250);
+  }
+
   await delay(300);
   await cdp.command("Page.reload", { ignoreCache: true });
   const persistenceDeadline = Date.now() + 30_000;
@@ -451,7 +517,7 @@ try {
   }
   if (persistedType !== "longText") throw new Error("El tipo de columna no persistio despues de recargar Sheets");
 
-  console.log("VALIDACION_OK: tipos persistentes, estado animado, tema Ant Design, lectura, cambio sin rerender, foco y pegado TSV confirmados.");
+  console.log("VALIDACION_OK: tipos persistentes, estado animado, tema Ant Design, lectura, fila vacía, cambio sin rerender, foco y pegado TSV confirmados.");
 } finally {
   cdp?.close();
   if (browser.pid) spawnSync("taskkill", ["/PID", String(browser.pid), "/T", "/F"], { stdio: "ignore", windowsHide: true });

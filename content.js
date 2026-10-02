@@ -7,6 +7,7 @@ import Checkbox from "antd/es/checkbox/index.js";
 import ConfigProvider from "antd/es/config-provider/index.js";
 import DatePicker from "antd/es/date-picker/index.js";
 import Drawer from "antd/es/drawer/index.js";
+import Empty from "antd/es/empty/index.js";
 import Input from "antd/es/input/index.js";
 import InputNumber from "antd/es/input-number/index.js";
 import Pagination from "antd/es/pagination/index.js";
@@ -369,6 +370,13 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
     .status.error { border-color: ${antdTokens.colorErrorBorder}; background: ${antdTokens.colorErrorBg}; color: ${antdTokens.colorErrorText}; }
     .status.busy { border-color: ${antdTokens.colorInfoBorder}; background: ${antdTokens.colorInfoBg}; color: ${antdTokens.colorInfoText}; }
     .status[hidden], .related-status[hidden] { display: none; }
+    .empty-state {
+      min-height: 340px; padding: 64px 20px; display: flex; align-items: center; justify-content: center;
+      border: 1px solid var(--workspace-border); border-radius: 8px;
+      background: var(--workspace-surface); box-shadow: 0 8px 24px var(--workspace-shadow-soft);
+    }
+    .empty-state[hidden] { display: none; }
+    .empty-state .ant-empty-description { color: var(--workspace-text-muted); }
     .fields {
       min-width: 0; max-width: 100%; overflow: hidden; padding: 4px 14px;
       border: 1px solid var(--workspace-border); border-radius: 8px;
@@ -988,13 +996,17 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
   const main = element("main");
   const status = element("div", "status busy", "Esperando una celda…");
   status.hidden = true;
+  const emptyState = element("div", "empty-state");
+  emptyState.hidden = true;
+  emptyState.setAttribute("role", "status");
+  emptyState.setAttribute("aria-live", "polite");
   const fields = element("div", "fields");
   const related = element("section", "related");
   const relatedTitle = element("h2", "", "Relacionados");
   const relatedStatus = element("div", "related-status", "Selecciona una fila para buscar relaciones.");
   const relatedList = element("div", "related-list");
   related.append(relatedTitle, relatedStatus, relatedList);
-  main.append(status, fields, related);
+  main.append(status, emptyState, fields, related);
 
   const footer = element("footer");
   const meta = element("div", "meta", "Sin fila seleccionada");
@@ -1058,7 +1070,9 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
     reopen,
     saveState,
     status,
+    emptyState,
     fields,
+    related,
     relatedStatus,
     relatedList,
     meta,
@@ -1074,6 +1088,14 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
     propertyCancel,
     propertySave
   };
+
+  emptyState._reactRoot = createRoot(emptyState);
+  flushSync(() => emptyState._reactRoot.render(antdTree(
+    React.createElement(Empty, {
+      image: Empty.PRESENTED_IMAGE_SIMPLE,
+      description: "Nada para mostrar"
+    })
+  )));
 
   ui.close.addEventListener("click", () => {
     ui.frame.hidden = true;
@@ -1579,7 +1601,7 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
     return new DOMParser().parseFromString(trustedHtml, "text/html");
   }
 
-  async function readRange(range, signal, gid = currentGid()) {
+  async function readRange(range, signal, gid = currentGid(), options = {}) {
     const doc = await fetchHtmlDocument(embedUrl(range, gid), signal, "La vista HTML tardó demasiado en responder", 12_000);
     const rows = Array.from(doc.querySelectorAll("tbody tr")).flatMap((tr) => {
       const rowHeader = tr.querySelector("th.row-headers-background");
@@ -1588,7 +1610,9 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
       const cells = Array.from(tr.querySelectorAll("td:not(.freezebar-cell)"), readableCellText);
       return Number.isFinite(number) ? [{ number, cells }] : [];
     });
-    if (!rows.length) throw new Error("La vista HTML no devolvió filas; revisa que tu sesión tenga acceso");
+    if (!rows.length && !options.allowEmpty) {
+      throw new Error("La vista HTML no devolvió filas; revisa que tu sesión tenga acceso");
+    }
     return rows;
   }
 
@@ -2422,6 +2446,7 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
     state.values = Array.from({ length: width }, (_, index) => values[index] || "");
     state.fields = Array.from({ length: width }, (_, index) => labels[index] || `Columna ${columnName(index + 1)}`);
     reconcileSheetConfiguration(currentGid(), activeSheetName() || `Hoja ${currentGid()}`, state.fields);
+    setEmptyState(false);
     renderFields(new Map(drafts.map((draft) => [draft.index, draft.value])));
     state.viewRow = row;
     state.viewGid = currentGid();
@@ -2430,6 +2455,41 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
     ui.fields.removeAttribute("aria-busy");
     syncPendingActions();
     startRelationships(labels, state.values, signal);
+  }
+
+  function clearRenderedFields() {
+    for (const wrapper of ui.fields.children) {
+      const control = wrapper.querySelector?.("[data-column]");
+      const configure = wrapper.querySelector?.(".field-configure");
+      if (control?._reactRoot) flushSync(() => control._reactRoot.unmount());
+      if (configure?._iconRoot) flushSync(() => configure._iconRoot.unmount());
+    }
+    ui.fields.replaceChildren();
+  }
+
+  function setEmptyState(empty) {
+    ui.emptyState.hidden = !empty;
+    ui.fields.hidden = empty;
+    ui.related.hidden = empty;
+    host.dataset.empty = empty ? "true" : "false";
+  }
+
+  function applyEmptyRow(labels, row) {
+    state.relationRequest?.abort();
+    state.relationRequest = null;
+    setActivity("relations", false);
+    state.fields = [...labels];
+    state.values = Array.from({ length: labels.length }, () => "");
+    state.viewRow = row;
+    state.viewGid = currentGid();
+    host.dataset.row = String(row);
+    clearRenderedFields();
+    clearRelations();
+    setRelatedStatus("", true);
+    setEmptyState(true);
+    ui.fields.inert = false;
+    ui.fields.removeAttribute("aria-busy");
+    syncPendingActions();
   }
 
   async function loadRow(row, force = false) {
@@ -2457,7 +2517,10 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
       if (request.signal.aborted || state.request !== request) return;
     }
 
-    if (cached?.labels && cached?.values) {
+    if (cached?.empty && cached?.labels) {
+      applyEmptyRow(cached.labels, row);
+      setStatus(`Fila ${row} vacía`, "empty");
+    } else if (cached?.labels && cached?.values) {
       applyRowData(cached.labels, cached.values, row, request.signal);
       setStatus(`Fila ${row} cargada desde caché · comprobando cambios…`);
     } else {
@@ -2468,9 +2531,21 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
     try {
       const [labels, rows] = await Promise.all([
         headers(request.signal, true),
-        readRange(`A${row}:${MAX_COLUMN}${row}`, request.signal)
+        readRange(`A${row}:${MAX_COLUMN}${row}`, request.signal, gid, { allowEmpty: true })
       ]);
       const values = rows.find((item) => item.number === row)?.cells || [];
+      const rowIsEmpty = !values.some((value) => String(value ?? "").trim());
+      if (rowIsEmpty) {
+        void writePersistentCache(persistentKey, {
+          labels: [...labels],
+          values: [],
+          empty: true,
+          updatedAt: Date.now()
+        });
+        applyEmptyRow(labels, row);
+        setStatus(`Fila ${row} vacía`, "empty");
+        return;
+      }
       const width = Math.max(labels.length, values.length, cached?.values?.length || 0);
       const freshValues = Array.from({ length: width }, (_, index) => values[index] || "");
       const freshLabels = Array.from({ length: width }, (_, index) => labels[index] || "");
