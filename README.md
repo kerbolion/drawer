@@ -18,7 +18,7 @@ La interfaz usa Ant Design `5.29.3`, la misma versión instalada en `workspace-a
 - Normaliza `true`/`false` y `VERDADERO`/`FALSO` a `TRUE`/`FALSE`, conserva la casilla visible mientras Sheets confirma el guardado y verifica en segundo plano sin volver a renderizar el formulario.
 - Muestra la actividad con el indicador del encabezado: spinner azul durante la lectura o el guardado y check verde al terminar, sin mensajes rutinarios dentro del formulario.
 - Aísla el formulario para que `Ctrl+V` permanezca dentro del input.
-- Guarda el rango editado mediante un único pegado TSV horizontal de Sheets.
+- Guarda solamente el rango horizontal mínimo que contiene los campos modificados mediante un único pegado TSV de Sheets; la confirmación remota continúa en segundo plano.
 - Verifica el guardado volviendo a leer la fila.
 - No usa Google Sheets API, claves, OAuth propio, Apps Script ni el portapapeles del sistema.
 

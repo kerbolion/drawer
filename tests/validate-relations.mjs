@@ -242,6 +242,20 @@ try {
     await delay(80);
   }
 
+  async function waitForWriteVerification(timeoutMs = 6_000) {
+    const deadline = Date.now() + timeoutMs;
+    let verification = "";
+    let sawPending = false;
+    while (Date.now() < deadline) {
+      verification = await cdp.evaluate('document.getElementById("sheets-session-probe")?.dataset.writeVerification || ""');
+      if (verification === "pending") sawPending = true;
+      if (verification === "verified" && sawPending) return verification;
+      if (verification === "failed") break;
+      await delay(100);
+    }
+    throw new Error(`La escritura no se confirmó: ${verification}`);
+  }
+
   async function configureColumn3(type, options = "") {
     await cdp.evaluate(`(() => {
       const panel = document.getElementById("sheets-session-probe").shadowRoot.querySelector(".panel-frame").contentDocument;
@@ -421,12 +435,22 @@ try {
   const localizedDatePicker = await cdp.evaluate(`(() => {
     const panel = document.getElementById("sheets-session-probe").shadowRoot.querySelector(".panel-frame").contentDocument;
     const popup = Array.from(panel.querySelectorAll(".ant-picker-dropdown:not(.ant-picker-dropdown-hidden)")).at(-1);
+    const calendarRows = Array.from(popup?.querySelectorAll(".ant-picker-content tbody tr") || []);
+    const firstCell = popup?.querySelector(".ant-picker-content tbody td");
     return {
       workspaceClass: popup?.classList.contains("workspace-date-picker-popup") || false,
-      text: popup?.textContent || ""
+      text: popup?.textContent || "",
+      rowBackgrounds: calendarRows.slice(0, 2).map(row => panel.defaultView.getComputedStyle(row).backgroundColor),
+      cellBorderTopWidth: firstCell ? panel.defaultView.getComputedStyle(firstCell).borderTopWidth : ""
     };
   })()`);
-  if (!localizedDatePicker.workspaceClass || !localizedDatePicker.text.includes("Hoy") || !localizedDatePicker.text.includes("LunMarMiéJueVieSábDom")) {
+  if (
+    !localizedDatePicker.workspaceClass ||
+    !localizedDatePicker.text.includes("Hoy") ||
+    !localizedDatePicker.text.includes("LunMarMiéJueVieSábDom") ||
+    localizedDatePicker.rowBackgrounds[0] !== localizedDatePicker.rowBackgrounds[1] ||
+    localizedDatePicker.cellBorderTopWidth !== "0px"
+  ) {
     throw new Error(`El calendario no usÃ³ el estilo y locale de Workspace: ${JSON.stringify({ datePopup, localizedDatePicker })}`);
   }
   await closePanelPopup();
@@ -564,24 +588,31 @@ try {
   if (checkboxRow?.values?.[2] !== "FALSE") throw new Error(`No se normalizó FALSO al cargar la fila: ${JSON.stringify(checkboxRow)}`);
 
   await cdp.evaluate(`(() => {
-    window.__checkboxRepairPaste = null;
+    window.__minimalPaste = null;
     document.addEventListener("paste", event => {
-      window.__checkboxRepairPaste = event.clipboardData?.getData("text/plain") || "";
+      window.__minimalPaste = event.clipboardData?.getData("text/plain") || "";
     }, { capture: true, once: true });
     const panel = document.getElementById("sheets-session-probe").shadowRoot.querySelector(".panel-frame").contentDocument;
+    const input = panel.querySelector('[data-column="4"] input');
+    const setter = Object.getOwnPropertyDescriptor(panel.defaultView.HTMLInputElement.prototype, "value").set;
+    setter.call(input, "Solo cambio");
+    input.dispatchEvent(new panel.defaultView.Event("input", { bubbles: true }));
     panel.querySelector(".save").click();
   })()`);
-  const checkboxRepairDeadline = Date.now() + 3_000;
-  let checkboxRepairPaste = null;
-  while (Date.now() < checkboxRepairDeadline) {
-    checkboxRepairPaste = await cdp.evaluate("window.__checkboxRepairPaste");
-    if (checkboxRepairPaste !== null) break;
+  setTimeout(() => {
+    sheets.Servicios.rows[0][3] = "Solo cambio";
+  }, 650);
+  const minimalPasteDeadline = Date.now() + 3_000;
+  let minimalPaste = null;
+  while (Date.now() < minimalPasteDeadline) {
+    minimalPaste = await cdp.evaluate("window.__minimalPaste");
+    if (minimalPaste !== null) break;
     await delay(50);
   }
-  if (checkboxRepairPaste !== "FALSE") {
-    throw new Error(`Guardar no reparó la casilla localizada existente: ${JSON.stringify(checkboxRepairPaste)}`);
+  if (minimalPaste !== "Solo cambio") {
+    throw new Error(`El guardado incluyó columnas que no cambiaron: ${JSON.stringify(minimalPaste)}`);
   }
-  await delay(650);
+  await waitForWriteVerification(4_000);
 
   await cdp.evaluate(`(() => {
     window.__checkboxBlockPaste = null;
@@ -613,12 +644,7 @@ try {
   if (checkboxBlockPaste !== "C-9\tFALSE\tActualizada") {
     throw new Error(`El bloque reinsertó el texto localizado de la casilla: ${JSON.stringify(checkboxBlockPaste)}`);
   }
-  const blockSaveDeadline = Date.now() + 4_000;
-  while (Date.now() < blockSaveDeadline) {
-    const saveState = await cdp.evaluate('document.getElementById("sheets-session-probe")?.dataset.saveState');
-    if (saveState === "saved") break;
-    await delay(100);
-  }
+  await waitForWriteVerification(4_000);
 
   sheets.Servicios.rows[0][2] = "";
   setTimeout(() => {
@@ -642,31 +668,28 @@ try {
       checked: control.querySelector('input[type="checkbox"]')?.checked,
       value: control.dataset.serializedValue,
       saveState: host.dataset.saveState,
+      verification: host.dataset.writeVerification,
       pastes: window.__optimisticCheckboxPastes,
       hiddenReaders: document.querySelectorAll('iframe[aria-hidden="true"]').length
     };
   })()`);
-  if (!optimisticCheckbox.checked || optimisticCheckbox.value !== "TRUE" || optimisticCheckbox.saveState !== "saving" || optimisticCheckbox.pastes.length !== 1 || optimisticCheckbox.hiddenReaders !== 0) {
+  if (!optimisticCheckbox.checked || optimisticCheckbox.value !== "TRUE" || optimisticCheckbox.saveState !== "saved" || optimisticCheckbox.verification !== "pending" || optimisticCheckbox.pastes.length !== 1 || optimisticCheckbox.hiddenReaders !== 0) {
     throw new Error(`La verificación intermitente sobrescribió la casilla: ${JSON.stringify(optimisticCheckbox)}`);
   }
-  const optimisticSaveDeadline = Date.now() + 6_000;
-  let optimisticResult;
-  while (Date.now() < optimisticSaveDeadline) {
-    optimisticResult = await cdp.evaluate(`(() => {
-      const host = document.getElementById("sheets-session-probe");
-      const panel = host.shadowRoot.querySelector(".panel-frame").contentDocument;
-      const control = panel.querySelector('[data-column="3"]');
-      return {
-        checked: control.querySelector('input[type="checkbox"]')?.checked,
-        value: control.dataset.serializedValue,
-        saveState: host.dataset.saveState,
-        pastes: window.__optimisticCheckboxPastes
-      };
-    })()`);
-    if (optimisticResult.saveState === "saved") break;
-    await delay(100);
-  }
-  if (!optimisticResult?.checked || optimisticResult.value !== "TRUE" || optimisticResult.saveState !== "saved" || optimisticResult.pastes.length !== 1) {
+  await waitForWriteVerification();
+  const optimisticResult = await cdp.evaluate(`(() => {
+    const host = document.getElementById("sheets-session-probe");
+    const panel = host.shadowRoot.querySelector(".panel-frame").contentDocument;
+    const control = panel.querySelector('[data-column="3"]');
+    return {
+      checked: control.querySelector('input[type="checkbox"]')?.checked,
+      value: control.dataset.serializedValue,
+      saveState: host.dataset.saveState,
+      verification: host.dataset.writeVerification,
+      pastes: window.__optimisticCheckboxPastes
+    };
+  })()`);
+  if (!optimisticResult?.checked || optimisticResult.value !== "TRUE" || optimisticResult.saveState !== "saved" || optimisticResult.verification !== "verified" || optimisticResult.pastes.length !== 1) {
     throw new Error(`La casilla no quedó estable después de verificar: ${JSON.stringify(optimisticResult)}`);
   }
   console.log("RELACIONES_OK: opciones con color, casillas localizadas, fecha y hora en español, tipos persistentes y caché confirmados.");

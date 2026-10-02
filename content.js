@@ -120,6 +120,7 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
     workspacePromise: null,
     workspaceWriteQueue: Promise.resolve(),
     propertyColumn: null,
+    pendingWrites: new Map(),
     activity: { row: false, relations: false, config: false },
     indicatorError: false
   };
@@ -128,6 +129,7 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
   host.id = "sheets-session-probe";
   host.dataset.status = "starting";
   host.dataset.themeSource = "workspace-antd";
+  host.dataset.writeVerification = "idle";
   document.documentElement.appendChild(host);
 
   const shadow = host.attachShadow({ mode: "open" });
@@ -201,11 +203,11 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
       border-left: 1px solid ${antdTokens.colorBorder};
       display: flex; flex-direction: column;
     }
-    header { padding: 16px 24px; border-bottom: 1px solid ${antdTokens.colorBorderSecondary}; }
+    .drawer > header { padding: 16px 24px; border-bottom: 1px solid ${antdTokens.colorBorderSecondary}; }
     .eyebrow { color: ${antdTokens.colorTextTertiary}; font-size: 11px; font-weight: 600; letter-spacing: .08em; }
     .title-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
     .header-actions { display: flex; align-items: center; gap: 8px; }
-    h1 { margin: 6px 0 0; color: ${antdTokens.colorTextHeading}; font-size: 18px; line-height: 1.35; }
+    .drawer h1 { margin: 6px 0 0; color: ${antdTokens.colorTextHeading}; font-size: 18px; line-height: 1.35; }
     .icon-button {
       width: ${antdTokens.controlHeight}px; height: ${antdTokens.controlHeight}px;
       border: 0; border-radius: ${antdTokens.borderRadius}px; background: transparent;
@@ -235,7 +237,7 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
       65% { opacity: 1; transform: scale(1.18); }
       100% { transform: scale(1); }
     }
-    main { flex: 1; overflow: auto; padding: 20px 28px 32px; background: var(--workspace-bg); }
+    .drawer > main { flex: 1; overflow: auto; padding: 20px 28px 32px; background: var(--workspace-bg); }
     .status {
       margin-bottom: 14px; padding: 9px 12px; border: 1px solid ${antdTokens.colorSuccessBorder};
       border-radius: ${antdTokens.borderRadiusLG}px; background: ${antdTokens.colorSuccessBg}; color: ${antdTokens.colorSuccessText};
@@ -351,13 +353,13 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
     .relation-count { min-width: 24px; border-radius: ${antdTokens.borderRadiusSM}px; padding: 1px 7px; border: 1px solid ${antdTokens.colorBorder}; background: ${antdTokens.colorBgContainer}; color: ${antdTokens.colorTextSecondary}; text-align: center; font-size: 11px; }
     .relation-empty { padding: 12px; color: var(--workspace-text-muted); font-size: 12px; }
     .relation-table { width: 100%; overflow-x: auto; }
-    table { width: max-content; min-width: 100%; border-collapse: collapse; font-size: 11px; }
-    th, td { max-width: 180px; padding: 8px 10px; border-top: 1px solid var(--workspace-border-soft); text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    th { color: ${antdTokens.colorTextSecondary}; background: ${workspaceTokens.surfaceMuted}; font-weight: 600; }
-    tbody tr:nth-child(even) { background: var(--workspace-surface-subtle); }
+    .relation-table table { width: max-content; min-width: 100%; border-collapse: collapse; font-size: 11px; }
+    .relation-table th, .relation-table td { max-width: 180px; padding: 8px 10px; border-top: 1px solid var(--workspace-border-soft); text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .relation-table th { color: ${antdTokens.colorTextSecondary}; background: ${workspaceTokens.surfaceMuted}; font-weight: 600; }
+    .relation-table tbody tr:nth-child(even) { background: var(--workspace-surface-subtle); }
     .relation-more { padding: 8px 10px; border-top: 1px solid var(--workspace-border-soft); color: var(--workspace-text-muted); font-size: 11px; }
     .workspace-date-picker-popup .ant-picker-panel-container { max-width: calc(100vw - 16px); }
-    footer { padding: 12px 24px 16px; border-top: 1px solid ${antdTokens.colorBorderSecondary}; background: ${antdTokens.colorBgContainer}; }
+    .drawer > footer { padding: 12px 24px 16px; border-top: 1px solid ${antdTokens.colorBorderSecondary}; background: ${antdTokens.colorBgContainer}; }
     .meta { margin-bottom: 9px; color: ${antdTokens.colorTextTertiary}; font-size: 11px; }
     .save {
       width: 100%; min-height: ${antdTokens.controlHeightLG}px; border: 1px solid ${antdTokens.colorPrimary};
@@ -368,8 +370,8 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
     .save:hover { background: ${antdTokens.colorPrimaryHover}; border-color: ${antdTokens.colorPrimaryHover}; }
     .save:disabled { border-color: ${antdTokens.colorBgContainerDisabled}; background: ${antdTokens.colorBgContainerDisabled}; color: ${antdTokens.colorTextDisabled}; box-shadow: none; cursor: default; }
     @media (max-width: 640px) {
-      main { padding: 16px 14px 24px; }
-      header, footer { padding-inline: 16px; }
+      .drawer > main { padding: 16px 14px 24px; }
+      .drawer > header, .drawer > footer { padding-inline: 16px; }
       .field { grid-template-columns: minmax(86px, 34%) minmax(0, 1fr); gap: 10px; }
       .property-header, .property-body { padding-inline: 16px; }
       .property-grid { grid-template-columns: 1fr; gap: 0; }
@@ -1189,9 +1191,9 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
     syncSaveState();
   }
 
-  function embedUrl(range) {
+  function embedUrl(range, gid = currentGid()) {
     const url = new URL(`/spreadsheets/d/${spreadsheetId()}/htmlembed/sheet`, location.origin);
-    url.searchParams.set("gid", currentGid());
+    url.searchParams.set("gid", gid);
     url.searchParams.set("range", range);
     url.searchParams.set("_", Date.now().toString());
     return url;
@@ -1236,8 +1238,8 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
     }
   }
 
-  async function readRange(range, signal) {
-    const doc = await fetchHtmlDocument(embedUrl(range), signal, "La vista HTML tardó demasiado en responder", 12_000);
+  async function readRange(range, signal, gid = currentGid()) {
+    const doc = await fetchHtmlDocument(embedUrl(range, gid), signal, "La vista HTML tardó demasiado en responder", 12_000);
     const rows = Array.from(doc.querySelectorAll("tbody tr")).flatMap((tr) => {
       const rowHeader = tr.querySelector("th.row-headers-background");
       if (!rowHeader) return [];
@@ -1375,11 +1377,11 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
     delete ui.relatedList.dataset.signature;
   }
 
-  function startRelationships(currentHeaders, currentValues, parentSignal) {
+  function startRelationships(currentHeaders, currentValues, parentSignal, silent = false) {
     state.relationRequest?.abort();
     const controller = new AbortController();
     state.relationRequest = controller;
-    setActivity("relations", true);
+    if (!silent) setActivity("relations", true);
     if (parentSignal?.aborted) controller.abort();
     else parentSignal?.addEventListener("abort", () => controller.abort(), { once: true });
     void loadRelationships(currentHeaders, currentValues, controller.signal).finally(() => {
@@ -1586,14 +1588,6 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
     return ["TRUE", "VERDADERO", "SI", "YES", "1"].includes(normalized);
   }
 
-  function checkboxNeedsCanonicalWrite(rawValue, property) {
-    const text = comparable(rawValue);
-    const normalized = text.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase();
-    if (!["VERDADERO", "FALSO"].includes(normalized)) return false;
-    const canonical = serializeEditorValue(checkboxEditorValue(text, property), property);
-    return text.toLowerCase() !== comparable(canonical).toLowerCase();
-  }
-
   function createFieldControl(property, index) {
     const control = element("div", "antd-field-control");
     control.dataset.column = String(index + 1);
@@ -1743,27 +1737,45 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
         readRange(`A${row}:${MAX_COLUMN}${row}`, request.signal)
       ]);
       const values = rows.find((item) => item.number === row)?.cells || [];
-      const width = Math.max(labels.length, values.length);
+      const width = Math.max(labels.length, values.length, cached?.values?.length || 0);
       const freshValues = Array.from({ length: width }, (_, index) => values[index] || "");
       const freshLabels = Array.from({ length: width }, (_, index) => labels[index] || "");
-      const changed = !cached || !sameValues(cached.labels, freshLabels) || !sameValues(cached.values, freshValues);
-      void writePersistentCache(persistentKey, {
+      const cachedPendingChanges = Array.isArray(cached?.pendingChanges) ? cached.pendingChanges : [];
+      const pendingSince = Number(cached?.pendingSince || cached?.updatedAt || 0);
+      const pendingChanges = Date.now() - pendingSince < 20_000 ? cachedPendingChanges : [];
+      const pendingByIndex = new Map(pendingChanges.map((change) => [change.index, change]));
+      const pendingConfirmed = pendingChanges.length > 0 && pendingChanges.every(({ index, value }) =>
+        valuesEqualForProperty(freshValues[index], value, propertyForColumn(index))
+      );
+      const effectiveValues = pendingChanges.length > 0
+        ? freshValues.map((value, index) => {
+          const pending = pendingByIndex.get(index);
+          return pending ? String(pending.value ?? "") : value;
+        })
+        : freshValues;
+      const nextCache = {
         labels: freshLabels,
-        values: freshValues,
-        updatedAt: Date.now()
-      });
+        values: effectiveValues,
+        updatedAt: Date.now(),
+        ...(pendingChanges.length > 0 && !pendingConfirmed ? { pendingChanges, pendingSince } : {})
+      };
+      const changed = !cached || !sameValues(cached.labels, freshLabels) || !sameValues(cached.values, effectiveValues);
+      void writePersistentCache(persistentKey, nextCache);
 
       if (!cached) {
-        applyRowData(freshLabels, freshValues, row, request.signal);
+        applyRowData(freshLabels, effectiveValues, row, request.signal);
         setStatus(`Lectura automática confirmada · fila ${row}`);
       } else if (!changed) {
-        setStatus(`Fila ${row} actualizada · sin cambios nuevos`);
+        setStatus(pendingChanges.length > 0 && !pendingConfirmed
+          ? `Fila ${row} guardada localmente · esperando confirmación de Sheets`
+          : `Fila ${row} actualizada · sin cambios nuevos`
+        );
       } else {
         const draftValues = currentInputValues();
         const dirty = draftValues.flatMap((value, index) =>
           valuesEqualForProperty(value, state.values[index], propertyForColumn(index)) ? [] : [{ index, value }]
         );
-        applyRowData(freshLabels, freshValues, row, request.signal, dirty);
+        applyRowData(freshLabels, effectiveValues, row, request.signal, dirty);
         setStatus(dirty.length
           ? `Datos actualizados en segundo plano · ${dirty.length} cambio(s) tuyos conservados`
           : `Datos actualizados en segundo plano · fila ${row}`
@@ -2074,6 +2086,67 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
     });
   }
 
+  async function verifyPendingWrite(entry) {
+    const verificationDelays = [600, 1_200, 2_200, 4_000];
+    let verificationError = null;
+    try {
+      for (const delay of verificationDelays) {
+        await wait(delay);
+        if (entry.controller.signal.aborted || state.pendingWrites.get(entry.key) !== entry) return;
+        try {
+          const rows = await readRange(`A${entry.row}:${MAX_COLUMN}${entry.row}`, entry.controller.signal, entry.gid);
+          const values = rows.find((item) => item.number === entry.row)?.cells || [];
+          const width = Math.max(entry.labels.length, values.length);
+          const freshValues = Array.from({ length: width }, (_, index) => values[index] || "");
+          const verified = entry.writtenCells.every(({ index, value }) =>
+            valuesEqualForProperty(freshValues[index], value, entry.properties[index])
+          );
+          if (!verified) continue;
+          const writtenByIndex = new Map(entry.writtenCells.map((cell) => [cell.index, cell.value]));
+          const confirmedValues = freshValues.map((value, index) =>
+            writtenByIndex.has(index) ? String(writtenByIndex.get(index) ?? "") : value
+          );
+
+          state.pendingWrites.delete(entry.key);
+          void writePersistentCache(entry.cacheKey, {
+            labels: [...entry.labels],
+            values: confirmedValues,
+            updatedAt: Date.now()
+          });
+          if (state.gid === entry.gid && state.row === entry.row) {
+            state.values = confirmedValues;
+            state.headerCache.delete(`${spreadsheetId()}:${entry.gid}`);
+            state.sheetCache.clear();
+            host.dataset.writeVerification = "verified";
+            const relationshipKeyChanged = entry.writtenCells.some(({ index }) => /^id[a-z0-9]*/.test(normalizedColumn(entry.labels[index])));
+            if (relationshipKeyChanged) startRelationships(state.fields, state.values, state.request?.signal, true);
+          }
+          return;
+        } catch (error) {
+          if (error.name === "AbortError") return;
+          verificationError = error;
+        }
+      }
+
+      if (state.pendingWrites.get(entry.key) !== entry) return;
+      state.pendingWrites.delete(entry.key);
+      void writePersistentCache(entry.cacheKey, {
+        labels: [...entry.labels],
+        values: [...entry.previousValues],
+        updatedAt: Date.now()
+      });
+      if (state.gid === entry.gid && state.row === entry.row) {
+        state.values = [...entry.previousValues];
+        host.dataset.writeVerification = "failed";
+        setStatus(verificationError?.message || "Sheets no confirmó los valores guardados; puedes volver a intentarlo", "error");
+      }
+    } finally {
+      if (state.pendingWrites.get(entry.key) === entry && entry.controller.signal.aborted) {
+        state.pendingWrites.delete(entry.key);
+      }
+    }
+  }
+
   async function saveChanges() {
     if (state.saving || !state.row) return;
     if (state.viewRow !== state.row || state.viewGid !== state.gid) {
@@ -2081,87 +2154,80 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
       return;
     }
     const controls = currentControls();
+    const properties = controls.map((control) => propertyForColumn(Number(control.dataset.column) - 1));
     const changes = controls.flatMap((control) => {
       const index = Number(control.dataset.column) - 1;
-      const property = propertyForColumn(index);
+      const property = properties[index];
       const value = controlValue(control, property);
-      const needsCheckboxRepair = property.type === "checkbox" && checkboxNeedsCanonicalWrite(state.values[index], property);
-      return valuesEqualForProperty(value, state.values[index], property) && !needsCheckboxRepair ? [] : [{ index, value }];
+      return valuesEqualForProperty(value, state.values[index], property) ? [] : [{ index, value }];
     });
     if (!changes.length) {
       setStatus("No hay cambios pendientes");
       return;
     }
 
+    const gid = state.gid;
+    const row = state.row;
+    const labels = [...state.fields];
+    const firstChanged = changes[0].index;
+    const lastChanged = changes[changes.length - 1].index;
+    const changedValues = new Map(changes.map((change) => [change.index, change.value]));
+    const blockValues = controls.slice(firstChanged, lastChanged + 1).map((control) => {
+      const index = Number(control.dataset.column) - 1;
+      if (changedValues.has(index)) return changedValues.get(index);
+      const property = properties[index];
+      return property.type === "checkbox"
+        ? serializeEditorValue(checkboxEditorValue(state.values[index], property), property)
+        : state.values[index];
+    });
+
     state.saving = true;
     ui.save.disabled = true;
     setStatus(`Pegando ${changes.length} campo(s) en un solo bloque…`, "busy");
     try {
-      const firstChanged = changes[0].index;
-      const lastChanged = changes[changes.length - 1].index;
-      const changedValues = new Map(changes.map((change) => [change.index, change.value]));
-      const blockValues = controls.slice(firstChanged, lastChanged + 1).map((control) => {
-        const index = Number(control.dataset.column) - 1;
-        if (changedValues.has(index)) return changedValues.get(index);
-        const property = propertyForColumn(index);
-        if (property.type === "checkbox") {
-          return serializeEditorValue(checkboxEditorValue(state.values[index], property), property);
-        }
-        return state.values[index];
-      });
-      await writeRange(`${columnName(firstChanged + 1)}${state.row}`, blockValues);
+      await writeRange(`${columnName(firstChanged + 1)}${row}`, blockValues);
+
+      const key = `${gid}:${row}`;
+      const previousPending = state.pendingWrites.get(key);
+      previousPending?.controller.abort();
       const optimisticValues = [...state.values];
       blockValues.forEach((value, offset) => {
         optimisticValues[firstChanged + offset] = String(value ?? "");
       });
-      void writePersistentCache(cacheKey("row", state.gid, state.row), {
-        labels: [...state.fields],
+      const writtenByIndex = new Map((previousPending?.writtenCells || []).map((cell) => [cell.index, cell]));
+      blockValues.forEach((value, offset) => {
+        const index = firstChanged + offset;
+        writtenByIndex.set(index, { index, value: String(value ?? "") });
+      });
+      const writtenCells = [...writtenByIndex.values()].sort((left, right) => left.index - right.index);
+      const controller = new AbortController();
+      const pendingSince = previousPending?.pendingSince || Date.now();
+      const entry = {
+        key,
+        cacheKey: cacheKey("row", gid, row),
+        gid,
+        row,
+        labels,
+        properties,
+        previousValues: previousPending?.previousValues || [...state.values],
+        writtenCells,
+        pendingSince,
+        controller
+      };
+      state.pendingWrites.set(key, entry);
+      state.values = optimisticValues;
+      host.dataset.writeVerification = "pending";
+      void writePersistentCache(entry.cacheKey, {
+        labels,
         values: optimisticValues,
         updatedAt: Date.now(),
-        pendingWrite: true
+        pendingChanges: writtenCells,
+        pendingSince
       });
-
-      let verified = false;
-      let confirmedValues = null;
-      let verificationError = null;
-      const verificationDelays = [450, 700, 1_000, 1_500, 2_200];
-      for (const delay of verificationDelays) {
-        await wait(delay);
-        try {
-          const rows = await readRange(`A${state.row}:${MAX_COLUMN}${state.row}`);
-          const values = rows.find((item) => item.number === state.row)?.cells || [];
-          const width = Math.max(state.fields.length, values.length);
-          const freshValues = Array.from({ length: width }, (_, index) => values[index] || "");
-          verified = changes.every((change) =>
-            valuesEqualForProperty(freshValues[change.index], change.value, propertyForColumn(change.index))
-          );
-          if (verified) {
-            confirmedValues = freshValues.map((value, index) => {
-              const property = propertyForColumn(index);
-              return property.type === "checkbox"
-                ? serializeEditorValue(checkboxEditorValue(value, property), property)
-                : value;
-            });
-            break;
-          }
-        } catch (error) {
-          verificationError = error;
-        }
-      }
-      if (!verified) {
-        throw new Error(verificationError?.message || "Sheets no confirmó todos los valores; el pegado sintético puede estar bloqueado en este navegador");
-      }
-      state.values = confirmedValues;
-      state.headerCache.delete(`${spreadsheetId()}:${currentGid()}`);
-      state.sheetCache.clear();
-      void writePersistentCache(cacheKey("row", state.gid, state.row), {
-        labels: [...state.fields],
-        values: [...confirmedValues],
-        updatedAt: Date.now()
-      });
-      startRelationships(state.fields, state.values, state.request?.signal);
-      setStatus(`Guardado y verificado en la fila ${state.row}`);
+      setStatus(`Guardado en la fila ${row}`);
+      void verifyPendingWrite(entry);
     } catch (error) {
+      host.dataset.writeVerification = "failed";
       setStatus(error.message, "error");
     } finally {
       state.saving = false;
