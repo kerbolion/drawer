@@ -1,0 +1,18 @@
+{
+  "name": "sheets-row-drawer",
+  "version": "0.5.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "vite build",
+    "test": "npm run build && node tests/validate-public-sheet.mjs && node tests/validate-relations.mjs"
+  },
+  "dependencies": {
+    "antd": "5.15.4",
+    "react": "18.2.0",
+    "react-dom": "18.2.0"
+  },
+  "devDependencies": {
+    "vite": "5.4.21"
+  }
+}

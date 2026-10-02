@@ -1,3 +1,5 @@
+import { antdTokens, workspaceTokens } from "./theme.js";
+
 (() => {
   "use strict";
 
@@ -32,6 +34,7 @@
   const host = document.createElement("div");
   host.id = "sheets-session-probe";
   host.dataset.status = "starting";
+  host.dataset.themeSource = "workspace-antd";
   document.documentElement.appendChild(host);
 
   const shadow = host.attachShadow({ mode: "open" });
@@ -40,11 +43,18 @@
     :host { all: initial; }
     .panel-frame {
       position: fixed; inset: 0 0 0 auto; z-index: 2147483647;
-      width: min(380px, 92vw); height: 100vh; border: 0; background: #fff;
-      box-shadow: -8px 0 24px rgba(25, 35, 45, .12);
+      width: min(720px, 94vw); height: 100vh; border: 0; background: ${antdTokens.colorBgElevated};
+      box-shadow: ${antdTokens.boxShadowSecondary};
     }
     .panel-frame[hidden], .reopen[hidden] { display: none; }
-    .reopen { position: fixed; right: 16px; top: 82px; z-index: 2147483647; border: 0; border-radius: 999px; padding: 10px 14px; background: #0b8043; color: #fff; box-shadow: 0 4px 14px rgba(0,0,0,.2); font: 700 12px Arial, sans-serif; cursor: pointer; }
+    .reopen {
+      position: fixed; right: 16px; top: 82px; z-index: 2147483647;
+      min-height: ${antdTokens.controlHeight}px; border: 0; border-radius: ${antdTokens.borderRadius}px;
+      padding: 4px 15px; background: ${antdTokens.colorPrimary}; color: ${antdTokens.colorWhite};
+      box-shadow: ${antdTokens.boxShadowSecondary};
+      font: 600 ${antdTokens.fontSize}px/${antdTokens.lineHeight} ${antdTokens.fontFamily}; cursor: pointer;
+    }
+    .reopen:hover { background: ${antdTokens.colorPrimaryHover}; }
   `);
   shadow.adoptedStyleSheets = [shellStyles];
 
@@ -63,49 +73,116 @@
   panelDocument.body.replaceChildren();
   const panelStyles = panelDocument.createElement("style");
   panelStyles.textContent = `
+    :root {
+      color-scheme: light;
+      --workspace-bg: ${workspaceTokens.bg};
+      --workspace-surface: ${workspaceTokens.surface};
+      --workspace-surface-muted: ${workspaceTokens.surfaceMuted};
+      --workspace-surface-subtle: ${workspaceTokens.surfaceSubtle};
+      --workspace-surface-raised: ${workspaceTokens.surfaceRaised};
+      --workspace-border: ${workspaceTokens.border};
+      --workspace-border-soft: ${workspaceTokens.borderSoft};
+      --workspace-border-subtle: ${workspaceTokens.borderSubtle};
+      --workspace-text: ${workspaceTokens.text};
+      --workspace-text-body: ${workspaceTokens.textBody};
+      --workspace-text-secondary: ${workspaceTokens.textSecondary};
+      --workspace-text-muted: ${workspaceTokens.textMuted};
+      --workspace-text-disabled: ${workspaceTokens.textDisabled};
+      --workspace-primary: ${workspaceTokens.primary};
+      --workspace-primary-border: ${workspaceTokens.primaryBorder};
+      --workspace-primary-soft: ${workspaceTokens.primarySoft};
+      --workspace-primary-hover: ${workspaceTokens.primaryHover};
+      --workspace-shadow: ${workspaceTokens.shadow};
+      --workspace-shadow-soft: ${workspaceTokens.shadowSoft};
+    }
     *, *::before, *::after { box-sizing: border-box; }
-    html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background: #fff; }
+    html, body {
+      width: 100%; height: 100%; margin: 0; overflow: hidden;
+      background: ${antdTokens.colorBgContainer}; color: ${antdTokens.colorText};
+      font: ${antdTokens.fontSize}px/${antdTokens.lineHeight} ${antdTokens.fontFamily};
+    }
+    button, input { font: inherit; }
     .drawer {
-      width: 100%; height: 100%; background: #fff; color: #172033;
-      border-left: 1px solid #dfe3e8;
+      width: 100%; height: 100%; background: ${antdTokens.colorBgContainer}; color: ${antdTokens.colorText};
+      border-left: 1px solid ${antdTokens.colorBorder};
       display: flex; flex-direction: column;
-      font: 13px/1.45 Arial, sans-serif;
     }
-    header { padding: 18px 18px 14px; border-bottom: 1px solid #e8ebef; }
-    .eyebrow { color: #0b8043; font-size: 10px; font-weight: 700; letter-spacing: .16em; }
+    header { padding: 16px 24px; border-bottom: 1px solid ${antdTokens.colorBorderSecondary}; }
+    .eyebrow { color: ${antdTokens.colorTextTertiary}; font-size: 11px; font-weight: 600; letter-spacing: .08em; }
     .title-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-    h1 { margin: 6px 0 0; font-size: 19px; line-height: 1.25; }
-    .icon-button { border: 0; background: transparent; color: #4b5563; font-size: 22px; cursor: pointer; }
-    main { flex: 1; overflow: auto; padding: 16px 18px 24px; }
-    .status { margin-bottom: 16px; padding: 10px 12px; border-radius: 8px; background: #eef7f2; color: #216e46; }
-    .status.error { background: #fce8e6; color: #b3261e; }
-    .status.busy { background: #eef3fc; color: #185abc; }
-    .field { display: block; margin-bottom: 14px; }
-    .field span { display: block; margin-bottom: 6px; color: #303846; font-weight: 700; }
-    .field input {
-      width: 100%; border: 1px solid #cfd6df; border-radius: 7px;
-      padding: 10px 11px; background: #fff; color: #172033; font: inherit;
+    h1 { margin: 6px 0 0; color: ${antdTokens.colorTextHeading}; font-size: 18px; line-height: 1.35; }
+    .icon-button {
+      width: ${antdTokens.controlHeight}px; height: ${antdTokens.controlHeight}px;
+      border: 0; border-radius: ${antdTokens.borderRadius}px; background: transparent;
+      color: ${antdTokens.colorTextSecondary}; font-size: 20px; cursor: pointer;
     }
-    .field input:focus { border-color: #1a73e8; outline: 2px solid rgba(26, 115, 232, .15); }
-    .related { margin-top: 24px; padding-top: 18px; border-top: 1px solid #e8ebef; }
-    .related h2 { margin: 0 0 10px; font-size: 15px; }
-    .related-status { color: #687386; font-size: 12px; }
-    .relation { margin-top: 12px; border: 1px solid #dfe3e8; border-radius: 9px; overflow: hidden; }
-    .relation-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; padding: 10px 12px; background: #f7f9fb; }
+    .icon-button:hover { background: ${antdTokens.colorFillTertiary}; color: ${antdTokens.colorText}; }
+    main { flex: 1; overflow: auto; padding: 20px 28px 32px; background: var(--workspace-bg); }
+    .status {
+      margin-bottom: 14px; padding: 9px 12px; border: 1px solid ${antdTokens.colorSuccessBorder};
+      border-radius: ${antdTokens.borderRadiusLG}px; background: ${antdTokens.colorSuccessBg}; color: ${antdTokens.colorSuccessText};
+      font-size: 12px;
+    }
+    .status.error { border-color: ${antdTokens.colorErrorBorder}; background: ${antdTokens.colorErrorBg}; color: ${antdTokens.colorErrorText}; }
+    .status.busy { border-color: ${antdTokens.colorInfoBorder}; background: ${antdTokens.colorInfoBg}; color: ${antdTokens.colorInfoText}; }
+    .fields {
+      overflow: hidden; padding: 4px 14px;
+      border: 1px solid var(--workspace-border); border-radius: 8px;
+      background: var(--workspace-surface); box-shadow: 0 8px 24px var(--workspace-shadow-soft);
+    }
+    .field {
+      display: grid; grid-template-columns: 190px minmax(0, 1fr); align-items: center; gap: 18px;
+      min-height: 57px; padding: 12px 0; border-bottom: 1px solid var(--workspace-border-subtle);
+    }
+    .field:last-child { border-bottom: 0; }
+    .field span { display: block; color: var(--workspace-text-secondary); font-size: 13px; font-weight: 700; }
+    .field input {
+      width: 100%; min-height: ${antdTokens.controlHeight}px;
+      border: 1px solid ${antdTokens.colorBorder}; border-radius: ${antdTokens.borderRadius}px;
+      padding: 4px 11px; background: ${antdTokens.colorBgContainer}; color: ${antdTokens.colorText};
+      transition: border-color ${antdTokens.motionDurationMid}, box-shadow ${antdTokens.motionDurationMid};
+    }
+    .field input:hover { border-color: ${antdTokens.colorPrimaryHover}; }
+    .field input:focus { border-color: ${antdTokens.colorPrimary}; outline: 0; box-shadow: 0 0 0 ${antdTokens.controlOutlineWidth}px ${antdTokens.controlOutline}; }
+    .fields[aria-busy="true"] { cursor: progress; }
+    .related {
+      margin-top: 14px; padding: 0 14px 14px; overflow: hidden;
+      border: 1px solid var(--workspace-border); border-radius: 8px;
+      background: var(--workspace-surface); box-shadow: 0 8px 24px var(--workspace-shadow-soft);
+    }
+    .related h2 {
+      margin: 0 -14px 10px; min-height: 46px; padding: 12px 14px;
+      border-bottom: 1px solid var(--workspace-border-soft); background: var(--workspace-surface-raised);
+      color: var(--workspace-text); font-size: 14px; line-height: 22px;
+    }
+    .related-status { padding: 3px 0; color: var(--workspace-text-muted); font-size: 12px; }
+    .relation { margin-top: 12px; border: 1px solid var(--workspace-border); border-radius: 8px; overflow: hidden; }
+    .relation-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; padding: 10px 12px; background: var(--workspace-surface-muted); }
     .relation-title { font-weight: 700; }
-    .relation-kind { margin-top: 2px; color: #687386; font-size: 10px; }
-    .relation-count { min-width: 24px; border-radius: 999px; padding: 2px 7px; background: #e6f4ea; color: #137333; text-align: center; font-size: 11px; font-weight: 700; }
-    .relation-empty { padding: 12px; color: #687386; font-size: 12px; }
+    .relation-kind { margin-top: 2px; color: var(--workspace-text-muted); font-size: 11px; }
+    .relation-count { min-width: 24px; border-radius: ${antdTokens.borderRadiusSM}px; padding: 1px 7px; border: 1px solid ${antdTokens.colorBorder}; background: ${antdTokens.colorBgContainer}; color: ${antdTokens.colorTextSecondary}; text-align: center; font-size: 11px; }
+    .relation-empty { padding: 12px; color: var(--workspace-text-muted); font-size: 12px; }
     .relation-table { width: 100%; overflow-x: auto; }
     table { width: max-content; min-width: 100%; border-collapse: collapse; font-size: 11px; }
-    th, td { max-width: 180px; padding: 7px 9px; border-top: 1px solid #edf0f3; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    th { color: #556070; background: #fff; font-weight: 700; }
-    tbody tr:nth-child(even) { background: #fafbfc; }
-    .relation-more { padding: 8px 10px; border-top: 1px solid #edf0f3; color: #687386; font-size: 11px; }
-    footer { padding: 12px 18px 16px; border-top: 1px solid #e8ebef; background: #fff; }
-    .meta { margin-bottom: 9px; color: #687386; font-size: 11px; }
-    .save { width: 100%; border: 0; border-radius: 7px; padding: 11px 14px; background: #0b8043; color: #fff; font-weight: 700; cursor: pointer; }
-    .save:disabled { background: #a8c9b8; cursor: default; }
+    th, td { max-width: 180px; padding: 8px 10px; border-top: 1px solid var(--workspace-border-soft); text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    th { color: ${antdTokens.colorTextSecondary}; background: ${workspaceTokens.surfaceMuted}; font-weight: 600; }
+    tbody tr:nth-child(even) { background: var(--workspace-surface-subtle); }
+    .relation-more { padding: 8px 10px; border-top: 1px solid var(--workspace-border-soft); color: var(--workspace-text-muted); font-size: 11px; }
+    footer { padding: 12px 24px 16px; border-top: 1px solid ${antdTokens.colorBorderSecondary}; background: ${antdTokens.colorBgContainer}; }
+    .meta { margin-bottom: 9px; color: ${antdTokens.colorTextTertiary}; font-size: 11px; }
+    .save {
+      width: 100%; min-height: ${antdTokens.controlHeightLG}px; border: 1px solid ${antdTokens.colorPrimary};
+      border-radius: ${antdTokens.borderRadius}px; padding: 6px 15px; background: ${antdTokens.colorPrimary};
+      color: ${antdTokens.colorWhite}; font-weight: 600; cursor: pointer;
+      box-shadow: ${antdTokens.boxShadowTertiary}; transition: background ${antdTokens.motionDurationMid};
+    }
+    .save:hover { background: ${antdTokens.colorPrimaryHover}; border-color: ${antdTokens.colorPrimaryHover}; }
+    .save:disabled { border-color: ${antdTokens.colorBgContainerDisabled}; background: ${antdTokens.colorBgContainerDisabled}; color: ${antdTokens.colorTextDisabled}; box-shadow: none; cursor: default; }
+    @media (max-width: 540px) {
+      main { padding: 16px 14px 24px; }
+      header, footer { padding-inline: 16px; }
+      .field { grid-template-columns: minmax(86px, 34%) minmax(0, 1fr); gap: 10px; }
+    }
   `;
   panelDocument.head.appendChild(panelStyles);
 

@@ -152,7 +152,7 @@ try {
     grantUniveralAccess: true
   });
   await cdp.evaluate(await readFile(path.join(extensionDir, "page-write.js"), "utf8"));
-  await cdp.evaluate(await readFile(path.join(extensionDir, "content.js"), "utf8"), isolated.executionContextId);
+  await cdp.evaluate(await readFile(path.join(extensionDir, "dist", "content.js"), "utf8"), isolated.executionContextId);
 
   const snapshot = `(() => {
     const host = document.getElementById("sheets-session-probe");

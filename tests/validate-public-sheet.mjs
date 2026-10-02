@@ -118,7 +118,7 @@ try {
   });
   const writeScript = await readFile(path.join(extensionDir, "page-write.js"), "utf8");
   await cdp.evaluate(writeScript);
-  const contentScript = await readFile(path.join(extensionDir, "content.js"), "utf8");
+  const contentScript = await readFile(path.join(extensionDir, "dist", "content.js"), "utf8");
   await cdp.evaluate(contentScript, isolated.executionContextId);
   const deadline = Date.now() + 30_000;
   let result;
@@ -132,7 +132,10 @@ try {
         row: host?.dataset.row || null,
         fields: panel ? Array.from(panel.querySelectorAll(".field input"), input => input.value) : [] ,
         message: panel?.querySelector(".status")?.textContent || null,
-        nameBox: document.getElementById("t-name-box")?.value || null
+        nameBox: document.getElementById("t-name-box")?.value || null,
+        themeSource: host?.dataset.themeSource || null,
+        drawerWidth: host ? Math.round(host.shadowRoot.querySelector(".panel-frame").getBoundingClientRect().width) : 0,
+        primaryToken: panel ? getComputedStyle(panel.documentElement).getPropertyValue("--workspace-primary").trim() : null
       };
     })()`);
     if (result?.status === "ok" || result?.status === "error") break;
@@ -143,6 +146,9 @@ try {
   if (result.status !== "ok") throw new Error(result.message || "La lectura no termino correctamente");
   if (result.row !== "2") throw new Error(`Se esperaba la fila 2 y se obtuvo ${result.row}`);
   if (!result.fields.includes("Alexandra")) throw new Error("La fila leida no contiene el valor esperado");
+  if (result.themeSource !== "workspace-antd" || result.drawerWidth < 700 || result.drawerWidth > 720 || result.primaryToken !== "#1677ff") {
+    throw new Error(`El tema de workspace-antd no se aplico correctamente: ${JSON.stringify(result)}`);
+  }
 
   const isolation = await cdp.evaluate(`(() => {
     const host = document.getElementById("sheets-session-probe");
@@ -249,7 +255,7 @@ try {
     throw new Error(`El cambio de fila reconstruyo el formulario: ${JSON.stringify(stableRender)}`);
   }
 
-  console.log("VALIDACION_OK: lectura, cambio de fila sin rerender, foco aislado y pegado TSV unico confirmados.");
+  console.log("VALIDACION_OK: tema Ant Design, lectura, cambio de fila sin rerender, foco aislado y pegado TSV unico confirmados.");
 } finally {
   cdp?.close();
   if (browser.pid) spawnSync("taskkill", ["/PID", String(browser.pid), "/T", "/F"], { stdio: "ignore", windowsHide: true });

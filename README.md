@@ -2,6 +2,8 @@
 
 Prototipo mínimo para validar el flujo antes de construir la extensión completa.
 
+La interfaz usa Ant Design `5.15.4` y replica los tokens claros del drawer de `workspace-antd`: color primario, superficies, bordes, tipografía, radios y sombras. El bundle queda incluido localmente en la extensión y no descarga estilos ni scripts al abrir Google Sheets.
+
 - Lee la fila seleccionada mediante la vista HTML autenticada de Google Sheets.
 - Detecta automáticamente los cambios de celda o fila.
 - Abre el formulario a la derecha.
@@ -15,11 +17,12 @@ Prototipo mínimo para validar el flujo antes de construir la extensión complet
 
 ## Probar
 
-1. Abre `chrome://extensions`.
-2. Activa **Modo de desarrollador**.
-3. Pulsa **Cargar descomprimida** y elige este directorio.
-4. Recarga una hoja de Google Sheets que puedas editar.
-5. Selecciona cualquier celda debajo de la fila de encabezados.
+1. Ejecuta `npm install` y `npm run build` en este directorio.
+2. Abre `chrome://extensions`.
+3. Activa **Modo de desarrollador**.
+4. Pulsa **Cargar descomprimida** y elige este directorio.
+5. Recarga una hoja de Google Sheets que puedas editar.
+6. Selecciona cualquier celda debajo de la fila de encabezados.
 
 El panel debe cargar la fila automáticamente. Cambia un campo y pulsa **Guardar cambios** para validar la escritura y la lectura de comprobación.
 
