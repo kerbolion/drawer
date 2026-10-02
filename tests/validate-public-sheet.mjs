@@ -109,6 +109,30 @@ try {
     if (ready) break;
     await delay(250);
   }
+  await cdp.evaluate(`(() => {
+    document.getElementById("srd-test-companion")?.remove();
+    const container = document.createElement("div");
+    container.id = "srd-test-companion";
+    container.className = "companion-app-switcher-container";
+    container.style.cssText = "position:fixed;right:8px;top:80px;width:48px;height:160px";
+    const switcher = document.createElement("div");
+    switcher.className = "companion-guest-app-switcher";
+    switcher.setAttribute("role", "tablist");
+    switcher.style.cssText = "display:flex;flex-direction:column;align-items:center;width:48px;height:160px";
+    const add = document.createElement("div");
+    add.id = "srd-test-addons";
+    add.className = "agca-gab-button app-switcher-button";
+    add.setAttribute("role", "tab");
+    add.setAttribute("aria-label", "Obtener Complementos");
+    add.style.cssText = "width:40px;height:40px";
+    const icon = document.createElement("div");
+    icon.className = "app-switcher-button-icon-container";
+    icon.style.backgroundImage = "url(https://fonts.gstatic.com/s/i/googlematerialicons/add/v21/black-24dp/1x/gm_add_black_24dp.png)";
+    add.appendChild(icon);
+    switcher.appendChild(add);
+    container.appendChild(switcher);
+    document.body.prepend(container);
+  })()`);
   const frameTree = await cdp.command("Page.getFrameTree");
   const frameId = frameTree.frameTree.frame.id;
   const isolated = await cdp.command("Page.createIsolatedWorld", {
@@ -178,6 +202,85 @@ try {
   if (!result.statusHidden || result.saveState !== "saved") throw new Error("El estado rutinario no se movio al icono del encabezado");
   if (result.themeSource !== "workspace-antd" || result.drawerWidth < 700 || result.drawerWidth > 720 || result.primaryToken !== "#1677ff") {
     throw new Error(`El tema de workspace-antd no se aplico correctamente: ${JSON.stringify(result)}`);
+  }
+
+  const launcherDeadline = Date.now() + 3_000;
+  let launcherPlacement;
+  while (Date.now() < launcherDeadline) {
+    launcherPlacement = await cdp.evaluate(`(() => {
+      const host = document.getElementById("sheets-session-probe");
+      const add = document.getElementById("srd-test-addons");
+      const launcher = host?.shadowRoot?.querySelector(".reopen");
+      const addRect = add?.getBoundingClientRect();
+      const launcherRect = launcher?.getBoundingClientRect();
+      return {
+        exists: Boolean(launcher),
+        ownedByExtension: launcher?.getRootNode() === host?.shadowRoot,
+        googleTreeUntouched: add?.nextElementSibling === null,
+        belowAdd: Boolean(addRect && launcherRect && launcherRect.top >= addRect.bottom + 7),
+        initiallyHidden: launcher?.hidden ?? null,
+        anchor: host?.dataset.launcherAnchor || null
+      };
+    })()`);
+    if (launcherPlacement.exists && launcherPlacement.belowAdd && launcherPlacement.anchor === "ready") break;
+    await delay(50);
+  }
+  if (!launcherPlacement?.ownedByExtension || !launcherPlacement.googleTreeUntouched || !launcherPlacement.belowAdd || launcherPlacement.initiallyHidden !== false) {
+    throw new Error(`El lanzador no quedó debajo de Obtener Complementos: ${JSON.stringify(launcherPlacement)}`);
+  }
+
+  const closedDrawer = await cdp.evaluate(`(() => {
+    const host = document.getElementById("sheets-session-probe");
+    const frame = host.shadowRoot.querySelector(".panel-frame");
+    frame.contentDocument.querySelector(".close").click();
+    const launcher = host.shadowRoot.querySelector(".reopen");
+    const style = getComputedStyle(launcher);
+    const rect = launcher.getBoundingClientRect();
+    return {
+      drawerHidden: frame.hidden,
+      launcherHidden: launcher.hidden,
+      width: Math.round(rect.width),
+      height: Math.round(rect.height),
+      borderRadius: style.borderRadius
+    };
+  })()`);
+  if (!closedDrawer.drawerHidden || closedDrawer.launcherHidden || closedDrawer.width !== 40 || closedDrawer.height !== 40 || closedDrawer.borderRadius !== "50%") {
+    throw new Error(`El lanzador circular no mostró el estado esperado: ${JSON.stringify(closedDrawer)}`);
+  }
+
+  const reopenedDrawer = await cdp.evaluate(`(() => {
+    const host = document.getElementById("sheets-session-probe");
+    const frame = host.shadowRoot.querySelector(".panel-frame");
+    const launcher = host.shadowRoot.querySelector(".reopen");
+    launcher.click();
+    return {
+      drawerHidden: frame.hidden,
+      launcherHidden: launcher.hidden,
+      drawerLayer: Number(getComputedStyle(frame).zIndex),
+      launcherLayer: Number(getComputedStyle(launcher).zIndex)
+    };
+  })()`);
+  if (reopenedDrawer.drawerHidden || reopenedDrawer.launcherHidden || reopenedDrawer.launcherLayer >= reopenedDrawer.drawerLayer) {
+    throw new Error(`El botón lateral no volvió a abrir el drawer: ${JSON.stringify(reopenedDrawer)}`);
+  }
+
+  const launcherMove = await cdp.evaluate(`(async () => {
+    const host = document.getElementById("sheets-session-probe");
+    const launcher = host.shadowRoot.querySelector(".reopen");
+    const companion = document.getElementById("srd-test-companion");
+    const before = launcher.getBoundingClientRect().top;
+    companion.style.top = "120px";
+    window.dispatchEvent(new Event("resize"));
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    return {
+      before: Math.round(before),
+      after: Math.round(launcher.getBoundingClientRect().top),
+      hidden: launcher.hidden,
+      stillOutsideGoogleTree: launcher.getRootNode() === host.shadowRoot
+    };
+  })()`);
+  if (launcherMove.after - launcherMove.before !== 40 || launcherMove.hidden || !launcherMove.stillOutsideGoogleTree) {
+    throw new Error(`El lanzador no siguió la barra mediante listeners: ${JSON.stringify(launcherMove)}`);
   }
 
   const bridgeDeadline = Date.now() + 15_000;

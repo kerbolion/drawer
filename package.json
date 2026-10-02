@@ -1,6 +1,6 @@
 {
   "name": "sheets-row-drawer",
-  "version": "0.9.4",
+  "version": "0.9.7",
   "private": true,
   "type": "module",
   "scripts": {

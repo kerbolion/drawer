@@ -156,25 +156,132 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
     }
     .panel-frame[hidden], .reopen[hidden] { display: none; }
     .reopen {
-      position: fixed; right: 16px; top: 82px; z-index: 2147483647;
-      min-height: ${antdTokens.controlHeight}px; border: 0; border-radius: ${antdTokens.borderRadius}px;
-      padding: 4px 15px; background: ${antdTokens.colorPrimary}; color: ${antdTokens.colorWhite};
-      box-shadow: ${antdTokens.boxShadowSecondary};
-      font: 600 ${antdTokens.fontSize}px/${antdTokens.lineHeight} ${antdTokens.fontFamily}; cursor: pointer;
+      box-sizing: border-box; position: fixed; z-index: 2147483646;
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 40px; height: 40px; min-width: 40px; min-height: 40px;
+      margin: 0; padding: 0; border: 0; border-radius: 50%;
+      background: #e6f4ea; color: #0b8043; box-shadow: none;
+      cursor: pointer; user-select: none;
+      transition: background-color 120ms ease, transform 120ms ease;
     }
-    .reopen:hover { background: ${antdTokens.colorPrimaryHover}; }
+    .reopen:hover { background: #ceead6; }
+    .reopen:active { transform: scale(.94); }
+    .reopen:focus-visible { outline: 2px solid #1a73e8; outline-offset: 2px; }
+    .reopen svg { display: block; width: 20px; height: 20px; pointer-events: none; }
   `);
   shadow.adoptedStyleSheets = [shellStyles];
 
   const panelFrame = document.createElement("iframe");
   panelFrame.className = "panel-frame";
   panelFrame.title = "Detalles de la fila";
+  shadow.appendChild(panelFrame);
+
   const reopen = document.createElement("button");
   reopen.className = "reopen";
   reopen.type = "button";
-  reopen.textContent = "Abrir formulario";
+  reopen.setAttribute("aria-label", "Abrir formulario de Sheets CRM");
+  reopen.title = "Abrir formulario";
   reopen.hidden = true;
-  shadow.append(panelFrame, reopen);
+  const launcherIcon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  launcherIcon.setAttribute("viewBox", "0 0 24 24");
+  launcherIcon.setAttribute("fill", "none");
+  launcherIcon.setAttribute("stroke", "currentColor");
+  launcherIcon.setAttribute("stroke-width", "2");
+  launcherIcon.setAttribute("stroke-linecap", "round");
+  launcherIcon.setAttribute("stroke-linejoin", "round");
+  launcherIcon.setAttribute("aria-hidden", "true");
+  const launcherRect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+  launcherRect.setAttribute("x", "5");
+  launcherRect.setAttribute("y", "3");
+  launcherRect.setAttribute("width", "14");
+  launcherRect.setAttribute("height", "18");
+  launcherRect.setAttribute("rx", "2");
+  launcherIcon.appendChild(launcherRect);
+  for (const pathData of ["M8 8h8", "M8 12h8", "M8 16h5"]) {
+    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    path.setAttribute("d", pathData);
+    launcherIcon.appendChild(path);
+  }
+  reopen.appendChild(launcherIcon);
+  shadow.appendChild(reopen);
+
+  function companionSwitcher() {
+    return document.querySelector(".companion-app-switcher-container .companion-guest-app-switcher");
+  }
+
+  function companionAddButton(switcher) {
+    return Array.from(switcher?.children || []).find((candidate) => {
+      const label = String(candidate.getAttribute("aria-label") || "").toLowerCase();
+      const icon = candidate.querySelector(".app-switcher-button-icon-container");
+      const iconSource = String(icon?.style.backgroundImage || icon?.getAttribute("style") || "").toLowerCase();
+      return iconSource.includes("materialicons/add/")
+        || iconSource.includes("gm_add_")
+        || label.includes("complementos")
+        || label.includes("add-ons");
+    }) || null;
+  }
+
+  const LAUNCHER_SIZE = 40;
+  const LAUNCHER_GAP = 8;
+  let launcherPositioned = false;
+  let launcherAnchor = null;
+  let launcherSwitcher = null;
+  const launcherResizeObserver = typeof ResizeObserver === "function"
+    ? new ResizeObserver(() => scheduleLauncherPlacement())
+    : null;
+
+  function watchLauncherAnchor(switcher, addButton) {
+    if (launcherAnchor === addButton && launcherSwitcher === switcher) return;
+    launcherResizeObserver?.disconnect();
+    launcherAnchor = addButton;
+    launcherSwitcher = switcher;
+    if (switcher) launcherResizeObserver?.observe(switcher);
+    if (addButton && addButton !== switcher) launcherResizeObserver?.observe(addButton);
+  }
+
+  function placeLauncher() {
+    const switcher = companionSwitcher();
+    const addButton = companionAddButton(switcher);
+    watchLauncherAnchor(switcher, addButton);
+    if (!switcher || !addButton) {
+      host.dataset.launcherAnchor = "missing";
+      if (!launcherPositioned) reopen.hidden = true;
+      return;
+    }
+
+    const rect = addButton.getBoundingClientRect();
+    if (!rect.width || !rect.height) {
+      host.dataset.launcherAnchor = "hidden";
+      if (!launcherPositioned) reopen.hidden = true;
+      return;
+    }
+
+    const maxLeft = Math.max(4, window.innerWidth - LAUNCHER_SIZE - 4);
+    const maxTop = Math.max(4, window.innerHeight - LAUNCHER_SIZE - 4);
+    const left = Math.min(maxLeft, Math.max(4, rect.left + (rect.width - LAUNCHER_SIZE) / 2));
+    const top = Math.min(maxTop, Math.max(4, rect.bottom + LAUNCHER_GAP));
+    reopen.style.left = `${Math.round(left)}px`;
+    reopen.style.top = `${Math.round(top)}px`;
+    launcherPositioned = true;
+    reopen.hidden = false;
+    host.dataset.launcherAnchor = "ready";
+    launcherDiscoveryObserver.disconnect();
+  }
+
+  let launcherPlacementFrame = 0;
+  function scheduleLauncherPlacement() {
+    if (launcherPlacementFrame) return;
+    launcherPlacementFrame = requestAnimationFrame(() => {
+      launcherPlacementFrame = 0;
+      placeLauncher();
+    });
+  }
+
+  const launcherDiscoveryObserver = new MutationObserver(scheduleLauncherPlacement);
+  launcherDiscoveryObserver.observe(document.body || document.documentElement, { childList: true, subtree: true });
+  window.addEventListener("resize", scheduleLauncherPlacement, { passive: true });
+  window.addEventListener("scroll", scheduleLauncherPlacement, { capture: true, passive: true });
+  scheduleLauncherPlacement();
 
   const panelDocument = panelFrame.contentDocument;
   installTrustedHtmlBridge(panelFrame.contentWindow);
@@ -970,11 +1077,9 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
 
   ui.close.addEventListener("click", () => {
     ui.frame.hidden = true;
-    ui.reopen.hidden = false;
   });
   ui.reopen.addEventListener("click", () => {
     ui.frame.hidden = false;
-    ui.reopen.hidden = true;
   });
   ui.cancel.addEventListener("click", cancelChanges);
   ui.save.addEventListener("click", saveChanges);
