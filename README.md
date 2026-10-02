@@ -5,7 +5,8 @@ Prototipo mínimo para validar el flujo antes de construir la extensión complet
 - Lee la fila seleccionada mediante la vista HTML autenticada de Google Sheets.
 - Detecta automáticamente los cambios de celda o fila.
 - Abre el formulario a la derecha.
-- Guarda sólo los campos modificados mediante eventos de pegado internos de Sheets.
+- Aísla el formulario para que `Ctrl+V` permanezca dentro del input.
+- Guarda el rango editado mediante un único pegado TSV horizontal de Sheets.
 - Verifica el guardado volviendo a leer la fila.
 - No usa Google Sheets API, claves, OAuth propio, Apps Script ni el portapapeles del sistema.
 

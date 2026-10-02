@@ -125,13 +125,13 @@ try {
   while (Date.now() < deadline) {
     result = await cdp.evaluate(`(() => {
       const host = document.getElementById("sheets-session-probe");
-      const root = host?.shadowRoot;
+      const panel = host?.shadowRoot?.querySelector(".panel-frame")?.contentDocument;
       return {
         exists: Boolean(host),
         status: host?.dataset.status || null,
         row: host?.dataset.row || null,
-        fields: root ? Array.from(root.querySelectorAll(".field input"), input => input.value) : [] ,
-        message: root?.querySelector(".status")?.textContent || null,
+        fields: panel ? Array.from(panel.querySelectorAll(".field input"), input => input.value) : [] ,
+        message: panel?.querySelector(".status")?.textContent || null,
         nameBox: document.getElementById("t-name-box")?.value || null
       };
     })()`);
@@ -144,18 +144,47 @@ try {
   if (result.row !== "2") throw new Error(`Se esperaba la fila 2 y se obtuvo ${result.row}`);
   if (!result.fields.includes("Alexandra")) throw new Error("La fila leida no contiene el valor esperado");
 
+  const isolation = await cdp.evaluate(`(() => {
+    const host = document.getElementById("sheets-session-probe");
+    const frame = host.shadowRoot.querySelector(".panel-frame");
+    const input = frame.contentDocument.querySelector(".field input");
+    let parentKeydowns = 0;
+    let parentPastes = 0;
+    const onKeydown = () => { parentKeydowns += 1; };
+    const onPaste = () => { parentPastes += 1; };
+    document.addEventListener("keydown", onKeydown);
+    document.addEventListener("paste", onPaste);
+    input.focus();
+    input.dispatchEvent(new frame.contentWindow.KeyboardEvent("keydown", {
+      key: "v", code: "KeyV", ctrlKey: true, bubbles: true, composed: true
+    }));
+    const transfer = new frame.contentWindow.DataTransfer();
+    transfer.setData("text/plain", "texto de prueba");
+    input.dispatchEvent(new frame.contentWindow.ClipboardEvent("paste", {
+      clipboardData: transfer, bubbles: true, composed: true
+    }));
+    document.removeEventListener("keydown", onKeydown);
+    document.removeEventListener("paste", onPaste);
+    return { parentKeydowns, parentPastes, inputFocused: frame.contentDocument.activeElement === input };
+  })()`);
+  if (!isolation.inputFocused || isolation.parentKeydowns !== 0 || isolation.parentPastes !== 0) {
+    throw new Error("El teclado del formulario no quedo aislado de Google Sheets");
+  }
+
   await cdp.evaluate(`(() => {
     window.__probePaste = null;
+    window.__probePasteCount = 0;
     document.addEventListener("paste", event => {
+      window.__probePasteCount += 1;
       window.__probePaste = event.clipboardData?.getData("text/plain") || "";
     }, { capture: true, once: true });
   })()`);
   await cdp.evaluate(`window.postMessage({
     source: "sheets-row-drawer",
-    type: "write-cell",
+    type: "write-range",
     requestId: "automated-noop",
     reference: "A2",
-    value: "Alexandra"
+    tsv: "Alexandra\\tFemale"
   }, location.origin)`, isolated.executionContextId);
   const pasteDeadline = Date.now() + 5_000;
   let pasted;
@@ -164,7 +193,10 @@ try {
     if (pasted !== null) break;
     await delay(100);
   }
-  if (pasted !== "Alexandra") throw new Error("El puente no genero el evento de pegado esperado");
+  const pasteCount = await cdp.evaluate("window.__probePasteCount");
+  if (pasted !== "Alexandra\tFemale" || pasteCount !== 1) {
+    throw new Error("El puente no genero un unico pegado TSV horizontal");
+  }
 
   await cdp.evaluate(`(() => {
     const box = document.getElementById("t-name-box");
@@ -179,10 +211,11 @@ try {
   while (Date.now() < selectionDeadline) {
     result = await cdp.evaluate(`(() => {
       const host = document.getElementById("sheets-session-probe");
+      const panel = host?.shadowRoot?.querySelector(".panel-frame")?.contentDocument;
       return {
         status: host?.dataset.status || null,
         row: host?.dataset.row || null,
-        fields: host?.shadowRoot ? Array.from(host.shadowRoot.querySelectorAll(".field input"), input => input.value) : []
+        fields: panel ? Array.from(panel.querySelectorAll(".field input"), input => input.value) : []
       };
     })()`);
     if (result?.status === "ok" && result?.row === "3") break;
@@ -192,7 +225,7 @@ try {
     throw new Error("El formulario no siguio automaticamente el cambio a la fila 3");
   }
 
-  console.log("VALIDACION_OK: lectura real, cambio automatico de fila y puente de escritura confirmados.");
+  console.log("VALIDACION_OK: lectura, cambio de fila, foco aislado y pegado TSV unico confirmados.");
 } finally {
   cdp?.close();
   if (browser.pid) spawnSync("taskkill", ["/PID", String(browser.pid), "/T", "/F"], { stdio: "ignore", windowsHide: true });

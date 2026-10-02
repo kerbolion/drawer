@@ -32,12 +32,12 @@
 
   window.addEventListener("message", async (event) => {
     const message = event.data;
-    if (event.source !== window || message?.source !== SOURCE || message?.type !== "write-cell") return;
+    if (event.source !== window || message?.source !== SOURCE || message?.type !== "write-range") return;
 
     try {
       focusCell(message.reference);
       await wait(120);
-      paste(String(message.value ?? ""));
+      paste(String(message.tsv ?? ""));
       await wait(180);
       window.postMessage({ source: SOURCE, type: "write-result", requestId: message.requestId, ok: true }, location.origin);
     } catch (error) {

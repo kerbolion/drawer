@@ -25,18 +25,42 @@
   document.documentElement.appendChild(host);
 
   const shadow = host.attachShadow({ mode: "open" });
-  const styles = new CSSStyleSheet();
-  styles.replaceSync(`
+  const shellStyles = new CSSStyleSheet();
+  shellStyles.replaceSync(`
     :host { all: initial; }
-    *, *::before, *::after { box-sizing: border-box; }
-    .drawer {
+    .panel-frame {
       position: fixed; inset: 0 0 0 auto; z-index: 2147483647;
-      width: min(380px, 92vw); background: #fff; color: #172033;
-      border-left: 1px solid #dfe3e8; box-shadow: -8px 0 24px rgba(25, 35, 45, .12);
+      width: min(380px, 92vw); height: 100vh; border: 0; background: #fff;
+      box-shadow: -8px 0 24px rgba(25, 35, 45, .12);
+    }
+    .panel-frame[hidden], .reopen[hidden] { display: none; }
+    .reopen { position: fixed; right: 16px; top: 82px; z-index: 2147483647; border: 0; border-radius: 999px; padding: 10px 14px; background: #0b8043; color: #fff; box-shadow: 0 4px 14px rgba(0,0,0,.2); font: 700 12px Arial, sans-serif; cursor: pointer; }
+  `);
+  shadow.adoptedStyleSheets = [shellStyles];
+
+  const panelFrame = document.createElement("iframe");
+  panelFrame.className = "panel-frame";
+  panelFrame.title = "Detalles de la fila";
+  const reopen = document.createElement("button");
+  reopen.className = "reopen";
+  reopen.type = "button";
+  reopen.textContent = "Abrir formulario";
+  reopen.hidden = true;
+  shadow.append(panelFrame, reopen);
+
+  const panelDocument = panelFrame.contentDocument;
+  panelDocument.documentElement.lang = "es";
+  panelDocument.body.replaceChildren();
+  const panelStyles = panelDocument.createElement("style");
+  panelStyles.textContent = `
+    *, *::before, *::after { box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background: #fff; }
+    .drawer {
+      width: 100%; height: 100%; background: #fff; color: #172033;
+      border-left: 1px solid #dfe3e8;
       display: flex; flex-direction: column;
       font: 13px/1.45 Arial, sans-serif;
     }
-    .drawer[hidden], .reopen[hidden] { display: none; }
     header { padding: 18px 18px 14px; border-bottom: 1px solid #e8ebef; }
     .eyebrow { color: #0b8043; font-size: 10px; font-weight: 700; letter-spacing: .16em; }
     .title-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
@@ -57,12 +81,11 @@
     .meta { margin-bottom: 9px; color: #687386; font-size: 11px; }
     .save { width: 100%; border: 0; border-radius: 7px; padding: 11px 14px; background: #0b8043; color: #fff; font-weight: 700; cursor: pointer; }
     .save:disabled { background: #a8c9b8; cursor: default; }
-    .reopen { position: fixed; right: 16px; top: 82px; z-index: 2147483647; border: 0; border-radius: 999px; padding: 10px 14px; background: #0b8043; color: #fff; box-shadow: 0 4px 14px rgba(0,0,0,.2); font: 700 12px Arial, sans-serif; cursor: pointer; }
-  `);
-  shadow.adoptedStyleSheets = [styles];
+  `;
+  panelDocument.head.appendChild(panelStyles);
 
   function element(tag, className, text) {
-    const node = document.createElement(tag);
+    const node = panelDocument.createElement(tag);
     if (className) node.className = className;
     if (text !== undefined) node.textContent = text;
     return node;
@@ -93,20 +116,16 @@
   save.disabled = true;
   footer.append(meta, save);
   drawer.append(panelHeader, main, footer);
+  panelDocument.body.appendChild(drawer);
 
-  const reopen = element("button", "reopen", "Abrir formulario");
-  reopen.type = "button";
-  reopen.hidden = true;
-  shadow.append(drawer, reopen);
-
-  const ui = { drawer, close, reopen, status, fields, meta, save };
+  const ui = { frame: panelFrame, drawer, close, reopen, status, fields, meta, save };
 
   ui.close.addEventListener("click", () => {
-    ui.drawer.hidden = true;
+    ui.frame.hidden = true;
     ui.reopen.hidden = false;
   });
   ui.reopen.addEventListener("click", () => {
-    ui.drawer.hidden = false;
+    ui.frame.hidden = false;
     ui.reopen.hidden = true;
   });
   ui.save.addEventListener("click", saveChanges);
@@ -256,11 +275,9 @@
   function renderFields() {
     ui.fields.replaceChildren();
     state.fields.forEach((label, index) => {
-      const wrapper = document.createElement("label");
-      wrapper.className = "field";
-      const title = document.createElement("span");
-      title.textContent = label;
-      const input = document.createElement("input");
+      const wrapper = element("label", "field");
+      const title = element("span", "", label);
+      const input = element("input");
       input.type = "text";
       input.value = state.values[index] || "";
       input.dataset.column = String(index + 1);
@@ -272,7 +289,12 @@
 
   const wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
-  function writeCell(reference, value) {
+  function tsvValue(value) {
+    const text = String(value ?? "");
+    return /[\t\r\n"]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+  }
+
+  function writeRange(reference, values) {
     return new Promise((resolve, reject) => {
       const requestId = `${Date.now()}-${++state.writeRequest}`;
       const timeout = setTimeout(() => {
@@ -292,10 +314,10 @@
       window.addEventListener("message", receive);
       window.postMessage({
         source: "sheets-row-drawer",
-        type: "write-cell",
+        type: "write-range",
         requestId,
         reference,
-        value
+        tsv: values.map(tsvValue).join("\t")
       }, location.origin);
     });
   }
@@ -314,11 +336,12 @@
 
     state.saving = true;
     ui.save.disabled = true;
-    setStatus(`Guardando ${changes.length} campo(s)…`, "busy");
+    setStatus(`Pegando ${changes.length} campo(s) en un solo bloque…`, "busy");
     try {
-      for (const change of changes) {
-        await writeCell(`${columnName(change.index + 1)}${state.row}`, change.value);
-      }
+      const firstChanged = changes[0].index;
+      const lastChanged = changes[changes.length - 1].index;
+      const blockValues = inputs.slice(firstChanged, lastChanged + 1).map((input) => input.value);
+      await writeRange(`${columnName(firstChanged + 1)}${state.row}`, blockValues);
       let verified = false;
       for (let attempt = 0; attempt < 4 && !verified; attempt += 1) {
         await wait(attempt === 0 ? 450 : 600);
