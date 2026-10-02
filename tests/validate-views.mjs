@@ -559,7 +559,23 @@ try {
     throw new Error(`El modo ampliado de Calendario no persistio al reabrir: ${JSON.stringify(calendarExpansion)}`);
   }
 
+  const calendarSelectionBeforeClick = await cdp.evaluate(`({ box: document.getElementById("t-name-box").value, row: document.getElementById("sheets-session-probe").dataset.row })`);
   await cdp.evaluate(panelExpression('panel.querySelector(\'.calendar-item[data-sheet-row="2"]\').click();'));
+  await delay(250);
+  const calendarSelectionAfterClick = await cdp.evaluate(`({ box: document.getElementById("t-name-box").value, row: document.getElementById("sheets-session-probe").dataset.row })`);
+  if (calendarSelectionAfterClick.box !== calendarSelectionBeforeClick.box || calendarSelectionAfterClick.row !== calendarSelectionBeforeClick.row) {
+    throw new Error(`El evento del Calendario abrio su fila con un solo clic: ${JSON.stringify({ calendarSelectionBeforeClick, calendarSelectionAfterClick })}`);
+  }
+
+  await cdp.evaluate(panelExpression(`
+    panel.querySelector('.calendar-item[data-sheet-row="2"]').dispatchEvent(new MouseEvent("dblclick", {
+      bubbles: true,
+      cancelable: true,
+      composed: true,
+      detail: 2,
+      button: 0
+    }));
+  `));
   const calendarRowDeadline = Date.now() + 5_000;
   while (Date.now() < calendarRowDeadline) {
     selected = await cdp.evaluate(`({ box: document.getElementById("t-name-box").value, row: document.getElementById("sheets-session-probe").dataset.row })`);
@@ -570,7 +586,7 @@ try {
     throw new Error(`El evento no abrio su fila: ${JSON.stringify(selected)}`);
   }
 
-  console.log("VISTAS_OK: Kanban y Calendario amplian con persistencia independiente; Kanban escribe, limpia y conserva la ultima celda editada.");
+  console.log("VISTAS_OK: Kanban y Calendario amplian con persistencia independiente y abren fichas con doble clic.");
 } finally {
   cdp?.close();
   if (browser.pid) spawnSync("taskkill", ["/PID", String(browser.pid), "/T", "/F"], { stdio: "ignore", windowsHide: true });

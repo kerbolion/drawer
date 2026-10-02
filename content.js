@@ -1349,7 +1349,10 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
                     "data-sheet-row": String(row.number),
                     key: row.number,
                     type: "button",
-                    onClick: () => onOpenRow(row.number)
+                    onDoubleClick: () => onOpenRow(row.number),
+                    onKeyDown: (event) => {
+                      if (event.key === "Enter" || event.key === " ") onOpenRow(row.number);
+                    }
                   },
                   sheetViewRowTitle(row, columns)
                 ))
