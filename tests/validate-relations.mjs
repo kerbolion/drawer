@@ -426,7 +426,7 @@ try {
       text: popup?.textContent || ""
     };
   })()`);
-  if (!localizedDatePicker.workspaceClass || !localizedDatePicker.text.includes("Hoy") || !localizedDatePicker.text.includes("lumamijuvi")) {
+  if (!localizedDatePicker.workspaceClass || !localizedDatePicker.text.includes("Hoy") || !localizedDatePicker.text.includes("LunMarMiéJueVieSábDom")) {
     throw new Error(`El calendario no usÃ³ el estilo y locale de Workspace: ${JSON.stringify({ datePopup, localizedDatePicker })}`);
   }
   await closePanelPopup();
@@ -454,6 +454,26 @@ try {
   })()`);
   if (checkboxState.value !== "FALSE" || checkboxState.checked !== false) {
     throw new Error(`La casilla localizada no se normalizÃ³ para Sheets: ${JSON.stringify(checkboxState)}`);
+  }
+
+  const canonicalCheckboxSettings = await cdp.evaluate(`(() => {
+    const panel = document.getElementById("sheets-session-probe").shadowRoot.querySelector(".panel-frame").contentDocument;
+    panel.querySelector('[data-configure-column="3"]').click();
+    const checked = panel.querySelector('[name="checkedValue"]');
+    const unchecked = panel.querySelector('[name="uncheckedValue"]');
+    checked.value = "true";
+    unchecked.value = "false";
+    panel.querySelector("#srd-property-form").requestSubmit();
+    panel.querySelector('[data-configure-column="3"]').click();
+    const result = {
+      checked: panel.querySelector('[name="checkedValue"]')?.value,
+      unchecked: panel.querySelector('[name="uncheckedValue"]')?.value
+    };
+    panel.querySelector(".property-actions .secondary-button").click();
+    return result;
+  })()`);
+  if (canonicalCheckboxSettings.checked !== "TRUE" || canonicalCheckboxSettings.unchecked !== "FALSE") {
+    throw new Error(`Los valores booleanos no se normalizaron para Sheets: ${JSON.stringify(canonicalCheckboxSettings)}`);
   }
 
   sheets.Contactos.rows[0][1] = "Ana actualizada";
@@ -579,6 +599,10 @@ try {
     update(4, "Actualizada");
     panel.querySelector(".save").click();
   })()`);
+  setTimeout(() => {
+    sheets.Servicios.rows[0][1] = "C-9";
+    sheets.Servicios.rows[0][3] = "Actualizada";
+  }, 650);
   const checkboxPasteDeadline = Date.now() + 3_000;
   let checkboxBlockPaste = null;
   while (Date.now() < checkboxPasteDeadline) {
@@ -588,6 +612,62 @@ try {
   }
   if (checkboxBlockPaste !== "C-9\tFALSE\tActualizada") {
     throw new Error(`El bloque reinsertó el texto localizado de la casilla: ${JSON.stringify(checkboxBlockPaste)}`);
+  }
+  const blockSaveDeadline = Date.now() + 4_000;
+  while (Date.now() < blockSaveDeadline) {
+    const saveState = await cdp.evaluate('document.getElementById("sheets-session-probe")?.dataset.saveState');
+    if (saveState === "saved") break;
+    await delay(100);
+  }
+
+  sheets.Servicios.rows[0][2] = "";
+  setTimeout(() => {
+    sheets.Servicios.rows[0][2] = "TRUE";
+  }, 1_800);
+  await cdp.evaluate(`(() => {
+    window.__optimisticCheckboxPastes = [];
+    document.addEventListener("paste", event => {
+      window.__optimisticCheckboxPastes.push(event.clipboardData?.getData("text/plain") || "");
+    }, { capture: true });
+    const panel = document.getElementById("sheets-session-probe").shadowRoot.querySelector(".panel-frame").contentDocument;
+    panel.querySelector('[data-column="3"] input[type="checkbox"]').click();
+    panel.querySelector(".save").click();
+  })()`);
+  await delay(900);
+  const optimisticCheckbox = await cdp.evaluate(`(() => {
+    const host = document.getElementById("sheets-session-probe");
+    const panel = host.shadowRoot.querySelector(".panel-frame").contentDocument;
+    const control = panel.querySelector('[data-column="3"]');
+    return {
+      checked: control.querySelector('input[type="checkbox"]')?.checked,
+      value: control.dataset.serializedValue,
+      saveState: host.dataset.saveState,
+      pastes: window.__optimisticCheckboxPastes,
+      hiddenReaders: document.querySelectorAll('iframe[aria-hidden="true"]').length
+    };
+  })()`);
+  if (!optimisticCheckbox.checked || optimisticCheckbox.value !== "TRUE" || optimisticCheckbox.saveState !== "saving" || optimisticCheckbox.pastes.length !== 1 || optimisticCheckbox.hiddenReaders !== 0) {
+    throw new Error(`La verificación intermitente sobrescribió la casilla: ${JSON.stringify(optimisticCheckbox)}`);
+  }
+  const optimisticSaveDeadline = Date.now() + 6_000;
+  let optimisticResult;
+  while (Date.now() < optimisticSaveDeadline) {
+    optimisticResult = await cdp.evaluate(`(() => {
+      const host = document.getElementById("sheets-session-probe");
+      const panel = host.shadowRoot.querySelector(".panel-frame").contentDocument;
+      const control = panel.querySelector('[data-column="3"]');
+      return {
+        checked: control.querySelector('input[type="checkbox"]')?.checked,
+        value: control.dataset.serializedValue,
+        saveState: host.dataset.saveState,
+        pastes: window.__optimisticCheckboxPastes
+      };
+    })()`);
+    if (optimisticResult.saveState === "saved") break;
+    await delay(100);
+  }
+  if (!optimisticResult?.checked || optimisticResult.value !== "TRUE" || optimisticResult.saveState !== "saved" || optimisticResult.pastes.length !== 1) {
+    throw new Error(`La casilla no quedó estable después de verificar: ${JSON.stringify(optimisticResult)}`);
   }
   console.log("RELACIONES_OK: opciones con color, casillas localizadas, fecha y hora en español, tipos persistentes y caché confirmados.");
 } finally {

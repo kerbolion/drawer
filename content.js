@@ -57,9 +57,10 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
         }
       });
     } catch {}
+    return policy;
   }
 
-  installTrustedHtmlBridge(window);
+  const trustedHtmlPolicy = installTrustedHtmlBridge(window);
 
   if (!/\/spreadsheets\/d\/[^/]+\/edit/.test(location.pathname)) return;
   if (document.getElementById("sheets-session-probe")) return;
@@ -947,6 +948,15 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
     return String(value ?? "").trim();
   }
 
+  function normalizedCheckboxConfiguredValue(value, checked) {
+    const fallback = checked ? "TRUE" : "FALSE";
+    const text = comparable(value) || fallback;
+    const normalized = text.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase();
+    if (checked && ["TRUE", "VERDADERO"].includes(normalized)) return "TRUE";
+    if (!checked && ["FALSE", "FALSO"].includes(normalized)) return "FALSE";
+    return text;
+  }
+
   function cacheKey(kind, gid, row) {
     return `${CACHE_PREFIX}:${kind}:${encodeURIComponent(spreadsheetId())}:${encodeURIComponent(gid)}:${row}`;
   }
@@ -1052,8 +1062,8 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
         ? source.dateFormat
         : "DD/MM/YYYY",
       timeFormat: source.timeFormat === "12" ? "12" : "24",
-      checkedValue: String(source.checkedValue ?? "TRUE"),
-      uncheckedValue: String(source.uncheckedValue ?? "FALSE")
+      checkedValue: normalizedCheckboxConfiguredValue(source.checkedValue, true),
+      uncheckedValue: normalizedCheckboxConfiguredValue(source.uncheckedValue, false)
     };
   }
 
@@ -1195,53 +1205,48 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
     return String(clone.textContent || "").trim();
   }
 
-  function readRange(range, signal) {
-    return new Promise((resolve, reject) => {
-      const frame = document.createElement("iframe");
-      frame.hidden = true;
-      frame.setAttribute("aria-hidden", "true");
-      frame.src = embedUrl(range).href;
-      let finished = false;
+  async function fetchHtmlDocument(url, signal, timeoutMessage, timeoutMs) {
+    const controller = new AbortController();
+    let timedOut = false;
+    const abort = () => controller.abort(signal?.reason || new DOMException("Lectura cancelada", "AbortError"));
+    const timeout = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, timeoutMs);
+    if (signal?.aborted) abort();
+    else signal?.addEventListener("abort", abort, { once: true });
 
-      const timeout = setTimeout(() => finish(new Error("La vista HTML tardó demasiado en responder")), 12_000);
-      const abort = () => finish(new DOMException("Lectura cancelada", "AbortError"));
+    try {
+      const response = await fetch(url.href, {
+        credentials: "include",
+        cache: "no-store",
+        signal: controller.signal
+      });
+      if (!response.ok) throw new Error(`Google respondió ${response.status}`);
+      const html = await response.text();
+      const trustedHtml = trustedHtmlPolicy ? trustedHtmlPolicy.createHTML(html) : html;
+      return new DOMParser().parseFromString(trustedHtml, "text/html");
+    } catch (error) {
+      if (timedOut) throw new Error(timeoutMessage);
+      if (signal?.aborted) throw new DOMException("Lectura cancelada", "AbortError");
+      throw error;
+    } finally {
+      clearTimeout(timeout);
+      signal?.removeEventListener("abort", abort);
+    }
+  }
 
-      function finish(error, rows) {
-        if (finished) return;
-        finished = true;
-        clearTimeout(timeout);
-        signal?.removeEventListener("abort", abort);
-        frame.remove();
-        if (error) reject(error);
-        else resolve(rows);
-      }
-
-      frame.addEventListener("load", () => {
-        try {
-          const doc = frame.contentDocument;
-          const rows = Array.from(doc?.querySelectorAll("tbody tr") || []).flatMap((tr) => {
-            const rowHeader = tr.querySelector("th.row-headers-background");
-            if (!rowHeader) return [];
-            const number = Number(rowHeader.textContent.trim());
-            const cells = Array.from(
-              tr.querySelectorAll("td:not(.freezebar-cell)"),
-              readableCellText
-            );
-            return Number.isFinite(number) ? [{ number, cells }] : [];
-          });
-          if (!rows.length) throw new Error("La vista HTML no devolvió filas; revisa que tu sesión tenga acceso");
-          finish(null, rows);
-        } catch (error) {
-          finish(new Error(error instanceof Error ? error.message : String(error)));
-        }
-      }, { once: true });
-
-      if (signal?.aborted) abort();
-      else {
-        signal?.addEventListener("abort", abort, { once: true });
-        (document.body || document.documentElement).appendChild(frame);
-      }
+  async function readRange(range, signal) {
+    const doc = await fetchHtmlDocument(embedUrl(range), signal, "La vista HTML tardó demasiado en responder", 12_000);
+    const rows = Array.from(doc.querySelectorAll("tbody tr")).flatMap((tr) => {
+      const rowHeader = tr.querySelector("th.row-headers-background");
+      if (!rowHeader) return [];
+      const number = Number(rowHeader.textContent.trim());
+      const cells = Array.from(tr.querySelectorAll("td:not(.freezebar-cell)"), readableCellText);
+      return Number.isFinite(number) ? [{ number, cells }] : [];
     });
+    if (!rows.length) throw new Error("La vista HTML no devolvió filas; revisa que tu sesión tenga acceso");
+    return rows;
   }
 
   function sheetQueryUrl(sheetName, range) {
@@ -1254,51 +1259,24 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
     return url;
   }
 
-  function readSheetTable(sheetName, range, signal) {
-    return new Promise((resolve, reject) => {
-      const frame = document.createElement("iframe");
-      frame.hidden = true;
-      frame.setAttribute("aria-hidden", "true");
-      frame.src = sheetQueryUrl(sheetName, range).href;
-      let finished = false;
-
-      const timeout = setTimeout(() => finish(new Error(`La hoja ${sheetName} tardó demasiado en responder`)), 15_000);
-      const abort = () => finish(new DOMException("Lectura cancelada", "AbortError"));
-
-      function finish(error, table) {
-        if (finished) return;
-        finished = true;
-        clearTimeout(timeout);
-        signal?.removeEventListener("abort", abort);
-        frame.remove();
-        if (error) reject(error);
-        else resolve(table);
-      }
-
-      frame.addEventListener("load", () => {
-        try {
-          const table = frame.contentDocument?.querySelector("table");
-          if (!table) throw new Error(`Google no devolvió datos para la hoja ${sheetName}`);
-          const rows = Array.from(table.querySelectorAll("tr"), (tr) =>
-            Array.from(tr.querySelectorAll("td, th"), (cell) => cell.textContent.trim())
-          ).filter((cells) => cells.length);
-          const headers = rows[0] || [];
-          finish(null, {
-            name: sheetName,
-            headers,
-            rows: rows.slice(1).map((cells, index) => ({ number: index + 2, cells }))
-          });
-        } catch (error) {
-          finish(new Error(error instanceof Error ? error.message : String(error)));
-        }
-      }, { once: true });
-
-      if (signal?.aborted) abort();
-      else {
-        signal?.addEventListener("abort", abort, { once: true });
-        (document.body || document.documentElement).appendChild(frame);
-      }
-    });
+  async function readSheetTable(sheetName, range, signal) {
+    const doc = await fetchHtmlDocument(
+      sheetQueryUrl(sheetName, range),
+      signal,
+      `La hoja ${sheetName} tardó demasiado en responder`,
+      15_000
+    );
+    const table = doc.querySelector("table");
+    if (!table) throw new Error(`Google no devolvió datos para la hoja ${sheetName}`);
+    const rows = Array.from(table.querySelectorAll("tr"), (tr) =>
+      Array.from(tr.querySelectorAll("td, th"), (cell) => cell.textContent.trim())
+    ).filter((cells) => cells.length);
+    const headers = rows[0] || [];
+    return {
+      name: sheetName,
+      headers,
+      rows: rows.slice(1).map((cells, index) => ({ number: index + 2, cells }))
+    };
   }
 
   async function cachedSheetTable(sheetName, full, signal) {
@@ -2132,17 +2110,56 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
         return state.values[index];
       });
       await writeRange(`${columnName(firstChanged + 1)}${state.row}`, blockValues);
+      const optimisticValues = [...state.values];
+      blockValues.forEach((value, offset) => {
+        optimisticValues[firstChanged + offset] = String(value ?? "");
+      });
+      void writePersistentCache(cacheKey("row", state.gid, state.row), {
+        labels: [...state.fields],
+        values: optimisticValues,
+        updatedAt: Date.now(),
+        pendingWrite: true
+      });
+
       let verified = false;
-      for (let attempt = 0; attempt < 4 && !verified; attempt += 1) {
-        await wait(attempt === 0 ? 450 : 600);
-        state.headerCache.delete(`${spreadsheetId()}:${currentGid()}`);
-        state.sheetCache.clear();
-        await loadRow(state.row, true);
-        verified = changes.every((change) =>
-          valuesEqualForProperty(state.values[change.index], change.value, propertyForColumn(change.index))
-        );
+      let confirmedValues = null;
+      let verificationError = null;
+      const verificationDelays = [450, 700, 1_000, 1_500, 2_200];
+      for (const delay of verificationDelays) {
+        await wait(delay);
+        try {
+          const rows = await readRange(`A${state.row}:${MAX_COLUMN}${state.row}`);
+          const values = rows.find((item) => item.number === state.row)?.cells || [];
+          const width = Math.max(state.fields.length, values.length);
+          const freshValues = Array.from({ length: width }, (_, index) => values[index] || "");
+          verified = changes.every((change) =>
+            valuesEqualForProperty(freshValues[change.index], change.value, propertyForColumn(change.index))
+          );
+          if (verified) {
+            confirmedValues = freshValues.map((value, index) => {
+              const property = propertyForColumn(index);
+              return property.type === "checkbox"
+                ? serializeEditorValue(checkboxEditorValue(value, property), property)
+                : value;
+            });
+            break;
+          }
+        } catch (error) {
+          verificationError = error;
+        }
       }
-      if (!verified) throw new Error("Sheets no confirmó todos los valores; el pegado sintético puede estar bloqueado en este navegador");
+      if (!verified) {
+        throw new Error(verificationError?.message || "Sheets no confirmó todos los valores; el pegado sintético puede estar bloqueado en este navegador");
+      }
+      state.values = confirmedValues;
+      state.headerCache.delete(`${spreadsheetId()}:${currentGid()}`);
+      state.sheetCache.clear();
+      void writePersistentCache(cacheKey("row", state.gid, state.row), {
+        labels: [...state.fields],
+        values: [...confirmedValues],
+        updatedAt: Date.now()
+      });
+      startRelationships(state.fields, state.values, state.request?.signal);
       setStatus(`Guardado y verificado en la fila ${state.row}`);
     } catch (error) {
       setStatus(error.message, "error");

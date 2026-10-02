@@ -2,7 +2,7 @@
 
 Prototipo mínimo para validar el flujo antes de construir la extensión completa.
 
-La interfaz usa Ant Design `5.15.4` y replica los tokens claros del drawer de `workspace-antd`: color primario, superficies, bordes, tipografía, radios y sombras. El bundle queda incluido localmente en la extensión y no descarga estilos ni scripts al abrir Google Sheets.
+La interfaz usa Ant Design `5.29.3`, la misma versión instalada en `workspace-antd`, y replica sus tokens claros: color primario, superficies, bordes, tipografía, radios y sombras. El bundle queda incluido localmente en la extensión y no descarga estilos ni scripts al abrir Google Sheets.
 
 - Lee la fila seleccionada mediante la vista HTML autenticada de Google Sheets.
 - Detecta automáticamente los cambios de celda o fila.
@@ -15,7 +15,7 @@ La interfaz usa Ant Design `5.15.4` y replica los tokens claros del drawer de `w
 - Usa los componentes reales de Ant Design para editar cada tipo y muestra el mismo icono de propiedad que Workspace.
 - Permite agregar, eliminar y colorear las opciones de selección y Estado con la paleta de Workspace.
 - Muestra calendarios y selectores de hora en español con el mismo comportamiento responsive de Workspace.
-- Normaliza `VERDADERO`/`FALSO` a los valores válidos de las casillas de Sheets al guardar bloques.
+- Normaliza `true`/`false` y `VERDADERO`/`FALSO` a `TRUE`/`FALSE`, conserva la casilla visible mientras Sheets confirma el guardado y verifica en segundo plano sin volver a renderizar el formulario.
 - Muestra la actividad con el indicador del encabezado: spinner azul durante la lectura o el guardado y check verde al terminar, sin mensajes rutinarios dentro del formulario.
 - Aísla el formulario para que `Ctrl+V` permanezca dentro del input.
 - Guarda el rango editado mediante un único pegado TSV horizontal de Sheets.

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Sheets Row Drawer - Session Probe",
-  "version": "0.6.2",
+  "version": "0.6.3",
   "description": "Valida lectura y escritura de filas usando la sesion abierta de Google Sheets.",
   "permissions": ["storage"],
   "content_scripts": [
