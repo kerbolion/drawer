@@ -1,7 +1,59 @@
-import { antdTokens, workspaceTokens } from "./theme.js";
+import React from "react";
+import { flushSync } from "react-dom";
+import { createRoot } from "react-dom/client";
+import { StyleProvider } from "@ant-design/cssinjs";
+import Button from "antd/es/button/index.js";
+import Checkbox from "antd/es/checkbox/index.js";
+import ConfigProvider from "antd/es/config-provider/index.js";
+import DatePicker from "antd/es/date-picker/index.js";
+import Input from "antd/es/input/index.js";
+import InputNumber from "antd/es/input-number/index.js";
+import Select from "antd/es/select/index.js";
+import Space from "antd/es/space/index.js";
+import TimePicker from "antd/es/time-picker/index.js";
+import {
+  CalculatorOutlined,
+  CalendarOutlined,
+  CheckSquareOutlined,
+  LinkOutlined,
+  MailOutlined,
+  PhoneOutlined,
+  UnorderedListOutlined
+} from "@ant-design/icons";
+import esES from "antd/es/locale/es_ES.js";
+import dayjs from "dayjs";
+import { CircleDollarSign, Clock3, Hash, ListChecks, Type } from "lucide-react";
+import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
 
 (() => {
   "use strict";
+
+  function installTrustedHtmlBridge(view) {
+    const factory = view?.trustedTypes;
+    const prototype = view?.Element?.prototype;
+    const descriptor = prototype && Object.getOwnPropertyDescriptor(prototype, "innerHTML");
+    if (!factory || !descriptor?.get || !descriptor?.set || !descriptor.configurable) return;
+    let policy = null;
+    for (const name of ["goog#html", "default", "sheets-row-drawer#html"]) {
+      try {
+        policy = factory.createPolicy(name, { createHTML: (value) => value });
+        if (policy) break;
+      } catch {}
+    }
+    if (!policy) return;
+    try {
+      Object.defineProperty(prototype, "innerHTML", {
+        configurable: true,
+        enumerable: descriptor.enumerable,
+        get: descriptor.get,
+        set(value) {
+          descriptor.set.call(this, typeof value === "string" ? policy.createHTML(value) : value);
+        }
+      });
+    } catch {}
+  }
+
+  installTrustedHtmlBridge(window);
 
   if (!/\/spreadsheets\/d\/[^/]+\/edit/.test(location.pathname)) return;
   if (document.getElementById("sheets-session-probe")) return;
@@ -93,6 +145,7 @@ import { antdTokens, workspaceTokens } from "./theme.js";
   shadow.append(panelFrame, reopen);
 
   const panelDocument = panelFrame.contentDocument;
+  installTrustedHtmlBridge(panelFrame.contentWindow);
   panelDocument.documentElement.lang = "es";
   panelDocument.body.replaceChildren();
   const panelStyles = panelDocument.createElement("style");
@@ -190,34 +243,20 @@ import { antdTokens, workspaceTokens } from "./theme.js";
       font-weight: 700; text-overflow: ellipsis; white-space: nowrap;
     }
     .field-configure {
-      flex: 0 0 auto; width: 26px; height: 26px; border: 0; border-radius: ${antdTokens.borderRadiusSM}px;
-      background: transparent; color: ${antdTokens.colorTextTertiary}; cursor: pointer; font-size: 18px;
-      font-weight: 700; line-height: 1; opacity: .55;
+      display: inline-flex; flex: 0 0 auto; align-items: center; justify-content: center;
+      width: 28px; height: 28px; border: 0; border-radius: 50%;
+      background: ${antdTokens.colorPrimaryBg}; color: ${antdTokens.colorPrimary}; cursor: pointer;
+      line-height: 1; opacity: 1; transition: color ${antdTokens.motionDurationMid}, background ${antdTokens.motionDurationMid};
     }
-    .field:hover .field-configure, .field-configure:focus-visible { opacity: 1; }
-    .field-configure:hover { background: ${antdTokens.colorFillTertiary}; color: ${antdTokens.colorPrimary}; }
+    .field-configure svg { display: block; width: 14px; height: 14px; }
+    .field-configure:hover, .field-configure:focus-visible { background: ${antdTokens.colorPrimaryBgHover}; color: ${antdTokens.colorPrimaryHover}; }
     .field-editor { min-width: 0; }
-    .field-control {
-      width: 100%; min-height: ${antdTokens.controlHeight}px;
-      border: 1px solid ${antdTokens.colorBorder}; border-radius: ${antdTokens.borderRadius}px;
-      padding: 4px 11px; background: ${antdTokens.colorBgContainer}; color: ${antdTokens.colorText};
-      transition: border-color ${antdTokens.motionDurationMid}, box-shadow ${antdTokens.motionDurationMid};
-    }
-    textarea.field-control { min-height: 72px; resize: vertical; line-height: 1.5; }
-    select.field-control[multiple] { min-height: 92px; padding-block: 6px; }
-    .field-control:hover { border-color: ${antdTokens.colorPrimaryHover}; }
-    .field-control:focus { border-color: ${antdTokens.colorPrimary}; outline: 0; box-shadow: 0 0 0 ${antdTokens.controlOutlineWidth}px ${antdTokens.controlOutline}; }
-    .checkbox-control {
-      display: inline-flex; align-items: center; gap: 9px; min-height: ${antdTokens.controlHeight}px;
-      color: ${antdTokens.colorText}; cursor: pointer;
-    }
-    .checkbox-control input { width: 16px; height: 16px; accent-color: ${antdTokens.colorPrimary}; }
-    .input-affix { position: relative; }
-    .input-affix .field-control { padding-left: 34px; }
-    .input-prefix {
-      position: absolute; top: 50%; left: 12px; z-index: 1; color: ${antdTokens.colorTextTertiary};
-      transform: translateY(-50%); pointer-events: none;
-    }
+    .antd-field-control { width: 100%; min-width: 0; }
+    .antd-field-control > .ant-input-number,
+    .antd-field-control > .ant-picker,
+    .antd-field-control > .ant-select,
+    .antd-field-control > .ant-input,
+    .antd-field-control > .ant-space-compact { width: 100%; }
     .fields[aria-busy="true"] { cursor: progress; }
     .property-drawer {
       position: fixed; inset: 0; z-index: 20; display: flex; flex-direction: column;
@@ -249,6 +288,13 @@ import { antdTokens, workspaceTokens } from "./theme.js";
     textarea.property-input { min-height: 116px; resize: vertical; line-height: 1.5; }
     .property-input:hover { border-color: ${antdTokens.colorPrimaryHover}; }
     .property-input:focus { border-color: ${antdTokens.colorPrimary}; outline: 0; box-shadow: 0 0 0 ${antdTokens.controlOutlineWidth}px ${antdTokens.controlOutline}; }
+    .property-type-host { width: 100%; }
+    .property-type-option { display: inline-flex; align-items: center; gap: 8px; }
+    .property-type-option-icon {
+      display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px;
+      border-radius: 50%; background: ${antdTokens.colorPrimaryBg}; color: ${antdTokens.colorPrimary};
+    }
+    .property-type-option-icon svg { display: block; width: 14px; height: 14px; }
     .property-help { margin-top: 6px; color: ${antdTokens.colorTextTertiary}; font-size: 12px; }
     .property-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
     .property-source {
@@ -307,6 +353,201 @@ import { antdTokens, workspaceTokens } from "./theme.js";
     if (className) node.className = className;
     if (text !== undefined) node.textContent = text;
     return node;
+  }
+
+  const datePickerLocale = {
+    ...esES.DatePicker,
+    lang: { ...esES.DatePicker.lang, ok: "OK" }
+  };
+
+  function typeIcon(type, size = 14) {
+    const lucideProps = { size, strokeWidth: 2 };
+    const icons = {
+      text: () => React.createElement(Type, lucideProps),
+      longText: () => React.createElement(UnorderedListOutlined),
+      number: () => React.createElement(Hash, lucideProps),
+      currency: () => React.createElement(CircleDollarSign, lucideProps),
+      date: () => React.createElement(CalendarOutlined),
+      datetime: () => React.createElement(CalendarOutlined),
+      time: () => React.createElement(Clock3, lucideProps),
+      select: () => React.createElement(UnorderedListOutlined),
+      multiSelect: () => React.createElement(ListChecks, lucideProps),
+      status: () => React.createElement(CalculatorOutlined),
+      checkbox: () => React.createElement(CheckSquareOutlined),
+      url: () => React.createElement(LinkOutlined),
+      phone: () => React.createElement(PhoneOutlined),
+      email: () => React.createElement(MailOutlined)
+    };
+    return (icons[type] || icons.text)();
+  }
+
+  function antdTree(child) {
+    return React.createElement(
+      StyleProvider,
+      { container: panelDocument.head },
+      React.createElement(
+        ConfigProvider,
+        {
+          theme: workspaceThemeConfig,
+          locale: esES,
+          getPopupContainer: () => panelDocument.body
+        },
+        child
+      )
+    );
+  }
+
+  function renderTypeIcon(button, type) {
+    if (!button._iconRoot) button._iconRoot = createRoot(button);
+    flushSync(() => button._iconRoot.render(typeIcon(type)));
+  }
+
+  function updateAntdControl(host, property, nextValue, refresh) {
+    host._editorValue = nextValue;
+    host._value = serializeEditorValue(nextValue, property);
+    host.dataset.serializedValue = host._value;
+    refresh();
+  }
+
+  class FieldErrorBoundary extends React.Component {
+    constructor(props) {
+      super(props);
+      this.state = { error: null };
+    }
+
+    static getDerivedStateFromError(error) {
+      return { error };
+    }
+
+    componentDidCatch(error) {
+      this.props.host.dataset.renderError = error?.message || String(error);
+    }
+
+    render() {
+      if (this.state.error) return React.createElement("span", { className: "field-render-error" }, "No se pudo mostrar este campo");
+      return this.props.children;
+    }
+  }
+
+  function AntFieldControl({ host, property }) {
+    const [, refresh] = React.useReducer((value) => value + 1, 0);
+    const value = host._editorValue;
+    const update = (nextValue) => updateAntdControl(host, property, nextValue, refresh);
+    const fullWidth = { width: "100%" };
+
+    if (property.type === "longText") {
+      return React.createElement(Input.TextArea, {
+        value: String(value ?? ""),
+        autoSize: { minRows: 2, maxRows: 6 },
+        onChange: (event) => update(event.target.value)
+      });
+    }
+
+    if (property.type === "number") {
+      return React.createElement(InputNumber, {
+        value: value === "" ? null : value,
+        controls: true,
+        onChange: update,
+        style: fullWidth
+      });
+    }
+
+    if (property.type === "currency") {
+      return React.createElement(InputNumber, {
+        value: value === "" ? null : value,
+        prefix: property.currencySymbol || "$",
+        precision: Number(property.currencyDecimals ?? 2),
+        controls: true,
+        onChange: update,
+        style: fullWidth
+      });
+    }
+
+    if (["select", "status"].includes(property.type)) {
+      const values = [...new Set([...(property.options || []), ...(value ? [String(value)] : [])])];
+      return React.createElement(Select, {
+        allowClear: true,
+        value: value || undefined,
+        onChange: (nextValue) => update(nextValue || ""),
+        options: values.map((option) => ({ value: option, label: option })),
+        style: fullWidth
+      });
+    }
+
+    if (property.type === "multiSelect") {
+      const selected = Array.isArray(value) ? value : [];
+      const values = [...new Set([...(property.options || []), ...selected])];
+      return React.createElement(Select, {
+        mode: "multiple",
+        allowClear: true,
+        value: selected,
+        onChange: update,
+        options: values.map((option) => ({ value: option, label: option })),
+        style: fullWidth
+      });
+    }
+
+    if (["date", "datetime"].includes(property.type)) {
+      const usesTime = property.type === "datetime";
+      const uses12Hours = property.timeFormat === "12";
+      const timeFormat = uses12Hours ? "h:mm A" : "HH:mm";
+      const format = usesTime ? `${property.dateFormat} ${timeFormat}` : property.dateFormat;
+      const pickerValue = value && dayjs(value).isValid() ? dayjs(value) : null;
+      return React.createElement(DatePicker, {
+        value: pickerValue,
+        locale: datePickerLocale,
+        placement: "bottomRight",
+        showTime: usesTime ? { format: timeFormat, use12Hours: uses12Hours } : false,
+        format,
+        onChange: (date) => update(date ? date.format(usesTime ? "YYYY-MM-DDTHH:mm" : "YYYY-MM-DD") : ""),
+        style: fullWidth
+      });
+    }
+
+    if (property.type === "time") {
+      const uses12Hours = property.timeFormat === "12";
+      const timeFormat = uses12Hours ? "h:mm A" : "HH:mm";
+      const pickerValue = value && dayjs(`2000-01-01T${value}`).isValid() ? dayjs(`2000-01-01T${value}`) : null;
+      return React.createElement(TimePicker, {
+        value: pickerValue,
+        format: timeFormat,
+        use12Hours: uses12Hours,
+        onChange: (time) => update(time ? time.format("HH:mm") : ""),
+        style: fullWidth
+      });
+    }
+
+    if (property.type === "checkbox") {
+      return React.createElement(Checkbox, {
+        checked: Boolean(value),
+        onChange: (event) => update(event.target.checked)
+      });
+    }
+
+    const textValue = String(value ?? "");
+    const input = React.createElement(Input, {
+      value: textValue,
+      type: property.type === "email" ? "email" : property.type === "phone" ? "tel" : "text",
+      placeholder: property.type === "url" ? "https://" : property.type === "email" ? "correo@dominio.com" : property.type === "phone" ? "+506" : undefined,
+      onChange: (event) => update(event.target.value)
+    });
+
+    if (!["url", "phone", "email"].includes(property.type)) return input;
+    const action = {
+      url: { label: "Abrir", icon: React.createElement(LinkOutlined), href: /^https?:\/\//i.test(textValue) ? textValue : `https://${textValue}` },
+      phone: { label: "Llamar", icon: React.createElement(PhoneOutlined), href: `tel:${textValue}` },
+      email: { label: "Enviar", icon: React.createElement(MailOutlined), href: `mailto:${textValue}` }
+    }[property.type];
+    return React.createElement(
+      Space.Compact,
+      { block: true },
+      input,
+      React.createElement(Button, {
+        disabled: !textValue.trim(),
+        icon: action.icon,
+        onClick: () => panelFrame.contentWindow.open(action.href, property.type === "url" ? "_blank" : "_self", "noopener,noreferrer")
+      }, action.label)
+    );
   }
 
   const drawer = element("aside", "drawer");
@@ -400,16 +641,14 @@ import { antdTokens, workspaceTokens } from "./theme.js";
   propertyNameItem.append(propertyNameLabel, propertyName);
   const propertyTypeItem = element("div", "property-form-item");
   const propertyTypeLabel = element("label", "", "Tipo");
-  propertyTypeLabel.htmlFor = "srd-property-type";
-  const propertyType = element("select", "property-input");
+  propertyTypeLabel.htmlFor = "srd-property-type-select";
+  const propertyType = element("input");
   propertyType.id = "srd-property-type";
   propertyType.name = "type";
-  for (const item of FIELD_TYPES) {
-    const option = element("option", "", item.label);
-    option.value = item.value;
-    propertyType.appendChild(option);
-  }
-  propertyTypeItem.append(propertyTypeLabel, propertyType);
+  propertyType.type = "hidden";
+  const propertyTypeHost = element("div", "property-type-host");
+  propertyTypeHost.id = "srd-property-type-select";
+  propertyTypeItem.append(propertyTypeLabel, propertyType, propertyTypeHost);
   const propertySettings = element("div", "property-settings");
   propertyForm.append(propertySource, propertyNameItem, propertyTypeItem, propertySettings);
   propertyBody.appendChild(propertyForm);
@@ -433,6 +672,7 @@ import { antdTokens, workspaceTokens } from "./theme.js";
     propertySource,
     propertyName,
     propertyType,
+    propertyTypeHost,
     propertySettings,
     propertyCancel,
     propertySave
@@ -448,7 +688,10 @@ import { antdTokens, workspaceTokens } from "./theme.js";
   });
   ui.save.addEventListener("click", saveChanges);
   ui.propertyCancel.addEventListener("click", closePropertyEditor);
-  ui.propertyType.addEventListener("change", renderPropertySettings);
+  ui.propertyType.addEventListener("change", () => {
+    renderPropertyTypeSelect();
+    renderPropertySettings();
+  });
   ui.propertyForm.addEventListener("submit", savePropertyConfiguration);
 
   function spreadsheetId() {
@@ -1181,104 +1424,59 @@ import { antdTokens, workspaceTokens } from "./theme.js";
       .filter(Boolean);
   }
 
-  function configureSelect(control, property, rawValue) {
-    const selected = property.type === "multiSelect" ? splitMultipleValues(rawValue) : [String(rawValue ?? "").trim()].filter(Boolean);
-    const values = [...new Set([...(property.options || []), ...selected])];
-    const signature = JSON.stringify(values);
-    if (control.dataset.options !== signature) {
-      control.replaceChildren();
-      if (property.type !== "multiSelect") {
-        const empty = element("option", "", "Sin selección");
-        empty.value = "";
-        control.appendChild(empty);
-      }
-      for (const value of values) {
-        const option = element("option", "", value);
-        option.value = value;
-        control.appendChild(option);
-      }
-      control.dataset.options = signature;
-    }
-  }
-
   function createFieldControl(property, index) {
-    let control;
-    if (property.type === "longText") {
-      control = element("textarea", "field-control");
-      control.rows = 3;
-    } else if (["select", "multiSelect", "status"].includes(property.type)) {
-      control = element("select", "field-control");
-      control.multiple = property.type === "multiSelect";
-    } else if (property.type === "checkbox") {
-      const label = element("label", "checkbox-control");
-      control = element("input");
-      control.type = "checkbox";
-      const text = element("span", "checkbox-label", "Activado");
-      label.append(control, text);
-      control.addEventListener("change", () => {
-        const columnIndex = Number(control.dataset.column) - 1;
-        const currentProperty = propertyForColumn(columnIndex);
-        text.textContent = control.checked ? currentProperty.checkedValue : currentProperty.uncheckedValue;
-      });
-      control.dataset.container = "checkbox";
-      control._fieldContainer = label;
-    } else {
-      control = element("input", "field-control");
-      const inputTypes = { date: "date", datetime: "datetime-local", time: "time", url: "url", phone: "tel", email: "email" };
-      control.type = inputTypes[property.type] || (["number", "currency"].includes(property.type) ? "number" : "text");
-      if (["number", "currency"].includes(property.type)) control.step = "any";
-    }
+    const control = element("div", "antd-field-control");
     control.dataset.column = String(index + 1);
     control.dataset.fieldType = property.type;
-    control.autocomplete = "off";
+    control.dataset.fieldHost = "";
     control.setAttribute("aria-label", property.name);
-    if (property.type === "currency") {
-      const affix = element("div", "input-affix");
-      const prefix = element("span", "input-prefix", property.currencySymbol);
-      affix.append(prefix, control);
-      control._fieldContainer = affix;
-    }
     return control;
   }
 
-  function setControlValue(control, rawValue, property) {
+  function editorValueFromRaw(rawValue, property) {
     const text = String(rawValue ?? "");
-    control.setAttribute("aria-label", property.name);
-    if (["select", "multiSelect", "status"].includes(property.type)) configureSelect(control, property, text);
     if (property.type === "checkbox") {
-      control.checked = comparable(text).toLowerCase() === comparable(property.checkedValue).toLowerCase();
-      const checkboxLabel = control.parentElement?.querySelector(".checkbox-label");
-      if (checkboxLabel) checkboxLabel.textContent = control.checked ? property.checkedValue : property.uncheckedValue;
-      return;
+      return comparable(text).toLowerCase() === comparable(property.checkedValue).toLowerCase();
     }
-    if (property.type === "multiSelect") {
-      const selected = new Set(splitMultipleValues(text));
-      for (const option of control.options) option.selected = selected.has(option.value);
-      return;
-    }
-    if (property.type === "date") control.value = dateInputValue(text, property.dateFormat);
-    else if (property.type === "datetime") control.value = datetimeInputValue(text, property);
-    else if (property.type === "time") control.value = timeInputValue(text);
-    else if (["number", "currency"].includes(property.type)) {
+    if (property.type === "multiSelect") return splitMultipleValues(text);
+    if (property.type === "date") return dateInputValue(text, property.dateFormat);
+    if (property.type === "datetime") return datetimeInputValue(text, property);
+    if (property.type === "time") return timeInputValue(text);
+    if (["number", "currency"].includes(property.type)) {
       const number = parseNumber(text, property);
-      control.value = number === null ? "" : String(number);
-    } else control.value = text;
-    if (property.type === "currency") {
-      const prefix = control.parentElement?.querySelector(".input-prefix");
-      if (prefix) prefix.textContent = property.currencySymbol;
+      return number === null ? "" : number;
     }
+    return text;
   }
 
-  function controlValue(control, property) {
-    if (property.type === "checkbox") return control.checked ? property.checkedValue : property.uncheckedValue;
-    if (property.type === "multiSelect") return Array.from(control.selectedOptions, (option) => option.value).join(", ");
-    if (property.type === "date") return formattedDate(control.value, property.dateFormat);
+  function serializeEditorValue(value, property) {
+    if (property.type === "checkbox") return value ? property.checkedValue : property.uncheckedValue;
+    if (property.type === "multiSelect") return (Array.isArray(value) ? value : []).join(", ");
+    if (property.type === "date") return formattedDate(value, property.dateFormat);
     if (property.type === "datetime") {
-      const [date, time] = String(control.value || "").split("T");
+      const [date, time] = String(value || "").split("T");
       return date && time ? `${formattedDate(date, property.dateFormat)} ${formattedTime(time, property.timeFormat)}` : "";
     }
-    if (property.type === "time") return formattedTime(control.value, property.timeFormat);
-    return String(control.value ?? "");
+    if (property.type === "time") return formattedTime(value, property.timeFormat);
+    return String(value ?? "");
+  }
+
+  function setControlValue(control, rawValue, property) {
+    control.setAttribute("aria-label", property.name);
+    control._editorValue = editorValueFromRaw(rawValue, property);
+    control._value = serializeEditorValue(control._editorValue, property);
+    control.dataset.serializedValue = control._value;
+    if (!control._reactRoot) control._reactRoot = createRoot(control);
+    const editor = React.createElement(
+      FieldErrorBoundary,
+      { host: control },
+      React.createElement(AntFieldControl, { host: control, property })
+    );
+    flushSync(() => control._reactRoot.render(antdTree(editor)));
+  }
+
+  function controlValue(control) {
+    return String(control._value ?? "");
   }
 
   function valuesEqualForProperty(left, right, property) {
@@ -1438,7 +1636,7 @@ import { antdTokens, workspaceTokens } from "./theme.js";
         wrapper.replaceChildren();
         heading = element("div", "field-label");
         title = element("span", "field-label-text");
-        configure = element("button", "field-configure", "⋯");
+        configure = element("button", "field-configure");
         configure.type = "button";
         configure.addEventListener("click", () => openPropertyEditor(Number(configure.dataset.configureColumn) - 1));
         heading.append(title, configure);
@@ -1452,11 +1650,13 @@ import { antdTokens, workspaceTokens } from "./theme.js";
       configure.dataset.configureColumn = String(index + 1);
       configure.title = `Configurar ${property.name || sourceLabel}`;
       configure.setAttribute("aria-label", `Configurar ${property.name || sourceLabel}`);
+      renderTypeIcon(configure, property.type);
       wrapper.dataset.fieldType = property.type;
       let control = editor.querySelector("[data-column]");
       if (!control || control.dataset.fieldType !== property.type) {
+        if (control?._reactRoot) flushSync(() => control._reactRoot.unmount());
         control = createFieldControl(property, index);
-        editor.replaceChildren(control._fieldContainer || control);
+        editor.replaceChildren(control);
       }
       control.dataset.column = String(index + 1);
       const nextValue = drafts.has(index) ? drafts.get(index) : (state.values[index] || "");
@@ -1464,6 +1664,10 @@ import { antdTokens, workspaceTokens } from "./theme.js";
     });
 
     for (let index = existing.length - 1; index >= state.fields.length; index -= 1) {
+      const staleControl = existing[index].querySelector("[data-column]");
+      const staleConfigure = existing[index].querySelector(".field-configure");
+      if (staleControl?._reactRoot) flushSync(() => staleControl._reactRoot.unmount());
+      if (staleConfigure?._iconRoot) flushSync(() => staleConfigure._iconRoot.unmount());
       existing[index].remove();
     }
   }
@@ -1498,6 +1702,38 @@ import { antdTokens, workspaceTokens } from "./theme.js";
     item.append(labelNode, control);
     if (options.help) item.appendChild(element("div", "property-help", options.help));
     return item;
+  }
+
+  function PropertyTypeControl({ initialValue }) {
+    const [value, setValue] = React.useState(initialValue);
+    return React.createElement(Select, {
+      id: "srd-property-type-picker",
+      value,
+      onChange: (nextValue) => {
+        setValue(nextValue);
+        ui.propertyType.value = nextValue;
+        renderPropertySettings();
+      },
+      options: FIELD_TYPES.map((item) => ({
+        value: item.value,
+        label: React.createElement(
+          "span",
+          { className: "property-type-option" },
+          React.createElement("span", { className: "property-type-option-icon" }, typeIcon(item.value, 15)),
+          React.createElement("span", null, item.label)
+        )
+      })),
+      style: { width: "100%" }
+    });
+  }
+
+  function renderPropertyTypeSelect() {
+    if (!ui.propertyTypeHost._reactRoot) ui.propertyTypeHost._reactRoot = createRoot(ui.propertyTypeHost);
+    const selector = React.createElement(PropertyTypeControl, {
+      key: `${state.propertyColumn}:${ui.propertyType.value}`,
+      initialValue: ui.propertyType.value
+    });
+    flushSync(() => ui.propertyTypeHost._reactRoot.render(antdTree(selector)));
   }
 
   function renderPropertySettings() {
@@ -1562,6 +1798,7 @@ import { antdTokens, workspaceTokens } from "./theme.js";
     ui.propertySource.textContent = `Columna ${columnName(index + 1)} · encabezado en Sheets: ${property.sourceHeader || "sin encabezado"}`;
     ui.propertyName.value = property.name;
     ui.propertyType.value = property.type;
+    renderPropertyTypeSelect();
     renderPropertySettings();
     ui.propertyDrawer.hidden = false;
     requestAnimationFrame(() => ui.propertyName.focus());

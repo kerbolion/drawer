@@ -164,7 +164,7 @@ try {
       relatedStatus: panel?.querySelector(".related-status")?.textContent || "",
       relatedStatusHidden: panel?.querySelector(".related-status")?.hidden ?? false,
       saveState: host?.dataset.saveState || null,
-      fields: panel ? Array.from(panel.querySelectorAll(".field [data-column]"), input => input.value) : [],
+      fields: panel ? Array.from(panel.querySelectorAll(".field [data-column]"), input => input.dataset.serializedValue || "") : [],
       relations: panel ? Array.from(panel.querySelectorAll(".relation"), relation => ({
         title: relation.querySelector(".relation-title")?.textContent || "",
         count: relation.querySelector(".relation-count")?.textContent || "",
@@ -183,6 +183,68 @@ try {
       await delay(200);
     }
     throw new Error(`No aparecio la relacion ${title}: ${JSON.stringify(result)}`);
+  }
+
+  async function clickPanelNode(selector) {
+    const point = await cdp.evaluate(`(() => {
+      const host = document.getElementById("sheets-session-probe");
+      const frame = host.shadowRoot.querySelector(".panel-frame");
+      const nodes = frame.contentDocument.querySelectorAll(${JSON.stringify(selector)});
+      const node = nodes[nodes.length - 1];
+      if (!node) return null;
+      const frameRect = frame.getBoundingClientRect();
+      const nodeRect = node.getBoundingClientRect();
+      return {
+        x: frameRect.left + nodeRect.left + nodeRect.width / 2,
+        y: frameRect.top + nodeRect.top + nodeRect.height / 2
+      };
+    })()`);
+    if (!point) throw new Error(`No se encontrÃ³ el control ${selector}`);
+    await cdp.command("Input.dispatchMouseEvent", { type: "mousePressed", ...point, button: "left", clickCount: 1 });
+    await cdp.command("Input.dispatchMouseEvent", { type: "mouseReleased", ...point, button: "left", clickCount: 1 });
+    return point;
+  }
+
+  async function waitForPanelPopup(selector, expectedText = "") {
+    const deadline = Date.now() + 2_000;
+    let popup;
+    while (Date.now() < deadline) {
+      popup = await cdp.evaluate(`(() => {
+        const panel = document.getElementById("sheets-session-probe").shadowRoot.querySelector(".panel-frame").contentDocument;
+        const nodes = panel.querySelectorAll(${JSON.stringify(selector)});
+        const node = nodes[nodes.length - 1];
+        if (!node) return { visible: false, text: "" };
+        const rect = node.getBoundingClientRect();
+        const style = panel.defaultView.getComputedStyle(node);
+        const visible = rect.width > 0 && rect.height > 0 && rect.left > -rect.width && rect.top > -rect.height && style.visibility !== "hidden";
+        return { visible, text: node.textContent || "", rect: { left: rect.left, top: rect.top, width: rect.width, height: rect.height } };
+      })()`);
+      if (popup.visible && (!expectedText || popup.text.includes(expectedText))) {
+        await delay(120);
+        return popup;
+      }
+      await delay(50);
+    }
+    throw new Error(`No se abriÃ³ ${selector}: ${JSON.stringify(popup)}`);
+  }
+
+  async function closePanelPopup() {
+    await cdp.command("Input.dispatchKeyEvent", { type: "rawKeyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+    await cdp.command("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+    await delay(80);
+  }
+
+  async function configureColumn3(type, options = "") {
+    await cdp.evaluate(`(() => {
+      const panel = document.getElementById("sheets-session-probe").shadowRoot.querySelector(".panel-frame").contentDocument;
+      panel.querySelector('[data-configure-column="3"]').click();
+      const typeSelect = panel.querySelector("#srd-property-type");
+      typeSelect.value = ${JSON.stringify(type)};
+      typeSelect.dispatchEvent(new Event("change", { bubbles: true }));
+      const optionInput = panel.querySelector('[name="options"]');
+      if (optionInput) optionInput.value = ${JSON.stringify(options)};
+      panel.querySelector("#srd-property-form").requestSubmit();
+    })()`);
   }
 
   const fromContact = await waitForRelation("Servicios");
@@ -206,13 +268,16 @@ try {
     const nameControl = panel.querySelector('[data-column="2"]');
     const ageControl = panel.querySelector('[data-column="3"]');
     return {
-      nameTag: nameControl?.tagName,
+      nameTag: nameControl?.querySelector("textarea")?.tagName,
       nameType: nameControl?.dataset.fieldType,
-      nameValue: nameControl?.value,
-      ageTag: ageControl?.tagName,
-      ageInputType: ageControl?.type,
+      nameValue: nameControl?.dataset.serializedValue,
+      ageTag: ageControl?.querySelector("input")?.tagName,
+      ageInputType: ageControl?.querySelector("input")?.getAttribute("role"),
       ageFieldType: ageControl?.dataset.fieldType,
-      ageValue: ageControl?.value,
+      ageValue: ageControl?.dataset.serializedValue,
+      nameUsesAntd: nameControl?.querySelector("textarea")?.classList.contains("ant-input"),
+      ageUsesAntd: Boolean(ageControl?.querySelector(".ant-input-number")),
+      typeIconCount: panel.querySelectorAll(".field-configure svg").length,
       editorHidden: panel.querySelector(".property-drawer")?.hidden
     };
   })()`);
@@ -221,9 +286,12 @@ try {
     configuredTypes.nameType !== "longText" ||
     configuredTypes.nameValue !== "Ana" ||
     configuredTypes.ageTag !== "INPUT" ||
-    configuredTypes.ageInputType !== "number" ||
+    configuredTypes.ageInputType !== "spinbutton" ||
     configuredTypes.ageFieldType !== "number" ||
     configuredTypes.ageValue !== "30" ||
+    !configuredTypes.nameUsesAntd ||
+    !configuredTypes.ageUsesAntd ||
+    configuredTypes.typeIconCount !== 3 ||
     !configuredTypes.editorHidden
   ) {
     throw new Error(`La configuración de tipos no se aplicó: ${JSON.stringify(configuredTypes)}`);
@@ -244,6 +312,68 @@ try {
   if (contact.count !== "1" || !contact.cells.includes("C-1") || !contact.cells.includes("Ana") || contact.cells.includes("Luis")) {
     throw new Error(`Relacion Servicios -> Contactos incorrecta: ${JSON.stringify(contact)}`);
   }
+
+  const antdSpecializedControls = await cdp.evaluate(`(() => {
+    const host = document.getElementById("sheets-session-probe");
+    const panel = host.shadowRoot.querySelector(".panel-frame").contentDocument;
+    const configure = (type, options = "") => {
+      panel.querySelector('[data-configure-column="3"]').click();
+      const typeSelect = panel.querySelector("#srd-property-type");
+      typeSelect.value = type;
+      typeSelect.dispatchEvent(new Event("change", { bubbles: true }));
+      const optionInput = panel.querySelector('[name="options"]');
+      if (optionInput) optionInput.value = options;
+      panel.querySelector("#srd-property-form").requestSubmit();
+      return panel.querySelector('[data-column="3"]');
+    };
+    const date = configure("date");
+    const datePicker = Boolean(date.querySelector(".ant-picker"));
+    const time = configure("time");
+    const timePicker = Boolean(time.querySelector(".ant-picker"));
+    const multiple = configure("multiSelect", "Limpieza\\nEntrega\\nReparación");
+    const multiSelect = Boolean(multiple.querySelector(".ant-select-multiple"));
+    const single = configure("select", "Limpieza\\nEntrega\\nReparación");
+    const singleSelect = Boolean(single.querySelector(".ant-select-single"));
+    const cssInIframe = Boolean(panel.head.querySelector("style[data-css-hash]"));
+    return { datePicker, timePicker, multiSelect, singleSelect, cssInIframe };
+  })()`);
+  if (Object.values(antdSpecializedControls).some((value) => !value)) {
+    throw new Error(`No se montaron todos los componentes Ant Design: ${JSON.stringify(antdSpecializedControls)}`);
+  }
+
+  await clickPanelNode('[data-column="3"] .ant-select-selector');
+  await waitForPanelPopup(".ant-select-dropdown:not(.ant-select-dropdown-hidden)", "Entrega");
+  const optionPoint = await clickPanelNode('.ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option[title="Entrega"]');
+  const selectedValue = await cdp.evaluate(`document.getElementById("sheets-session-probe").shadowRoot.querySelector(".panel-frame").contentDocument.querySelector('[data-column="3"]').dataset.serializedValue`);
+  if (selectedValue !== "Entrega") throw new Error(`El Select no aplicÃ³ la opciÃ³n elegida: ${selectedValue}; punto ${JSON.stringify(optionPoint)}`);
+  await closePanelPopup();
+
+  await cdp.evaluate(`(() => {
+    const panel = document.getElementById("sheets-session-probe").shadowRoot.querySelector(".panel-frame").contentDocument;
+    panel.querySelector('[data-configure-column="3"]').click();
+  })()`);
+  await clickPanelNode(".property-type-host .ant-select-selector");
+  await waitForPanelPopup(".ant-select-dropdown:not(.ant-select-dropdown-hidden)", "Texto");
+  await closePanelPopup();
+  await clickPanelNode(".property-actions .secondary-button");
+
+  await configureColumn3("multiSelect", "Limpieza\nEntrega\nReparaciÃ³n");
+  await clickPanelNode('[data-column="3"] .ant-select-selector');
+  await waitForPanelPopup(".ant-select-dropdown:not(.ant-select-dropdown-hidden)", "Limpieza");
+  const multipleOptionPoint = await clickPanelNode('.ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option[title="Limpieza"]');
+  const multipleValue = await cdp.evaluate(`document.getElementById("sheets-session-probe").shadowRoot.querySelector(".panel-frame").contentDocument.querySelector('[data-column="3"]').dataset.serializedValue`);
+  if (!multipleValue.includes("Entrega") || !multipleValue.includes("Limpieza")) throw new Error(`La selecciÃ³n mÃºltiple no aplicÃ³ la opciÃ³n elegida: ${multipleValue}; punto ${JSON.stringify(multipleOptionPoint)}`);
+  await closePanelPopup();
+
+  await configureColumn3("date");
+  await clickPanelNode('[data-column="3"] .ant-picker');
+  await waitForPanelPopup(".ant-picker-dropdown:not(.ant-picker-dropdown-hidden)");
+  await closePanelPopup();
+
+  await configureColumn3("time");
+  await clickPanelNode('[data-column="3"] .ant-picker');
+  await waitForPanelPopup(".ant-picker-dropdown:not(.ant-picker-dropdown-hidden)");
+  await closePanelPopup();
 
   sheets.Contactos.rows[0][1] = "Ana actualizada";
   sheets.Servicios.rows.push(["S-4", "C-1", "Instalación"]);
@@ -274,7 +404,7 @@ try {
   await cdp.evaluate(`(() => {
     const host = document.getElementById("sheets-session-probe");
     const panel = host.shadowRoot.querySelector(".panel-frame").contentDocument;
-    const age = panel.querySelector('[data-column="3"]');
+    const age = panel.querySelector('[data-column="3"] input');
     age.value = "31";
     age.dispatchEvent(new Event("input", { bubbles: true }));
   })()`);
@@ -303,7 +433,7 @@ try {
   if (persistentTypes.nameType !== "longText" || persistentTypes.ageType !== "number") {
     throw new Error(`Los tipos no se conservaron al cambiar de hoja: ${JSON.stringify(persistentTypes)}`);
   }
-  console.log("RELACIONES_OK: tipos persistentes, caché inmediata, verificación silenciosa e indicador animado confirmados.");
+  console.log("RELACIONES_OK: Select, selección múltiple, fecha, hora, tipos persistentes y caché confirmados.");
 } finally {
   cdp?.close();
   if (browser.pid) spawnSync("taskkill", ["/PID", String(browser.pid), "/T", "/F"], { stdio: "ignore", windowsHide: true });
