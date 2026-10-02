@@ -1387,6 +1387,16 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
     const input = cell.querySelector('input[type="checkbox"]');
     if (input) return input.checked || input.hasAttribute("checked");
 
+    for (const use of cell.querySelectorAll("svg use")) {
+      const reference = use.getAttribute("href")
+        || use.getAttribute("xlink:href")
+        || use.getAttributeNS("http://www.w3.org/1999/xlink", "href")
+        || "";
+      const symbolId = reference.split("#").pop().trim().toLowerCase();
+      if (symbolId === "unchecked-checkbox-id") return false;
+      if (symbolId === "checked-checkbox-id") return true;
+    }
+
     const semanticCheckbox = cell.matches('[role="checkbox"], [aria-checked]')
       ? cell
       : cell.querySelector('[role="checkbox"], [aria-checked]');
@@ -1509,25 +1519,19 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
     return response.table;
   }
 
-  function visualizationCellText(cell, column) {
-    if (!cell || cell.v === null || cell.v === undefined) return "";
-    if (column?.type === "boolean" || typeof cell.v === "boolean") return cell.v ? "TRUE" : "FALSE";
-    if (cell.f !== null && cell.f !== undefined) return String(cell.f);
-    return String(cell.v);
+  async function readVisualizationRange(sheetName, range, signal) {
+    const source = await fetchResourceText(
+      sheetValueQueryUrl(sheetName, range),
+      signal,
+      `El rango ${range} de ${sheetName} tardó demasiado en responder`,
+      12_000
+    );
+    return parseVisualizationResponse(source);
   }
 
   async function readNamedSheetRow(sheetName, rowNumber, signal) {
-    const source = await fetchResourceText(
-      sheetValueQueryUrl(sheetName, `A${rowNumber}:${MAX_COLUMN}${rowNumber}`),
-      signal,
-      `La fila ${rowNumber} de ${sheetName} tardó demasiado en responder`,
-      12_000
-    );
-    const table = parseVisualizationResponse(source);
-    const row = table.rows?.[0]?.c || [];
-    return Array.from({ length: Math.max(table.cols?.length || 0, row.length) }, (_, index) =>
-      visualizationCellText(row[index], table.cols?.[index])
-    );
+    const table = await readSheetTable(sheetName, `A${rowNumber}:${MAX_COLUMN}${rowNumber}`, signal);
+    return table.headers;
   }
 
   async function readSheetTable(sheetName, range, signal) {
@@ -3099,6 +3103,104 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
     };
   }
 
+  function bridgeRangeBounds(range) {
+    const [start, end = start] = range.split(":");
+    const startMatch = start.match(/^([A-Z]+)(\d+)$/);
+    const endMatch = end.match(/^([A-Z]+)(\d+)$/);
+    return {
+      firstColumn: bridgeColumnNumber(startMatch[1]),
+      lastColumn: bridgeColumnNumber(endMatch[1]),
+      firstRow: Number(startMatch[2]),
+      lastRow: Number(endMatch[2])
+    };
+  }
+
+  function bridgeCellDiagnostics(cell, columnIndex, structuredCell, structuredColumn) {
+    return {
+      column: columnName(columnIndex),
+      value: cell ? readableCellText(cell) : "",
+      text: String(cell?.textContent || "").trim(),
+      html: String(cell?.innerHTML || "").slice(0, 4_000),
+      attributes: cell
+        ? Object.fromEntries(Array.from(cell.attributes, (attribute) => [attribute.name, attribute.value]))
+        : {},
+      svgUses: cell
+        ? Array.from(cell.querySelectorAll("svg use"), (use) =>
+          use.getAttribute("href") || use.getAttribute("xlink:href") || ""
+        ).filter(Boolean)
+        : [],
+      structured: {
+        column: structuredColumn || null,
+        cell: structuredCell || null
+      }
+    };
+  }
+
+  async function inspectBridgeRange(params, signal) {
+    const range = normalizedBridgeRange(params.range);
+    const requestedSheet = String(params.sheet || "").trim();
+    const activeName = activeSheetName();
+    const sheetName = requestedSheet || activeName;
+    if (requestedSheet && normalizedColumn(requestedSheet) !== normalizedColumn(activeName)) {
+      throw new Error("La inspección HTML requiere que la hoja solicitada sea la pestaña activa");
+    }
+
+    const bounds = bridgeRangeBounds(range);
+    const width = bounds.lastColumn - bounds.firstColumn + 1;
+    const height = bounds.lastRow - bounds.firstRow + 1;
+    if (width <= 0 || height <= 0) throw new Error("El rango de inspección está invertido");
+    if (width * height > 100) throw new Error("La inspección admite como máximo 100 celdas");
+
+    const structuredRequest = readVisualizationRange(sheetName, range, signal).then(
+      (table) => ({ table }),
+      (error) => ({ error })
+    );
+    const [doc, structuredResult] = await Promise.all([
+      fetchHtmlDocument(
+        embedUrl(range, String(params.gid || currentGid())),
+        signal,
+        "La vista HTML tardó demasiado en responder",
+        12_000
+      ),
+      structuredRequest
+    ]);
+    if (structuredResult.error && (structuredResult.error.name === "AbortError" || signal?.aborted)) {
+      throw structuredResult.error;
+    }
+
+    const visualRows = new Map(Array.from(doc.querySelectorAll("tbody tr")).flatMap((tr) => {
+      const rowHeader = tr.querySelector("th.row-headers-background");
+      const number = Number(rowHeader?.textContent.trim());
+      return Number.isFinite(number)
+        ? [[number, Array.from(tr.querySelectorAll("td:not(.freezebar-cell)"))]]
+        : [];
+    }));
+    const table = structuredResult.table;
+    const rows = Array.from({ length: height }, (_, rowOffset) => {
+      const rowNumber = bounds.firstRow + rowOffset;
+      const visualCells = visualRows.get(rowNumber) || [];
+      const structuredCells = table?.rows?.[rowOffset]?.c || [];
+      return {
+        row: rowNumber,
+        cells: Array.from({ length: width }, (_, columnOffset) => bridgeCellDiagnostics(
+          visualCells[columnOffset],
+          bounds.firstColumn + columnOffset,
+          structuredCells[columnOffset],
+          table?.cols?.[columnOffset]
+        ))
+      };
+    });
+
+    return {
+      spreadsheetId: spreadsheetId(),
+      gid: String(params.gid || currentGid()),
+      sheet: sheetName,
+      range,
+      structuredError: structuredResult.error?.message || null,
+      rows
+    };
+  }
+
   function bridgeResultValues(result, expectedRows) {
     return expectedRows.map((row, rowIndex) => row.map((_, columnIndex) =>
       String(result.rows[rowIndex]?.values[columnIndex] ?? "")
@@ -3133,10 +3235,11 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
         sheet: activeSheetName(),
         selection: nameBoxValue(),
         sheets: visibleBridgeSheets(),
-        capabilities: ["read", "write", "clear"]
+        capabilities: ["read", "inspect", "write", "clear"]
       };
     }
     if (command.action === "read") return readBridgeRange(params, undefined);
+    if (command.action === "inspect") return inspectBridgeRange(params, undefined);
     if (command.action !== "write" && command.action !== "clear") {
       throw new Error(`Operación no soportada: ${command.action}`);
     }

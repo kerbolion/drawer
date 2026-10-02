@@ -27,7 +27,7 @@ function backgroundMessage(type, payload) {
   return new Promise((resolve, reject) => {
     const handled = backgroundListener(
       { source: "sheets-row-drawer-codex", type, payload },
-      { tab: { id: 9, active: true } },
+      { tab: { id: 9, active: false } },
       resolve
     );
     if (!handled) reject(new Error(`El service worker no aceptó el mensaje ${type}`));
@@ -82,6 +82,11 @@ try {
   await writeFile(valuesFile, JSON.stringify([["C-1", "Limpieza"], ["C-2", "Entrega"]]), "utf8");
 
   await runBridgeCase(["info", "--url", url, "--timeout", "5"], "info");
+  await runBridgeCase([
+    "inspect", "--url", url, "--range", "M2", "--timeout", "5"
+  ], "inspect", (command) => {
+    if (command.params.range !== "M2") throw new Error(`El CLI alteró la inspección: ${JSON.stringify(command)}`);
+  });
   await runBridgeCase([
     "write", "--url", url, "--sheet", "Servicios", "--start", "B2", "--values-file", valuesFile, "--timeout", "5"
   ], "write", (command) => {

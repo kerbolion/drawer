@@ -8,7 +8,7 @@ const HOST = "127.0.0.1";
 const PORT = 17373;
 const HEADER_VALUE = "sheets-row-drawer-v1";
 const MAX_BODY_BYTES = 1_048_576;
-const ACTIONS = new Set(["info", "read", "write", "clear"]);
+const ACTIONS = new Set(["info", "read", "inspect", "write", "clear"]);
 
 function fail(message, details = undefined) {
   const error = new Error(message);
@@ -19,7 +19,7 @@ function fail(message, details = undefined) {
 function parseArguments(argv) {
   const [action, ...tokens] = argv;
   if (!ACTIONS.has(action)) {
-    fail("Uso: sheets.mjs <info|read|write|clear> --url <URL de Sheets> [opciones]");
+    fail("Uso: sheets.mjs <info|read|inspect|write|clear> --url <URL de Sheets> [opciones]");
   }
   const options = {};
   for (let index = 0; index < tokens.length; index += 1) {
@@ -67,8 +67,8 @@ async function commandFromArguments(action, options) {
     sheet: String(options.sheet || "").trim()
   };
 
-  if (action === "read") {
-    if (!options.range) fail("read requiere --range, por ejemplo A1:D20");
+  if (action === "read" || action === "inspect") {
+    if (!options.range) fail(`${action} requiere --range, por ejemplo A1:D20`);
     params.range = options.range;
   }
   if (action === "write") {
@@ -133,7 +133,6 @@ function respond(response, status, value) {
 }
 
 function contextMatches(command, context) {
-  if (context?.tabActive === false) return false;
   if (context?.spreadsheetId !== command.target.spreadsheetId) return false;
   if (command.params.sheet) return true;
   return String(context?.gid || "0") === String(command.params.gid || "0");

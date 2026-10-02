@@ -43,7 +43,7 @@ let visualServiceCheckbox = null;
 
 function cells(values, checkboxIndex = -1) {
   return values.map((value, index) => index === checkboxIndex
-    ? `<td><div class="waffle-checkbox-container ${visualServiceCheckbox ? "checked" : "unchecked"}" role="checkbox" aria-checked="${visualServiceCheckbox}"><input type="checkbox" ${visualServiceCheckbox ? "checked" : ""}></div></td>`
+    ? `<td><svg><use href="#${visualServiceCheckbox ? "checked" : "unchecked"}-checkbox-id"></use></svg></td>`
     : `<td>${value}</td>`
   ).join("");
 }
@@ -54,15 +54,24 @@ function waffle(sheet, rowNumber) {
   return `<!doctype html><table><tbody><tr><th class="row-headers-background">${rowNumber}</th>${cells(values, checkboxIndex)}</tr></tbody></table>`;
 }
 
-function gviz(sheet) {
-  return `<!doctype html><table><tr>${cells(sheet.headers)}</tr>${sheet.rows.map((row) => `<tr>${cells(row)}</tr>`).join("")}</table>`;
+function gviz(sheet, rowNumber = null) {
+  const rows = rowNumber === null
+    ? [sheet.headers, ...sheet.rows]
+    : [rowNumber === 1 ? sheet.headers : (sheet.rows[rowNumber - 2] || [])];
+  return `<!doctype html><table>${rows.map((row) => `<tr>${cells(row)}</tr>`).join("")}</table>`;
 }
 
 function gvizJson(sheet, rowNumber) {
   const values = rowNumber === 1 ? sheet.headers : (sheet.rows[rowNumber - 2] || []);
+  const checkboxIndex = sheet === sheets.Servicios && rowNumber === 2 && visualServiceCheckbox !== null ? 2 : -1;
   const table = {
-    cols: sheet.headers.map((_, index) => ({ id: String.fromCharCode(65 + index), label: "", type: "string" })),
+    cols: sheet.headers.map((_, index) => ({
+      id: String.fromCharCode(65 + index),
+      label: "",
+      type: index === checkboxIndex ? "boolean" : "string"
+    })),
     rows: [{ c: sheet.headers.map((_, index) => {
+      if (index === checkboxIndex) return { v: visualServiceCheckbox };
       const value = values[index];
       return value === "" || value === null || value === undefined ? null : { v: String(value) };
     }) }]
@@ -99,7 +108,9 @@ const webServer = http.createServer((request, response) => {
         response.setHeader("Content-Type", "application/javascript; charset=utf-8");
         response.end(gvizJson(sheet, rowNumber));
       } else {
-        response.end(gviz(sheet));
+        const requestedRange = url.searchParams.get("range") || "";
+        const singleRow = /^A(\d+):ZZ\1$/.test(requestedRange) ? rowNumber : null;
+        response.end(gviz(sheet, singleRow));
       }
     };
     if (delayServicesTable && sheet === sheets.Servicios) setTimeout(send, 900);

@@ -16,6 +16,7 @@ Run these from the skill directory, or use the absolute path to this skill's scr
 ```powershell
 node scripts/sheets.mjs info --url "SHEETS_URL"
 node scripts/sheets.mjs read --url "SHEETS_URL" --range "A1:D20"
+node scripts/sheets.mjs inspect --url "SHEETS_URL" --range "M2"
 node scripts/sheets.mjs read --url "SHEETS_URL" --sheet "Servicios" --range "A1:F50"
 node scripts/sheets.mjs write --url "SHEETS_URL" --sheet "Servicios" --start "B2" --values-file "VALUES_JSON"
 node scripts/sheets.mjs clear --url "SHEETS_URL" --sheet "Servicios" --range "B2:D10"
@@ -28,6 +29,8 @@ For writes, create a temporary UTF-8 JSON file containing a rectangular array, f
 ```
 
 Use `info` first when the active tab or available sheet names matter. Use bounded ranges for reads. Preserve strings exactly; do not replace URLs or reformat values.
+
+Use `inspect` only for a small range in the active sheet when a displayed value cannot be explained by `read`. It reports the sanitized HTML cell representation and Google Visualization value metadata, and accepts at most 100 cells.
 
 `write` uses one synthetic TSV paste and verifies the resulting range through the authenticated HTML view. `clear` removes cell contents while preserving the rows, columns, and formatting. Inspect the returned `verified` field and report a verification failure instead of assuming success.
 
