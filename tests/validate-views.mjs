@@ -47,6 +47,7 @@ const webServer = http.createServer((request, response) => {
       <script>
         globalThis.__lastPaste = null;
         globalThis.__pastes = [];
+        globalThis.__clears = [];
         document.addEventListener("paste", event => {
           const paste = {
             reference: document.getElementById("t-name-box").value,
@@ -54,6 +55,11 @@ const webServer = http.createServer((request, response) => {
           };
           globalThis.__lastPaste = paste;
           globalThis.__pastes.push(paste);
+        }, true);
+        document.addEventListener("keydown", event => {
+          if (event.key === "Delete") {
+            globalThis.__clears.push(document.getElementById("t-name-box").value);
+          }
         }, true);
       </script>
     </body></html>`);
@@ -393,6 +399,50 @@ try {
   if (!editedSelection.endsWith("!C3")) {
     throw new Error(`Kanban restauro la seleccion anterior en lugar de conservar la ultima celda editada: ${editedSelection}`);
   }
+  const clearDrag = await cdp.evaluate(`(() => {
+    const frame = document.getElementById("sheets-session-probe").shadowRoot.querySelector(".panel-frame");
+    const frameRect = frame.getBoundingClientRect();
+    const panel = frame.contentDocument;
+    const card = panel.querySelector('.kanban-card-shell[data-sheet-row="2"]');
+    const target = panel.querySelector('[data-kanban-group="__empty__"]');
+    const start = card.getBoundingClientRect();
+    const end = target.getBoundingClientRect();
+    return {
+      startX: frameRect.left + start.left + Math.min(34, start.width / 2),
+      startY: frameRect.top + start.top + start.height / 2,
+      endX: frameRect.left + end.left + Math.min(44, end.width / 2),
+      endY: frameRect.top + end.top + Math.min(120, end.height / 2)
+    };
+  })()`);
+  await cdp.command("Input.dispatchMouseEvent", {
+    type: "mousePressed", x: clearDrag.startX, y: clearDrag.startY, button: "left", buttons: 1, clickCount: 1
+  });
+  await cdp.command("Input.dispatchMouseEvent", {
+    type: "mouseMoved", x: clearDrag.startX - 12, y: clearDrag.startY + 4, button: "left", buttons: 1
+  });
+  await delay(35);
+  await cdp.command("Input.dispatchMouseEvent", {
+    type: "mouseMoved", x: clearDrag.endX, y: clearDrag.endY, button: "left", buttons: 1
+  });
+  await delay(35);
+  await cdp.command("Input.dispatchMouseEvent", {
+    type: "mouseReleased", x: clearDrag.endX, y: clearDrag.endY, button: "left", buttons: 0, clickCount: 1
+  });
+  const clearDeadline = Date.now() + 4_000;
+  let clears = [];
+  while (Date.now() < clearDeadline) {
+    clears = await cdp.evaluate("globalThis.__clears || []");
+    if (clears.includes("'Contactos'!C2")) break;
+    await delay(50);
+  }
+  if (!clears.includes("'Contactos'!C2")) {
+    throw new Error(`Mover a Sin seleccion no limpio la celda de Estado: ${JSON.stringify(clears)}`);
+  }
+  sheet.rows[0][2] = "";
+  const clearedSelection = await cdp.evaluate('document.getElementById("t-name-box").value');
+  if (!clearedSelection.endsWith("!C2")) {
+    throw new Error(`La limpieza del Kanban no conservo la celda editada: ${clearedSelection}`);
+  }
   await cdp.evaluate(panelExpression(`
     panel.querySelector('.kanban-card-shell[data-sheet-row="4"]').dispatchEvent(new MouseEvent("dblclick", {
       bubbles: true,
@@ -471,7 +521,7 @@ try {
     throw new Error(`El evento no abrio su fila: ${JSON.stringify(selected)}`);
   }
 
-  console.log("VISTAS_OK: Kanban por lotes conserva la ultima celda editada, lectura atrasada sin falso error, doble clic y Calendario confirmados.");
+  console.log("VISTAS_OK: Kanban escribe valores, limpia Sin seleccion, conserva la ultima celda editada y evita falsos errores.");
 } finally {
   cdp?.close();
   if (browser.pid) spawnSync("taskkill", ["/PID", String(browser.pid), "/T", "/F"], { stdio: "ignore", windowsHide: true });

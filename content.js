@@ -3961,18 +3961,28 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
       let run = [];
       const flushRun = () => {
         if (!run.length) return;
-        operations.push({
-          reference: qualifiedReference(
-            run[0].sheetName,
-            `${columnName(run[0].property.index + 1)}${run[0].row}`
-          ),
-          rows: run.map((task) => [task.value])
-        });
+        const first = run[0];
+        const last = run[run.length - 1];
+        const firstCell = `${columnName(first.property.index + 1)}${first.row}`;
+        const lastCell = `${columnName(last.property.index + 1)}${last.row}`;
+        operations.push(first.value === ""
+          ? {
+            action: "clear",
+            reference: qualifiedReference(first.sheetName, firstCell === lastCell ? firstCell : `${firstCell}:${lastCell}`)
+          }
+          : {
+            reference: qualifiedReference(first.sheetName, firstCell),
+            rows: run.map((task) => [task.value])
+          }
+        );
         run = [];
       };
       for (const task of group) {
         const previous = run[run.length - 1];
-        if (previous && task.row !== previous.row + 1) flushRun();
+        if (previous && (
+          task.row !== previous.row + 1
+          || (task.value === "") !== (previous.value === "")
+        )) flushRun();
         run.push(task);
       }
       flushRun();
