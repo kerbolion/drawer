@@ -998,7 +998,7 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
         className: ["kanban-card-shell", isDragging || activeRowNumber === row.number ? "is-dragging" : "", moving ? "is-moving" : ""].filter(Boolean).join(" "),
         "data-sheet-row": String(row.number),
         style: { transform: CSS.Transform.toString(transform), transition },
-        onClick: () => {
+        onDoubleClick: () => {
           if (suppressOpenRef.current === row.number) {
             suppressOpenRef.current = null;
             return;

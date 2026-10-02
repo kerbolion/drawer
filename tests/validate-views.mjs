@@ -376,6 +376,20 @@ try {
   }
 
   await cdp.evaluate(panelExpression('panel.querySelector(\'.kanban-card-shell[data-sheet-row="3"]\').click();'));
+  await delay(250);
+  const afterSingleClick = await cdp.evaluate(`({ box: document.getElementById("t-name-box").value, row: document.getElementById("sheets-session-probe").dataset.row })`);
+  if (afterSingleClick.box === "A3" && afterSingleClick.row === "3") {
+    throw new Error(`La tarjeta abrio su fila con un solo clic: ${JSON.stringify(afterSingleClick)}`);
+  }
+  await cdp.evaluate(panelExpression(`
+    panel.querySelector('.kanban-card-shell[data-sheet-row="3"]').dispatchEvent(new MouseEvent("dblclick", {
+      bubbles: true,
+      cancelable: true,
+      composed: true,
+      detail: 2,
+      button: 0
+    }));
+  `));
   const rowDeadline = Date.now() + 5_000;
   let selected;
   while (Date.now() < rowDeadline) {
