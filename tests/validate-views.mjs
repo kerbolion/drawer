@@ -510,6 +510,55 @@ try {
     throw new Error(`Calendario no siguio el patron de Workspace: ${JSON.stringify(calendar)}`);
   }
 
+  let calendarExpansion = await cdp.evaluate(`(() => {
+    const root = document.getElementById("sheets-session-probe").shadowRoot;
+    const panel = root.querySelector(".panel-frame").contentDocument;
+    return {
+      frame: root.querySelector(".panel-frame").classList.contains("is-sheet-view-expanded"),
+      drawer: panel.querySelector(".sheet-view-drawer-root")?.classList.contains("is-expanded") || false,
+      action: panel.querySelector("[data-calendar-expand]")?.getAttribute("aria-label") || ""
+    };
+  })()`);
+  if (calendarExpansion.frame || calendarExpansion.drawer || calendarExpansion.action !== "Ampliar") {
+    throw new Error(`Calendario compartio indebidamente el modo ampliado de Kanban: ${JSON.stringify(calendarExpansion)}`);
+  }
+
+  await cdp.evaluate(panelExpression('panel.querySelector("[data-calendar-expand]").click();'));
+  await delay(250);
+  calendarExpansion = await cdp.evaluate(`(() => {
+    const root = document.getElementById("sheets-session-probe").shadowRoot;
+    const panel = root.querySelector(".panel-frame").contentDocument;
+    return {
+      frame: root.querySelector(".panel-frame").classList.contains("is-sheet-view-expanded"),
+      drawer: panel.querySelector(".sheet-view-drawer-root")?.classList.contains("is-expanded") || false,
+      action: panel.querySelector("[data-calendar-expand]")?.getAttribute("aria-label") || ""
+    };
+  })()`);
+  if (!calendarExpansion.frame || !calendarExpansion.drawer || calendarExpansion.action !== "Restaurar") {
+    throw new Error(`Calendario no se amplio a todo el sitio: ${JSON.stringify(calendarExpansion)}`);
+  }
+
+  await cdp.evaluate(panelExpression('panel.querySelector(".sheet-view-drawer .ant-drawer-close").click();'));
+  await delay(250);
+  await cdp.evaluate(panelExpression('panel.querySelector("[data-sheet-view=calendar]").click();'));
+  const calendarReopenDeadline = Date.now() + 5_000;
+  while (Date.now() < calendarReopenDeadline) {
+    calendarExpansion = await cdp.evaluate(`(() => {
+      const root = document.getElementById("sheets-session-probe").shadowRoot;
+      const panel = root.querySelector(".panel-frame").contentDocument;
+      return {
+        frame: root.querySelector(".panel-frame").classList.contains("is-sheet-view-expanded"),
+        action: panel.querySelector("[data-calendar-expand]")?.getAttribute("aria-label") || "",
+        rows: panel.querySelectorAll(".sheet-view-drawer .calendar-item").length
+      };
+    })()`);
+    if (calendarExpansion.frame && calendarExpansion.action === "Restaurar" && calendarExpansion.rows === 3) break;
+    await delay(100);
+  }
+  if (!calendarExpansion.frame || calendarExpansion.action !== "Restaurar" || calendarExpansion.rows !== 3) {
+    throw new Error(`El modo ampliado de Calendario no persistio al reabrir: ${JSON.stringify(calendarExpansion)}`);
+  }
+
   await cdp.evaluate(panelExpression('panel.querySelector(\'.calendar-item[data-sheet-row="2"]\').click();'));
   const calendarRowDeadline = Date.now() + 5_000;
   while (Date.now() < calendarRowDeadline) {
@@ -521,7 +570,7 @@ try {
     throw new Error(`El evento no abrio su fila: ${JSON.stringify(selected)}`);
   }
 
-  console.log("VISTAS_OK: Kanban escribe valores, limpia Sin seleccion, conserva la ultima celda editada y evita falsos errores.");
+  console.log("VISTAS_OK: Kanban y Calendario amplian con persistencia independiente; Kanban escribe, limpia y conserva la ultima celda editada.");
 } finally {
   cdp?.close();
   if (browser.pid) spawnSync("taskkill", ["/PID", String(browser.pid), "/T", "/F"], { stdio: "ignore", windowsHide: true });

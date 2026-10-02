@@ -1369,6 +1369,7 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
     const [movingRows, setMovingRows] = React.useState([]);
     const movingRowsRef = React.useRef(new Set());
     const [kanbanExpanded, setKanbanExpanded] = React.useState(() => settings.kanbanExpanded === true);
+    const [calendarExpanded, setCalendarExpanded] = React.useState(() => settings.calendarExpanded === true);
     const statusColumns = columns.filter((column) => column.type === "status");
     const dateColumns = columns.filter((column) => column.type === "date");
 
@@ -1379,14 +1380,17 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
       movingRowsRef.current.clear();
       setMovingRows([]);
       setKanbanExpanded(settings.kanbanExpanded === true);
+      setCalendarExpanded(settings.calendarExpanded === true);
     }, [sheetKey]);
 
     const expandedKanban = view === "kanban" && kanbanExpanded;
+    const expandedCalendar = view === "calendar" && calendarExpanded;
+    const expandedSheetView = expandedKanban || expandedCalendar;
 
     React.useEffect(() => {
-      panelFrame.classList.toggle("is-sheet-view-expanded", expandedKanban);
+      panelFrame.classList.toggle("is-sheet-view-expanded", expandedSheetView);
       return () => panelFrame.classList.remove("is-sheet-view-expanded");
-    }, [expandedKanban]);
+    }, [expandedSheetView]);
 
     React.useEffect(() => {
       if (!view) return undefined;
@@ -1421,6 +1425,12 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
       const next = !kanbanExpanded;
       setKanbanExpanded(next);
       setCurrentSheetViewSetting("kanbanExpanded", next);
+    };
+
+    const toggleCalendarExpanded = () => {
+      const next = !calendarExpanded;
+      setCalendarExpanded(next);
+      setCurrentSheetViewSetting("calendarExpanded", next);
     };
 
     const openRow = async (rowNumber) => {
@@ -1522,21 +1532,23 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
         {
           open: Boolean(view),
           onClose: () => setView(""),
-          width: expandedKanban ? "100%" : 720,
+          width: expandedSheetView ? "100%" : 720,
           destroyOnClose: true,
           className: "sheet-view-drawer",
-          rootClassName: `sheet-view-drawer-root ${expandedKanban ? "is-expanded" : ""}`.trim(),
+          rootClassName: `sheet-view-drawer-root ${expandedSheetView ? "is-expanded" : ""}`.trim(),
           getContainer: () => panelDocument.body,
           title: `${view === "kanban" ? "Kanban" : "Calendario"} · ${sheetName}`,
-          extra: view === "kanban" ? React.createElement(Button, {
+          extra: view ? React.createElement(Button, {
             type: "default",
             shape: "circle",
             size: "small",
-            icon: React.createElement(expandedKanban ? FullscreenExitOutlined : FullscreenOutlined),
-            title: expandedKanban ? "Restaurar" : "Ampliar",
-            "aria-label": expandedKanban ? "Restaurar" : "Ampliar",
-            "data-kanban-expand": expandedKanban ? "expanded" : "compact",
-            onClick: toggleKanbanExpanded
+            icon: React.createElement(expandedSheetView ? FullscreenExitOutlined : FullscreenOutlined),
+            title: expandedSheetView ? "Restaurar" : "Ampliar",
+            "aria-label": expandedSheetView ? "Restaurar" : "Ampliar",
+            ...(view === "kanban"
+              ? { "data-kanban-expand": expandedKanban ? "expanded" : "compact" }
+              : { "data-calendar-expand": expandedCalendar ? "expanded" : "compact" }),
+            onClick: view === "kanban" ? toggleKanbanExpanded : toggleCalendarExpanded
           }) : null
         },
         React.createElement(
@@ -2125,6 +2137,7 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
       if (!view || typeof view !== "object") continue;
       clean.sheetViews[String(key)] = {
         calendarColumnId: String(view.calendarColumnId || ""),
+        calendarExpanded: view.calendarExpanded === true,
         kanbanColumnId: String(view.kanbanColumnId || ""),
         kanbanExpanded: view.kanbanExpanded === true
       };
