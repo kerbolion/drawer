@@ -35,10 +35,19 @@
     if (event.source !== window || message?.source !== SOURCE || message?.type !== "write-range") return;
 
     try {
-      focusCell(message.reference);
-      await wait(120);
-      paste(String(message.tsv ?? ""));
-      await wait(180);
+      const operations = Array.isArray(message.operations) && message.operations.length
+        ? message.operations
+        : [{ reference: message.reference, tsv: message.tsv }];
+      for (const operation of operations) {
+        focusCell(operation.reference);
+        await wait(120);
+        paste(String(operation.tsv ?? ""));
+        await wait(180);
+      }
+      if (message.restoreReference) {
+        focusCell(message.restoreReference);
+        await wait(180);
+      }
       window.postMessage({ source: SOURCE, type: "write-result", requestId: message.requestId, ok: true }, location.origin);
     } catch (error) {
       window.postMessage({

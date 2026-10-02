@@ -58,6 +58,18 @@ function gviz(sheet) {
   return `<!doctype html><table><tr>${cells(sheet.headers)}</tr>${sheet.rows.map((row) => `<tr>${cells(row)}</tr>`).join("")}</table>`;
 }
 
+function gvizJson(sheet, rowNumber) {
+  const values = rowNumber === 1 ? sheet.headers : (sheet.rows[rowNumber - 2] || []);
+  const table = {
+    cols: sheet.headers.map((_, index) => ({ id: String.fromCharCode(65 + index), label: "", type: "string" })),
+    rows: [{ c: sheet.headers.map((_, index) => {
+      const value = values[index];
+      return value === "" || value === null || value === undefined ? null : { v: String(value) };
+    }) }]
+  };
+  return `/*O_o*/\ngoogle.visualization.Query.setResponse(${JSON.stringify({ version: "0.6", status: "ok", table })});`;
+}
+
 const webPort = await freePort();
 const webServer = http.createServer((request, response) => {
   const url = new URL(request.url, `http://127.0.0.1:${webPort}`);
@@ -80,7 +92,16 @@ const webServer = http.createServer((request, response) => {
   }
   if (url.pathname.endsWith("/gviz/tq")) {
     const sheet = sheets[url.searchParams.get("sheet")] || { headers: [], rows: [] };
-    const send = () => response.end(gviz(sheet));
+    const output = url.searchParams.get("tqx") || "";
+    const rowNumber = Number(url.searchParams.get("range")?.match(/A(\d+)/)?.[1] || 1);
+    const send = () => {
+      if (output.includes("out:json")) {
+        response.setHeader("Content-Type", "application/javascript; charset=utf-8");
+        response.end(gvizJson(sheet, rowNumber));
+      } else {
+        response.end(gviz(sheet));
+      }
+    };
     if (delayServicesTable && sheet === sheets.Servicios) setTimeout(send, 900);
     else send();
     return;
@@ -306,13 +327,152 @@ try {
     const tableScroll = relation?.querySelector(".related-table-scroll");
     return {
       view: relation?.dataset.relationView,
-      tableCells: Array.from(relation?.querySelectorAll("tbody td") || [], cell => cell.textContent),
+      tableCells: Array.from(relation?.querySelectorAll("tbody td") || [], cell => {
+        const input = cell.querySelector("input, textarea");
+        return input ? input.value : cell.textContent;
+      }),
       drawerHasHorizontalScroll: main ? main.scrollWidth > main.clientWidth + 1 : true,
       tableHasHorizontalScroll: tableScroll ? tableScroll.scrollWidth > tableScroll.clientWidth + 1 : false
     };
   })()`);
   if (relationDeck.view !== "deck" || relationDeck.cards !== 2 || !relationDeck.hasDeckOption || !relationDeck.hasTableOption || relationTable.view !== "table" || !relationTable.tableCells.includes("S-1") || relationTable.drawerHasHorizontalScroll || !relationTable.tableHasHorizontalScroll) {
     throw new Error(`Las vistas Deck/Tabla no funcionan: ${JSON.stringify({ relationDeck, relationTable })}`);
+  }
+
+  await cdp.evaluate(`(() => {
+    const panel = document.getElementById("sheets-session-probe").shadowRoot.querySelector(".panel-frame").contentDocument;
+    const relation = Array.from(panel.querySelectorAll(".relation")).find(item => item.querySelector(".relation-title")?.textContent === "Servicios");
+    Array.from(relation.querySelectorAll(".ant-segmented-item")).find(item => item.textContent.includes("Deck"))?.click();
+  })()`);
+  await delay(120);
+  await cdp.evaluate(`(() => {
+    const panel = document.getElementById("sheets-session-probe").shadowRoot.querySelector(".panel-frame").contentDocument;
+    const card = panel.querySelector('.relation[data-relation-view="deck"] .related-record-card');
+    card?.dispatchEvent(new panel.defaultView.MouseEvent("dblclick", { bubbles: true, cancelable: true, detail: 2 }));
+  })()`);
+  const relatedDrawerDeadline = Date.now() + 3_000;
+  let relatedDrawer;
+  while (Date.now() < relatedDrawerDeadline) {
+    relatedDrawer = await cdp.evaluate(`(() => {
+      const panel = document.getElementById("sheets-session-probe").shadowRoot.querySelector(".panel-frame").contentDocument;
+      const drawer = panel.querySelector(".related-record-drawer");
+      return {
+        open: Boolean(drawer),
+        title: drawer?.querySelector(".ant-drawer-title")?.textContent || "",
+        recordTitle: drawer?.querySelector(".related-drawer-title")?.textContent || "",
+        values: Array.from(drawer?.querySelectorAll(".related-cell-editor input, .related-cell-editor textarea") || [], input => input.value),
+        width: drawer ? Math.round(drawer.getBoundingClientRect().width) : 0
+      };
+    })()`);
+    if (relatedDrawer.open && relatedDrawer.values.includes("S-1")) break;
+    await delay(100);
+  }
+  if (!relatedDrawer?.open || !relatedDrawer.title.includes("Servicios") || relatedDrawer.recordTitle !== "S-1" || !relatedDrawer.values.includes("Limpieza") || relatedDrawer.width < 680) {
+    throw new Error(`El registro Deck no abrió el drawer de Workspace: ${JSON.stringify(relatedDrawer)}`);
+  }
+
+  const drawerCancel = await cdp.evaluate(`(() => {
+    const host = document.getElementById("sheets-session-probe");
+    const panel = host.shadowRoot.querySelector(".panel-frame").contentDocument;
+    const drawer = panel.querySelector(".related-record-drawer");
+    const input = drawer.querySelector('[data-related-column="4"] input');
+    const setter = Object.getOwnPropertyDescriptor(panel.defaultView.HTMLInputElement.prototype, "value").set;
+    setter.call(input, "Cambio temporal del drawer");
+    input.dispatchEvent(new panel.defaultView.Event("input", { bubbles: true }));
+    const pending = host.dataset.hasPendingChanges;
+    const cancel = Array.from(drawer.querySelectorAll(".ant-drawer-footer button")).find(button => button.textContent.includes("Cancelar"));
+    cancel.click();
+    return { pending, cancelDisabled: cancel.disabled };
+  })()`);
+  await delay(350);
+  const drawerClosed = await cdp.evaluate(`(() => {
+    const host = document.getElementById("sheets-session-probe");
+    const panel = host.shadowRoot.querySelector(".panel-frame").contentDocument;
+    return {
+      open: Boolean(panel.querySelector(".related-record-drawer")),
+      pending: host.dataset.hasPendingChanges
+    };
+  })()`);
+  if (drawerCancel.pending !== "true" || drawerCancel.cancelDisabled || drawerClosed.open || drawerClosed.pending !== "false") {
+    throw new Error(`Cancelar en el drawer relacionado no restauró el registro: ${JSON.stringify({ drawerCancel, drawerClosed })}`);
+  }
+
+  await cdp.evaluate(`(() => {
+    const panel = document.getElementById("sheets-session-probe").shadowRoot.querySelector(".panel-frame").contentDocument;
+    const relation = Array.from(panel.querySelectorAll(".relation")).find(item => item.querySelector(".relation-title")?.textContent === "Servicios");
+    Array.from(relation.querySelectorAll(".ant-segmented-item")).find(item => item.textContent.includes("Tabla"))?.click();
+  })()`);
+  await delay(120);
+  const inlineDraft = await cdp.evaluate(`(() => {
+    const host = document.getElementById("sheets-session-probe");
+    const panel = host.shadowRoot.querySelector(".panel-frame").contentDocument;
+    const input = panel.querySelector('[data-related-sheet="Servicios"][data-related-row="2"][data-related-column="3"] input');
+    const setter = Object.getOwnPropertyDescriptor(panel.defaultView.HTMLInputElement.prototype, "value").set;
+    setter.call(input, "Cambio temporal de tabla");
+    input.dispatchEvent(new panel.defaultView.Event("input", { bubbles: true }));
+    const edited = { value: input.value, pending: host.dataset.hasPendingChanges, saveDisabled: panel.querySelector(".save").disabled };
+    panel.querySelector(".cancel").click();
+    return edited;
+  })()`);
+  await delay(80);
+  const inlineRestored = await cdp.evaluate(`(() => {
+    const host = document.getElementById("sheets-session-probe");
+    const panel = host.shadowRoot.querySelector(".panel-frame").contentDocument;
+    return {
+      value: panel.querySelector('[data-related-sheet="Servicios"][data-related-row="2"][data-related-column="3"] input')?.value,
+      pending: host.dataset.hasPendingChanges
+    };
+  })()`);
+  if (inlineDraft.value !== "Cambio temporal de tabla" || inlineDraft.pending !== "true" || inlineDraft.saveDisabled || inlineRestored.value !== "Limpieza" || inlineRestored.pending !== "false") {
+    throw new Error(`La edición en línea no comparte Guardar/Cancelar: ${JSON.stringify({ inlineDraft, inlineRestored })}`);
+  }
+
+  await cdp.evaluate(`(() => {
+    window.__relatedPastes = [];
+    document.addEventListener("paste", event => {
+      window.__relatedPastes.push({
+        reference: document.getElementById("t-name-box")?.value || "",
+        value: event.clipboardData?.getData("text/plain") || ""
+      });
+    }, { capture: true });
+    const panel = document.getElementById("sheets-session-probe").shadowRoot.querySelector(".panel-frame").contentDocument;
+    const input = panel.querySelector('[data-related-sheet="Servicios"][data-related-row="2"][data-related-column="3"] input');
+    const note = panel.querySelector('[data-related-sheet="Servicios"][data-related-row="2"][data-related-column="4"] input');
+    const setter = Object.getOwnPropertyDescriptor(panel.defaultView.HTMLInputElement.prototype, "value").set;
+    setter.call(input, "Limpieza premium");
+    input.dispatchEvent(new panel.defaultView.Event("input", { bubbles: true }));
+    setter.call(note, "Nota relacionada");
+    note.dispatchEvent(new panel.defaultView.Event("input", { bubbles: true }));
+    panel.querySelector(".save").click();
+  })()`);
+  setTimeout(() => {
+    sheets.Servicios.rows[0][2] = "Limpieza premium";
+    sheets.Servicios.rows[0][3] = "Nota relacionada";
+  }, 450);
+  const relatedPasteDeadline = Date.now() + 4_000;
+  let relatedPastes = [];
+  while (Date.now() < relatedPasteDeadline) {
+    relatedPastes = await cdp.evaluate("window.__relatedPastes || []");
+    if (relatedPastes.length) break;
+    await delay(50);
+  }
+  if (relatedPastes.length !== 1 || relatedPastes[0].reference !== "'Servicios'!C2" || relatedPastes[0].value !== "Limpieza premium\tNota relacionada") {
+    throw new Error(`La tabla relacionada no escribió la celda exacta: ${JSON.stringify(relatedPastes)}`);
+  }
+  await waitForWriteVerification();
+  const relatedSaved = await cdp.evaluate(`(() => {
+    const host = document.getElementById("sheets-session-probe");
+    const panel = host.shadowRoot.querySelector(".panel-frame").contentDocument;
+    return {
+      row: host.dataset.row,
+      pending: host.dataset.hasPendingChanges,
+      value: panel.querySelector('[data-related-sheet="Servicios"][data-related-row="2"][data-related-column="3"] input')?.value,
+      note: panel.querySelector('[data-related-sheet="Servicios"][data-related-row="2"][data-related-column="4"] input')?.value,
+      saveDisabled: panel.querySelector(".save").disabled
+    };
+  })()`);
+  if (relatedSaved.row !== "2" || relatedSaved.pending !== "false" || relatedSaved.value !== "Limpieza premium" || relatedSaved.note !== "Nota relacionada" || !relatedSaved.saveDisabled) {
+    throw new Error(`La actualización relacionada no quedó confirmada: ${JSON.stringify(relatedSaved)}`);
   }
 
   const pendingActions = await cdp.evaluate(`(() => {
@@ -800,7 +960,7 @@ try {
   if (!optimisticResult?.checked || optimisticResult.value !== "TRUE" || optimisticResult.saveState !== "saved" || optimisticResult.verification !== "verified" || optimisticResult.pastes.length !== 1) {
     throw new Error(`La casilla no quedó estable después de verificar: ${JSON.stringify(optimisticResult)}`);
   }
-  console.log("RELACIONES_OK: opciones con color, casillas localizadas, fecha y hora en español, tipos persistentes y caché confirmados.");
+  console.log("RELACIONES_OK: Deck abre drawer, Tabla edita relacionados, guardado entre hojas, tipos persistentes y caché confirmados.");
 } finally {
   cdp?.close();
   if (browser.pid) spawnSync("taskkill", ["/PID", String(browser.pid), "/T", "/F"], { stdio: "ignore", windowsHide: true });

@@ -10,6 +10,9 @@ La interfaz usa Ant Design `5.29.3`, la misma versión instalada en `workspace-a
 - Detecta las demás hojas visibles y relaciona registros por columnas `ID ...` compartidas.
 - Muestra relaciones padre-hijo en ambos sentidos, como `Contactos -> Servicios` y `Servicios -> Contactos`.
 - Presenta los relacionados en vista **Deck** o **Tabla**, con paginación y una preferencia persistente por relación.
+- Abre cada tarjeta Deck en un segundo drawer de Ant Design, igual que Workspace; en equipos de escritorio se abre con doble clic y en dispositivos táctiles con un toque.
+- Permite editar los relacionados directamente en las celdas de la vista Tabla o desde su drawer usando los mismos controles tipados del formulario principal.
+- Integra los cambios relacionados con **Guardar cambios** y **Cancelar**, escribe únicamente las celdas modificadas en la hoja de destino, restaura la hoja principal y confirma cada fila en segundo plano.
 - Guarda filas y relacionados en caché local persistente, los muestra primero y comprueba cambios en segundo plano.
 - Conserva una configuración independiente por documento y pestaña en `chrome.storage.local`.
 - Permite configurar cada columna como texto, área de texto, número, monto, fecha, fecha y hora, hora, selección, selección múltiple, estado, casilla, URL, teléfono o correo.

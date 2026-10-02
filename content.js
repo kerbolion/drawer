@@ -6,6 +6,7 @@ import Button from "antd/es/button/index.js";
 import Checkbox from "antd/es/checkbox/index.js";
 import ConfigProvider from "antd/es/config-provider/index.js";
 import DatePicker from "antd/es/date-picker/index.js";
+import Drawer from "antd/es/drawer/index.js";
 import Input from "antd/es/input/index.js";
 import InputNumber from "antd/es/input-number/index.js";
 import Pagination from "antd/es/pagination/index.js";
@@ -108,6 +109,7 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
   const state = {
     row: null,
     gid: null,
+    sheetName: "",
     viewRow: null,
     viewGid: null,
     values: [],
@@ -127,6 +129,10 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
     workspaceWriteQueue: Promise.resolve(),
     propertyColumn: null,
     pendingWrites: new Map(),
+    relations: [],
+    relatedDrafts: new Map(),
+    relatedDraftListeners: new Set(),
+    relatedDraftVersion: 0,
     activity: { row: false, relations: false, config: false },
     indicatorError: false
   };
@@ -386,7 +392,10 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
     }
     .related-record-card {
       min-width: 0; border: 1px solid var(--workspace-border); border-radius: 8px; padding: 12px;
-      background: var(--workspace-surface); box-shadow: 0 6px 18px var(--workspace-shadow-soft);
+      background: var(--workspace-surface); box-shadow: 0 6px 18px var(--workspace-shadow-soft); cursor: pointer;
+    }
+    .related-record-card:hover, .related-record-card:focus-visible {
+      border-color: var(--workspace-primary-border); outline: 0; box-shadow: 0 8px 22px var(--workspace-shadow);
     }
     .related-record-title {
       overflow: hidden; color: var(--workspace-text); font-size: 14px; font-weight: 700;
@@ -411,8 +420,25 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
     .related-table-scroll { min-width: 0; max-width: calc(100% - 28px); margin: 10px 14px 0; overflow-x: auto; overflow-y: hidden; }
     .relation-table { width: max-content; min-width: 100%; border-collapse: separate; border-spacing: 0; font-size: 11px; }
     .relation-table th { padding: 8px; border-bottom: 1px solid var(--workspace-border); background: var(--workspace-surface-muted); color: var(--workspace-text-secondary); font-weight: 700; text-align: left; white-space: nowrap; }
-    .relation-table td { min-width: 150px; max-width: 220px; padding: 8px; border-bottom: 1px solid var(--workspace-border-subtle); overflow: hidden; text-align: left; text-overflow: ellipsis; vertical-align: top; white-space: nowrap; }
+    .relation-table td { min-width: 180px; padding: 8px; border-bottom: 1px solid var(--workspace-border-subtle); text-align: left; vertical-align: top; }
     .relation-table tr:last-child td { border-bottom: 0; }
+    .related-cell-editor { min-width: 0; width: 100%; }
+    .related-cell-editor > .ant-input-number,
+    .related-cell-editor > .ant-picker,
+    .related-cell-editor > .ant-select,
+    .related-cell-editor > .ant-input,
+    .related-cell-editor > .ant-space-compact { width: 100%; }
+    .related-record-drawer-root .ant-drawer-content-wrapper { width: min(720px, 100%) !important; }
+    .related-record-drawer .ant-drawer-header { background: var(--workspace-surface); border-bottom-color: var(--workspace-border-soft); }
+    .related-record-drawer .ant-drawer-body { padding: 8px 28px 32px; background: var(--workspace-bg); }
+    .related-record-drawer .ant-drawer-footer { padding: 12px 24px 16px; background: var(--workspace-surface); border-top-color: var(--workspace-border-soft); }
+    .related-record-page { max-width: 760px; margin: 0 auto; }
+    .related-drawer-title { margin: 12px 0 22px; color: var(--workspace-text); font-size: 28px; line-height: 1.15; overflow-wrap: anywhere; }
+    .related-drawer-fields { width: 100%; }
+    .related-field-icon { cursor: default; }
+    .related-field-icon:hover { background: ${antdTokens.colorPrimaryBg}; color: ${antdTokens.colorPrimary}; }
+    .related-drawer-footer { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 8px; }
+    .related-drawer-footer .ant-btn { min-height: ${antdTokens.controlHeightLG}px; font-weight: 600; }
     .relation-pagination { display: flex; justify-content: center; padding: 12px 14px 0; }
     .workspace-date-picker-popup .ant-picker-panel-container { max-width: calc(100vw - 16px); }
     .drawer > footer { min-width: 0; padding: 12px 24px 16px; border-top: 1px solid ${antdTokens.colorBorderSecondary}; background: ${antdTokens.colorBgContainer}; }
@@ -441,6 +467,7 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
       .relation-head { flex-wrap: wrap; padding-inline: 12px; }
       .relation-heading-copy { min-width: calc(100% - 36px); }
       .relation-actions { width: 100%; padding-left: 36px; justify-content: space-between; }
+      .related-record-drawer .ant-drawer-body { padding-inline: 14px; }
       .property-header, .property-body { padding-inline: 16px; }
       .property-grid { grid-template-columns: 1fr; gap: 0; }
       .workspace-date-picker-popup {
@@ -662,10 +689,8 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
     }
   }
 
-  function AntFieldControl({ host, property }) {
-    const [, refresh] = React.useReducer((value) => value + 1, 0);
-    const value = host._editorValue;
-    const update = (nextValue) => updateAntdControl(host, property, nextValue, refresh);
+  function PropertyEditorControl({ property, value, onChange }) {
+    const update = onChange;
     const fullWidth = { width: "100%" };
 
     if (property.type === "longText") {
@@ -797,6 +822,15 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
         onClick: () => panelFrame.contentWindow.open(action.href, property.type === "url" ? "_blank" : "_self", "noopener,noreferrer")
       }, action.label)
     );
+  }
+
+  function AntFieldControl({ host, property }) {
+    const [, refresh] = React.useReducer((value) => value + 1, 0);
+    return React.createElement(PropertyEditorControl, {
+      property,
+      value: host._editorValue,
+      onChange: (nextValue) => updateAntdControl(host, property, nextValue, refresh)
+    });
   }
 
   const drawer = element("aside", "drawer");
@@ -1394,7 +1428,7 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
     return String(clone.textContent || "").trim();
   }
 
-  async function fetchHtmlDocument(url, signal, timeoutMessage, timeoutMs) {
+  async function fetchResourceText(url, signal, timeoutMessage, timeoutMs) {
     const controller = new AbortController();
     let timedOut = false;
     const abort = () => controller.abort(signal?.reason || new DOMException("Lectura cancelada", "AbortError"));
@@ -1412,9 +1446,7 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
         signal: controller.signal
       });
       if (!response.ok) throw new Error(`Google respondió ${response.status}`);
-      const html = await response.text();
-      const trustedHtml = trustedHtmlPolicy ? trustedHtmlPolicy.createHTML(html) : html;
-      return new DOMParser().parseFromString(trustedHtml, "text/html");
+      return response.text();
     } catch (error) {
       if (timedOut) throw new Error(timeoutMessage);
       if (signal?.aborted) throw new DOMException("Lectura cancelada", "AbortError");
@@ -1423,6 +1455,12 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
       clearTimeout(timeout);
       signal?.removeEventListener("abort", abort);
     }
+  }
+
+  async function fetchHtmlDocument(url, signal, timeoutMessage, timeoutMs) {
+    const html = await fetchResourceText(url, signal, timeoutMessage, timeoutMs);
+    const trustedHtml = trustedHtmlPolicy ? trustedHtmlPolicy.createHTML(html) : html;
+    return new DOMParser().parseFromString(trustedHtml, "text/html");
   }
 
   async function readRange(range, signal, gid = currentGid()) {
@@ -1446,6 +1484,49 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
     url.searchParams.set("headers", "1");
     url.searchParams.set("_", Date.now().toString());
     return url;
+  }
+
+  function sheetValueQueryUrl(sheetName, range) {
+    const url = new URL(`/spreadsheets/d/${spreadsheetId()}/gviz/tq`, location.origin);
+    url.searchParams.set("tqx", "out:json");
+    url.searchParams.set("sheet", sheetName);
+    url.searchParams.set("range", range);
+    url.searchParams.set("headers", "0");
+    url.searchParams.set("_", Date.now().toString());
+    return url;
+  }
+
+  function parseVisualizationResponse(source) {
+    const start = source.indexOf("{");
+    const end = source.lastIndexOf("}");
+    if (start < 0 || end <= start) throw new Error("Google devolvió una respuesta de datos no válida");
+    const response = JSON.parse(source.slice(start, end + 1));
+    if (response.status !== "ok" || !response.table) {
+      const detail = response.errors?.map((error) => error.detailed_message || error.message).filter(Boolean).join(" · ");
+      throw new Error(detail || "Google no devolvió los valores solicitados");
+    }
+    return response.table;
+  }
+
+  function visualizationCellText(cell, column) {
+    if (!cell || cell.v === null || cell.v === undefined) return "";
+    if (column?.type === "boolean" || typeof cell.v === "boolean") return cell.v ? "TRUE" : "FALSE";
+    if (cell.f !== null && cell.f !== undefined) return String(cell.f);
+    return String(cell.v);
+  }
+
+  async function readNamedSheetRow(sheetName, rowNumber, signal) {
+    const source = await fetchResourceText(
+      sheetValueQueryUrl(sheetName, `A${rowNumber}:${MAX_COLUMN}${rowNumber}`),
+      signal,
+      `La fila ${rowNumber} de ${sheetName} tardó demasiado en responder`,
+      12_000
+    );
+    const table = parseVisualizationResponse(source);
+    const row = table.rows?.[0]?.c || [];
+    return Array.from({ length: Math.max(table.cols?.length || 0, row.length) }, (_, index) =>
+      visualizationCellText(row[index], table.cols?.[index])
+    );
   }
 
   async function readSheetTable(sheetName, range, signal) {
@@ -1486,8 +1567,7 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
   function relationColumns(headers) {
     return headers
       .map((header, index) => ({ header, index }))
-      .filter(({ header }) => String(header || "").trim())
-      .slice(0, 6);
+      .filter(({ header }) => String(header || "").trim());
   }
 
   function displayRelationColumns(relation) {
@@ -1502,13 +1582,116 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
       || defaultProperty(column.propertyIndex, column.header);
   }
 
-  function RelatedRecordCard({ relation, columns, row }) {
-    const titleColumn = columns[0];
-    const title = titleColumn ? String(row.cells[titleColumn.index] || "").trim() : "";
-    const previewColumns = columns.slice(1, 4).filter((column) => String(row.cells[column.index] || "").trim());
+  function relatedDraftKey(sheetName, rowNumber, columnIndex) {
+    return `${encodeURIComponent(sheetName)}:${rowNumber}:${columnIndex}`;
+  }
+
+  function relatedDraftSnapshot() {
+    return state.relatedDraftVersion;
+  }
+
+  function subscribeRelatedDrafts(listener) {
+    state.relatedDraftListeners.add(listener);
+    return () => state.relatedDraftListeners.delete(listener);
+  }
+
+  function notifyRelatedDrafts() {
+    state.relatedDraftVersion += 1;
+    for (const listener of state.relatedDraftListeners) listener();
+    syncPendingActions();
+  }
+
+  function useRelatedDraftVersion() {
+    return React.useSyncExternalStore(subscribeRelatedDrafts, relatedDraftSnapshot, relatedDraftSnapshot);
+  }
+
+  function relatedDraftValue(relation, row, column) {
+    const key = relatedDraftKey(relation.sheetName, row.number, column.propertyIndex);
+    return state.relatedDrafts.get(key)?.value ?? String(row.cells[column.index] ?? "");
+  }
+
+  function setRelatedDraft(relation, row, column, editorValue) {
+    const property = relatedProperty(relation.sheetName, column);
+    const key = relatedDraftKey(relation.sheetName, row.number, column.propertyIndex);
+    const existing = state.relatedDrafts.get(key);
+    const previousValue = existing?.previousValue ?? String(row.cells[column.index] ?? "");
+    const value = serializeEditorValue(editorValue, property);
+    if (valuesEqualForProperty(value, previousValue, property)) {
+      state.relatedDrafts.delete(key);
+    } else {
+      state.relatedDrafts.set(key, {
+        key,
+        sheetName: relation.sheetName,
+        rowNumber: row.number,
+        columnIndex: column.propertyIndex,
+        cellIndex: column.index,
+        value,
+        previousValue,
+        property,
+        relation,
+        row
+      });
+    }
+    notifyRelatedDrafts();
+  }
+
+  function relatedDraftsForRow(sheetName, rowNumber) {
+    return [...state.relatedDrafts.values()].filter((draft) =>
+      draft.sheetName === sheetName && draft.rowNumber === rowNumber
+    );
+  }
+
+  function discardRelatedDrafts(predicate = () => true) {
+    let changed = false;
+    for (const [key, draft] of state.relatedDrafts) {
+      if (!predicate(draft)) continue;
+      state.relatedDrafts.delete(key);
+      changed = true;
+    }
+    if (changed) notifyRelatedDrafts();
+  }
+
+  function RelatedCellEditor({ relation, row, column }) {
+    useRelatedDraftVersion();
+    const property = relatedProperty(relation.sheetName, column);
+    const rawValue = relatedDraftValue(relation, row, column);
     return React.createElement(
       "div",
-      { className: "related-record-card" },
+      {
+        className: "related-cell-editor",
+        "data-related-sheet": relation.sheetName,
+        "data-related-row": String(row.number),
+        "data-related-column": String(column.propertyIndex + 1)
+      },
+      React.createElement(PropertyEditorControl, {
+        property,
+        value: editorValueFromRaw(rawValue, property),
+        onChange: (nextValue) => setRelatedDraft(relation, row, column, nextValue)
+      })
+    );
+  }
+
+  function RelatedRecordCard({ relation, columns, row, onOpen }) {
+    useRelatedDraftVersion();
+    const titleColumn = columns[0];
+    const title = titleColumn ? String(relatedDraftValue(relation, row, titleColumn) || "").trim() : "";
+    const previewColumns = columns.slice(1, 4).filter((column) => String(relatedDraftValue(relation, row, column) || "").trim());
+    return React.createElement(
+      "div",
+      {
+        className: "related-record-card",
+        role: "button",
+        tabIndex: 0,
+        onClick: (event) => {
+          if (event.detail === 0 || panelFrame.contentWindow.matchMedia("(pointer: coarse)").matches) onOpen();
+        },
+        onDoubleClick: onOpen,
+        onKeyDown: (event) => {
+          if (event.key !== "Enter" && event.key !== " ") return;
+          event.preventDefault();
+          onOpen();
+        }
+      },
       React.createElement(
         "div",
         { className: "related-record-title", title: title || `Fila ${row.number}`, "data-relation-cell": "" },
@@ -1519,7 +1702,7 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
         { className: "related-record-fields" },
         ...previewColumns.map((column) => {
           const property = relatedProperty(relation.sheetName, column);
-          const value = String(row.cells[column.index] || "");
+          const value = String(relatedDraftValue(relation, row, column) || "");
           return React.createElement(
             "div",
             { className: "related-record-field", key: `${column.index}:${column.header}` },
@@ -1542,7 +1725,7 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
       { className: "related-table-scroll" },
       React.createElement(
         "table",
-        { className: "relation-table", "aria-label": `Registros relacionados de ${relation.sheetName}` },
+        { className: "relation-table related-inline-table", "aria-label": `Registros relacionados de ${relation.sheetName}` },
         React.createElement(
           "thead",
           null,
@@ -1558,15 +1741,86 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
           ...rows.map((row, rowIndex) => React.createElement(
             "tr",
             { key: row.number || rowIndex },
-            ...columns.map((column) => {
-              const value = String(row.cells[column.index] || "");
-              return React.createElement(
-                "td",
-                { key: `${column.index}:${column.header}`, title: value, "data-relation-cell": "" },
-                value
-              );
-            })
+            ...columns.map((column) => React.createElement(
+              "td",
+              { key: `${column.index}:${column.header}` },
+              React.createElement(RelatedCellEditor, { relation, row, column })
+            ))
           ))
+        )
+      )
+    );
+  }
+
+  function RelatedRecordDrawer({ relation, columns, row, open, onClose }) {
+    useRelatedDraftVersion();
+    if (!row) return null;
+    const titleColumn = columns[0];
+    const recordTitle = titleColumn
+      ? String(relatedDraftValue(relation, row, titleColumn) || "").trim()
+      : "";
+    const rowDrafts = relatedDraftsForRow(relation.sheetName, row.number);
+    const discard = () => {
+      discardRelatedDrafts((draft) => draft.sheetName === relation.sheetName && draft.rowNumber === row.number);
+      onClose();
+    };
+
+    return React.createElement(
+      Drawer,
+      {
+        open,
+        onClose,
+        width: 720,
+        destroyOnClose: true,
+        className: "record-drawer related-record-drawer",
+        rootClassName: "related-record-drawer-root",
+        getContainer: () => panelDocument.body,
+        title: `${relation.sheetName} · fila ${row.number}`,
+        footer: React.createElement(
+          "div",
+          { className: "related-drawer-footer" },
+          React.createElement(Button, { onClick: discard, disabled: state.saving || !rowDrafts.length }, "Cancelar"),
+          React.createElement(Button, {
+            type: "primary",
+            disabled: state.saving || !rowDrafts.length,
+            onClick: () => void saveRelatedChanges(rowDrafts)
+          }, "Guardar cambios")
+        )
+      },
+      React.createElement(
+        "div",
+        { className: "record-page related-record-page" },
+        React.createElement("h2", { className: "related-drawer-title" }, recordTitle || `Fila ${row.number}`),
+        React.createElement(
+          "div",
+          { className: "fields related-drawer-fields" },
+          ...columns.map((column) => {
+            const property = relatedProperty(relation.sheetName, column);
+            return React.createElement(
+              "div",
+              { className: "field", key: `${column.propertyIndex}:${column.header}` },
+              React.createElement(
+                "div",
+                { className: "field-label" },
+                React.createElement(
+                  "span",
+                  { className: "field-configure property-type-icon related-field-icon" },
+                  typeBadge(property.type)
+                ),
+                React.createElement(
+                  "div",
+                  { className: "field-label-copy" },
+                  React.createElement("span", { className: "field-label-text" }, property.name || column.header),
+                  React.createElement("small", { className: "field-type-name" }, property.type)
+                )
+              ),
+              React.createElement(
+                "div",
+                { className: "field-editor" },
+                React.createElement(RelatedCellEditor, { relation, row, column })
+              )
+            );
+          })
         )
       )
     );
@@ -1576,6 +1830,7 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
     const [expanded, setExpanded] = React.useState(true);
     const [view, setView] = React.useState(initialView);
     const [page, setPage] = React.useState(1);
+    const [openRow, setOpenRow] = React.useState(null);
     const columns = displayRelationColumns(relation);
     const pageSize = view === "table" ? 10 : 4;
     const totalCount = relation.totalCount ?? relation.rows.length;
@@ -1642,6 +1897,7 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
             relation,
             columns,
             row,
+            onOpen: () => setOpenRow(row),
             key: row.number || rowIndex
           }))
         )
@@ -1656,7 +1912,14 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
           size: "small",
           onChange: setPage
         })
-        : null
+        : null,
+      React.createElement(RelatedRecordDrawer, {
+        relation,
+        columns,
+        row: openRow,
+        open: Boolean(openRow),
+        onClose: () => setOpenRow(null)
+      })
     );
   }
 
@@ -1688,6 +1951,7 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
   }
 
   function showRelations(relations) {
+    state.relations = relations;
     const signature = JSON.stringify(storedRelations(relations));
     if (ui.relatedList.dataset.signature === signature) return;
     unmountRelations();
@@ -1703,6 +1967,7 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
   }
 
   function clearRelations() {
+    state.relations = [];
     unmountRelations();
     ui.relatedList.replaceChildren();
     delete ui.relatedList.dataset.signature;
@@ -2027,7 +2292,7 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
 
   function syncPendingActions() {
     const ready = Boolean(state.row && state.viewRow === state.row && state.viewGid === state.gid);
-    const hasChanges = ready && collectPendingChanges().length > 0;
+    const hasChanges = ready && (collectPendingChanges().length > 0 || state.relatedDrafts.size > 0);
     const disabled = state.saving || !hasChanges;
     ui.save.disabled = disabled;
     ui.cancel.disabled = disabled;
@@ -2037,6 +2302,7 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
   function cancelChanges() {
     if (state.saving || state.viewRow !== state.row || state.viewGid !== state.gid) return;
     renderFields();
+    discardRelatedDrafts();
     setStatus(`Cambios descartados · fila ${state.row}`);
     syncPendingActions();
   }
@@ -2067,6 +2333,7 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
     setActivity("row", true);
     state.row = row;
     state.gid = gid;
+    state.sheetName = activeSheetName() || `Hoja ${gid}`;
     syncPendingActions();
     ui.fields.inert = true;
     ui.fields.setAttribute("aria-busy", "true");
@@ -2428,13 +2695,18 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
     return /[\t\r\n"]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
   }
 
-  function writeRange(reference, values) {
+  function qualifiedReference(sheetName, reference) {
+    const escapedName = String(sheetName || "").replace(/'/g, "''");
+    return escapedName ? `'${escapedName}'!${reference}` : reference;
+  }
+
+  function writeRanges(operations, restoreReference = "") {
     return new Promise((resolve, reject) => {
       const requestId = `${Date.now()}-${++state.writeRequest}`;
       const timeout = setTimeout(() => {
         window.removeEventListener("message", receive);
         reject(new Error("Sheets no respondió al intento de escritura"));
-      }, 4_000);
+      }, Math.max(4_000, operations.length * 700 + 2_000));
 
       function receive(event) {
         const message = event.data;
@@ -2450,8 +2722,11 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
         source: "sheets-row-drawer",
         type: "write-range",
         requestId,
-        reference,
-        tsv: values.map(tsvValue).join("\t")
+        operations: operations.map((operation) => ({
+          reference: operation.reference,
+          tsv: operation.values.map(tsvValue).join("\t")
+        })),
+        restoreReference
       }, location.origin);
     });
   }
@@ -2487,7 +2762,7 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
             state.values = confirmedValues;
             state.headerCache.delete(`${spreadsheetId()}:${entry.gid}`);
             state.sheetCache.clear();
-            host.dataset.writeVerification = "verified";
+            host.dataset.writeVerification = state.pendingWrites.size ? "pending" : "verified";
             syncPendingActions();
             const relationshipKeyChanged = entry.writtenCells.some(({ index }) => /^id[a-z0-9]*/.test(normalizedColumn(entry.labels[index])));
             if (relationshipKeyChanged) startRelationships(state.fields, state.values, state.request?.signal, true);
@@ -2519,24 +2794,175 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
     }
   }
 
-  async function saveChanges() {
-    if (state.saving || !state.row) return;
-    if (state.viewRow !== state.row || state.viewGid !== state.gid) {
-      setStatus("Espera a que termine de cargar la fila seleccionada", "busy");
-      return;
+  function persistVisibleRelations() {
+    if (!state.row || !state.gid || !state.relations.length) return;
+    void writePersistentCache(cacheKey("relations", state.gid, state.row), {
+      currentSheet: state.sheetName,
+      relations: storedRelations(state.relations),
+      updatedAt: Date.now()
+    });
+  }
+
+  function buildRelatedWritePlans(drafts) {
+    const groupedRows = new Map();
+    for (const requestedDraft of drafts) {
+      const draft = state.relatedDrafts.get(requestedDraft.key);
+      if (!draft) continue;
+      const rowKey = `${encodeURIComponent(draft.sheetName)}:${draft.rowNumber}`;
+      if (!groupedRows.has(rowKey)) groupedRows.set(rowKey, []);
+      groupedRows.get(rowKey).push(draft);
     }
+
+    const rowPlans = [];
+    const operations = [];
+    for (const [rowKey, rowDrafts] of groupedRows) {
+      rowDrafts.sort((left, right) => left.columnIndex - right.columnIndex);
+      rowPlans.push({ key: `related:${rowKey}`, drafts: rowDrafts });
+      let run = [];
+      const flushRun = () => {
+        if (!run.length) return;
+        operations.push({
+          reference: qualifiedReference(run[0].sheetName, `${columnName(run[0].columnIndex + 1)}${run[0].rowNumber}`),
+          values: run.map((draft) => draft.value)
+        });
+        run = [];
+      };
+      for (const draft of rowDrafts) {
+        const previous = run[run.length - 1];
+        if (previous && draft.columnIndex !== previous.columnIndex + 1) flushRun();
+        run.push(draft);
+      }
+      flushRun();
+    }
+    return { operations, rowPlans };
+  }
+
+  function registerPrimaryWrite(plan) {
+    if (!plan) return;
+    const { gid, row, labels, properties, blockValues, firstChanged } = plan;
+    const key = `${gid}:${row}`;
+    const previousPending = state.pendingWrites.get(key);
+    previousPending?.controller.abort();
+    const optimisticValues = [...state.values];
+    blockValues.forEach((value, offset) => {
+      optimisticValues[firstChanged + offset] = String(value ?? "");
+    });
+    const writtenByIndex = new Map((previousPending?.writtenCells || []).map((cell) => [cell.index, cell]));
+    blockValues.forEach((value, offset) => {
+      const index = firstChanged + offset;
+      writtenByIndex.set(index, { index, value: String(value ?? "") });
+    });
+    const writtenCells = [...writtenByIndex.values()].sort((left, right) => left.index - right.index);
+    const controller = new AbortController();
+    const pendingSince = previousPending?.pendingSince || Date.now();
+    const entry = {
+      key,
+      cacheKey: cacheKey("row", gid, row),
+      gid,
+      row,
+      labels,
+      properties,
+      previousValues: previousPending?.previousValues || [...state.values],
+      writtenCells,
+      pendingSince,
+      controller
+    };
+    state.pendingWrites.set(key, entry);
+    state.values = optimisticValues;
+    void writePersistentCache(entry.cacheKey, {
+      labels,
+      values: optimisticValues,
+      updatedAt: Date.now(),
+      pendingChanges: writtenCells,
+      pendingSince
+    });
+    void verifyPendingWrite(entry);
+  }
+
+  function registerRelatedWrites(rowPlans) {
+    for (const plan of rowPlans) {
+      const previousPending = state.pendingWrites.get(plan.key);
+      previousPending?.controller.abort();
+      const previousByIndex = new Map((previousPending?.previousCells || []).map((cell) => [cell.index, cell]));
+      const writtenByIndex = new Map((previousPending?.writtenCells || []).map((cell) => [cell.index, cell]));
+      for (const draft of plan.drafts) {
+        if (!previousByIndex.has(draft.columnIndex)) {
+          previousByIndex.set(draft.columnIndex, { index: draft.columnIndex, value: draft.previousValue });
+        }
+        writtenByIndex.set(draft.columnIndex, { index: draft.columnIndex, value: draft.value, property: draft.property });
+        draft.row.cells[draft.cellIndex] = draft.value;
+        if (state.relatedDrafts.get(draft.key) === draft) state.relatedDrafts.delete(draft.key);
+      }
+      const firstDraft = plan.drafts[0];
+      const entry = {
+        key: plan.key,
+        sheetName: firstDraft.sheetName,
+        rowNumber: firstDraft.rowNumber,
+        relation: firstDraft.relation,
+        row: firstDraft.row,
+        previousCells: [...previousByIndex.values()],
+        writtenCells: [...writtenByIndex.values()].sort((left, right) => left.index - right.index),
+        controller: new AbortController()
+      };
+      state.pendingWrites.set(entry.key, entry);
+      void verifyRelatedWrite(entry);
+    }
+    state.sheetCache.clear();
+    persistVisibleRelations();
+    notifyRelatedDrafts();
+  }
+
+  async function verifyRelatedWrite(entry) {
+    const verificationDelays = [600, 1_200, 2_200, 4_000];
+    let verificationError = null;
+    try {
+      for (const delay of verificationDelays) {
+        await wait(delay);
+        if (entry.controller.signal.aborted || state.pendingWrites.get(entry.key) !== entry) return;
+        try {
+          const values = await readNamedSheetRow(entry.sheetName, entry.rowNumber, entry.controller.signal);
+          const verified = entry.writtenCells.every(({ index, value, property }) =>
+            valuesEqualForProperty(values[index], value, property)
+          );
+          if (!verified) continue;
+          for (const column of displayRelationColumns(entry.relation)) {
+            entry.row.cells[column.index] = String(values[column.propertyIndex] ?? "");
+          }
+          state.pendingWrites.delete(entry.key);
+          state.sheetCache.clear();
+          persistVisibleRelations();
+          host.dataset.writeVerification = state.pendingWrites.size ? "pending" : "verified";
+          notifyRelatedDrafts();
+          return;
+        } catch (error) {
+          if (error.name === "AbortError") return;
+          verificationError = error;
+        }
+      }
+
+      if (state.pendingWrites.get(entry.key) !== entry) return;
+      state.pendingWrites.delete(entry.key);
+      for (const previous of entry.previousCells) {
+        const column = displayRelationColumns(entry.relation).find((item) => item.propertyIndex === previous.index);
+        if (column) entry.row.cells[column.index] = previous.value;
+      }
+      state.sheetCache.clear();
+      persistVisibleRelations();
+      host.dataset.writeVerification = "failed";
+      setStatus(verificationError?.message || `Sheets no confirmó la fila ${entry.rowNumber} de ${entry.sheetName}`, "error");
+      notifyRelatedDrafts();
+    } finally {
+      if (state.pendingWrites.get(entry.key) === entry && entry.controller.signal.aborted) {
+        state.pendingWrites.delete(entry.key);
+      }
+    }
+  }
+
+  function preparePrimaryWrite() {
     const controls = currentControls();
     const properties = state.fields.map((_, index) => propertyForColumn(index));
     const changes = collectPendingChanges(controls);
-    if (!changes.length) {
-      setStatus("No hay cambios pendientes");
-      syncPendingActions();
-      return;
-    }
-
-    const gid = state.gid;
-    const row = state.row;
-    const labels = [...state.fields];
+    if (!changes.length) return null;
     const firstChanged = changes[0].index;
     const lastChanged = changes[changes.length - 1].index;
     const changedValues = new Map(changes.map((change) => [change.index, change.value]));
@@ -2548,60 +2974,68 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
         ? serializeEditorValue(checkboxEditorValue(state.values[index], property), property)
         : state.values[index];
     });
+    return {
+      gid: state.gid,
+      row: state.row,
+      labels: [...state.fields],
+      properties,
+      changes,
+      firstChanged,
+      blockValues,
+      operation: {
+        reference: qualifiedReference(state.sheetName, `${columnName(firstChanged + 1)}${state.row}`),
+        values: blockValues
+      }
+    };
+  }
 
+  async function persistChanges(primaryPlan, requestedRelatedDrafts) {
+    const relatedPlan = buildRelatedWritePlans(requestedRelatedDrafts);
+    const operations = [primaryPlan?.operation, ...relatedPlan.operations].filter(Boolean);
+    if (!operations.length) {
+      setStatus("No hay cambios pendientes");
+      syncPendingActions();
+      return;
+    }
+
+    const selectedReference = nameBoxValue().split("!").pop() || `A${state.row}`;
+    const restoreReference = qualifiedReference(state.sheetName, selectedReference);
+    const changeCount = (primaryPlan?.changes.length || 0) + requestedRelatedDrafts.length;
     state.saving = true;
-    syncPendingActions();
-    setStatus(`Pegando ${changes.length} campo(s) en un solo bloque…`, "busy");
+    notifyRelatedDrafts();
+    setStatus(`Guardando ${changeCount} campo(s)…`, "busy");
     try {
-      await writeRange(`${columnName(firstChanged + 1)}${row}`, blockValues);
-
-      const key = `${gid}:${row}`;
-      const previousPending = state.pendingWrites.get(key);
-      previousPending?.controller.abort();
-      const optimisticValues = [...state.values];
-      blockValues.forEach((value, offset) => {
-        optimisticValues[firstChanged + offset] = String(value ?? "");
-      });
-      const writtenByIndex = new Map((previousPending?.writtenCells || []).map((cell) => [cell.index, cell]));
-      blockValues.forEach((value, offset) => {
-        const index = firstChanged + offset;
-        writtenByIndex.set(index, { index, value: String(value ?? "") });
-      });
-      const writtenCells = [...writtenByIndex.values()].sort((left, right) => left.index - right.index);
-      const controller = new AbortController();
-      const pendingSince = previousPending?.pendingSince || Date.now();
-      const entry = {
-        key,
-        cacheKey: cacheKey("row", gid, row),
-        gid,
-        row,
-        labels,
-        properties,
-        previousValues: previousPending?.previousValues || [...state.values],
-        writtenCells,
-        pendingSince,
-        controller
-      };
-      state.pendingWrites.set(key, entry);
-      state.values = optimisticValues;
+      await writeRanges(operations, restoreReference);
+      registerPrimaryWrite(primaryPlan);
+      registerRelatedWrites(relatedPlan.rowPlans);
       host.dataset.writeVerification = "pending";
-      void writePersistentCache(entry.cacheKey, {
-        labels,
-        values: optimisticValues,
-        updatedAt: Date.now(),
-        pendingChanges: writtenCells,
-        pendingSince
-      });
-      setStatus(`Guardado en la fila ${row}`);
-      void verifyPendingWrite(entry);
+      setStatus(changeCount === 1 ? "Cambio guardado" : `${changeCount} cambios guardados`);
     } catch (error) {
       host.dataset.writeVerification = "failed";
       setStatus(error.message, "error");
     } finally {
       state.saving = false;
-      syncPendingActions();
+      notifyRelatedDrafts();
       syncSaveState();
     }
+  }
+
+  async function saveRelatedChanges(drafts = [...state.relatedDrafts.values()]) {
+    if (state.saving || !state.row || !drafts.length) return;
+    if (state.viewRow !== state.row || state.viewGid !== state.gid) {
+      setStatus("Espera a que termine de cargar la fila seleccionada", "busy");
+      return;
+    }
+    await persistChanges(null, drafts);
+  }
+
+  async function saveChanges() {
+    if (state.saving || !state.row) return;
+    if (state.viewRow !== state.row || state.viewGid !== state.gid) {
+      setStatus("Espera a que termine de cargar la fila seleccionada", "busy");
+      return;
+    }
+    await persistChanges(preparePrimaryWrite(), [...state.relatedDrafts.values()]);
   }
 
   function pollSelection() {
