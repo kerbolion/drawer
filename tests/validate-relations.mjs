@@ -29,8 +29,8 @@ const sheets = {
     rows: [["C-1", "Ana", "30"], ["C-2", "Luis", "44"]]
   },
   Servicios: {
-    headers: ["ID Servicio", "ID Contacto", "Nombre"],
-    rows: [["S-1", "C-1", "Limpieza"], ["S-2", "C-1", "Entrega"], ["S-3", "C-2", "Reparación"]]
+    headers: ["ID Servicio", "ID Contacto", "Nombre", "Nota"],
+    rows: [["S-1", "C-1", "Limpieza", "Inicial"], ["S-2", "C-1", "Entrega", ""], ["S-3", "C-2", "Reparación", ""]]
   }
 };
 let delayContactRow = false;
@@ -145,6 +145,14 @@ let cdp;
 try {
   const target = await waitForTarget(debugPort);
   cdp = await connect(target.webSocketDebuggerUrl);
+  const pageDeadline = Date.now() + 12_000;
+  let pageReady = false;
+  while (Date.now() < pageDeadline) {
+    pageReady = await cdp.evaluate(`document.readyState !== "loading" && Boolean(document.getElementById("t-name-box"))`);
+    if (pageReady) break;
+    await delay(100);
+  }
+  if (!pageReady) throw new Error("La hoja simulada no terminÃ³ de cargar");
   const frameTree = await cdp.command("Page.getFrameTree");
   const isolated = await cdp.command("Page.createIsolatedWorld", {
     frameId: frameTree.frameTree.frame.id,
@@ -365,15 +373,88 @@ try {
   if (!multipleValue.includes("Entrega") || !multipleValue.includes("Limpieza")) throw new Error(`La selecciÃ³n mÃºltiple no aplicÃ³ la opciÃ³n elegida: ${multipleValue}; punto ${JSON.stringify(multipleOptionPoint)}`);
   await closePanelPopup();
 
+  await configureColumn3("status", "Nuevo\nEn proceso\nCerrado");
+  await clickPanelNode('[data-column="3"] .ant-select-selector');
+  await waitForPanelPopup(".ant-select-dropdown:not(.ant-select-dropdown-hidden)", "En proceso");
+  const statusTags = await cdp.evaluate(`(() => {
+    const panel = document.getElementById("sheets-session-probe").shadowRoot.querySelector(".panel-frame").contentDocument;
+    const popup = Array.from(panel.querySelectorAll(".ant-select-dropdown:not(.ant-select-dropdown-hidden)")).at(-1);
+    return popup?.querySelectorAll(".option-tag.ant-tag").length || 0;
+  })()`);
+  if (statusTags < 3) throw new Error(`Las opciones de Estado no mostraron sus colores: ${statusTags}`);
+  await closePanelPopup();
+  await cdp.evaluate(`(() => {
+    const panel = document.getElementById("sheets-session-probe").shadowRoot.querySelector(".panel-frame").contentDocument;
+    panel.querySelector('[data-configure-column="3"]').click();
+  })()`);
+  const statusEditor = await cdp.evaluate(`(() => {
+    const panel = document.getElementById("sheets-session-probe").shadowRoot.querySelector(".panel-frame").contentDocument;
+    return {
+      colorSelectors: panel.querySelectorAll(".option-editor .color-select").length,
+      colors: JSON.parse(panel.querySelector('[name="optionColors"]')?.value || "{}")
+    };
+  })()`);
+  if (statusEditor.colorSelectors !== 3 || Object.keys(statusEditor.colors).length !== 3) {
+    throw new Error(`El editor de Estado no conservÃ³ colores: ${JSON.stringify(statusEditor)}`);
+  }
+  await clickPanelNode(".option-row:last-of-type .color-select .ant-select-selector");
+  await waitForPanelPopup(".ant-select-dropdown:not(.ant-select-dropdown-hidden)");
+  await clickPanelNode(".ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option");
+  await clickPanelNode(".property-actions .primary-button");
+  await delay(100);
+  await cdp.evaluate(`(() => {
+    const panel = document.getElementById("sheets-session-probe").shadowRoot.querySelector(".panel-frame").contentDocument;
+    panel.querySelector('[data-configure-column="3"]').click();
+  })()`);
+  const persistedStatusColors = await cdp.evaluate(`(() => {
+    const panel = document.getElementById("sheets-session-probe").shadowRoot.querySelector(".panel-frame").contentDocument;
+    return JSON.parse(panel.querySelector('[name="optionColors"]')?.value || "{}");
+  })()`);
+  if (persistedStatusColors.Cerrado !== "#d9d9d9") {
+    throw new Error(`El color de Estado no persistiÃ³: ${JSON.stringify(persistedStatusColors)}`);
+  }
+  await clickPanelNode(".property-actions .secondary-button");
+
   await configureColumn3("date");
   await clickPanelNode('[data-column="3"] .ant-picker');
-  await waitForPanelPopup(".ant-picker-dropdown:not(.ant-picker-dropdown-hidden)");
+  const datePopup = await waitForPanelPopup(".ant-picker-dropdown:not(.ant-picker-dropdown-hidden)");
+  const localizedDatePicker = await cdp.evaluate(`(() => {
+    const panel = document.getElementById("sheets-session-probe").shadowRoot.querySelector(".panel-frame").contentDocument;
+    const popup = Array.from(panel.querySelectorAll(".ant-picker-dropdown:not(.ant-picker-dropdown-hidden)")).at(-1);
+    return {
+      workspaceClass: popup?.classList.contains("workspace-date-picker-popup") || false,
+      text: popup?.textContent || ""
+    };
+  })()`);
+  if (!localizedDatePicker.workspaceClass || !localizedDatePicker.text.includes("Hoy") || !localizedDatePicker.text.includes("lumamijuvi")) {
+    throw new Error(`El calendario no usÃ³ el estilo y locale de Workspace: ${JSON.stringify({ datePopup, localizedDatePicker })}`);
+  }
   await closePanelPopup();
 
   await configureColumn3("time");
   await clickPanelNode('[data-column="3"] .ant-picker');
   await waitForPanelPopup(".ant-picker-dropdown:not(.ant-picker-dropdown-hidden)");
   await closePanelPopup();
+
+  await configureColumn3("text");
+  const localizedFalse = await cdp.evaluate(`(() => {
+    const panel = document.getElementById("sheets-session-probe").shadowRoot.querySelector(".panel-frame").contentDocument;
+    const input = panel.querySelector('[data-column="3"] input');
+    const setter = Object.getOwnPropertyDescriptor(panel.defaultView.HTMLInputElement.prototype, "value").set;
+    setter.call(input, "FALSO");
+    input.dispatchEvent(new panel.defaultView.Event("input", { bubbles: true }));
+    return panel.querySelector('[data-column="3"]').dataset.serializedValue;
+  })()`);
+  if (localizedFalse !== "FALSO") throw new Error(`No se preparÃ³ el valor localizado de casilla: ${localizedFalse}`);
+  await configureColumn3("checkbox");
+  const checkboxState = await cdp.evaluate(`(() => {
+    const panel = document.getElementById("sheets-session-probe").shadowRoot.querySelector(".panel-frame").contentDocument;
+    const control = panel.querySelector('[data-column="3"]');
+    return { value: control.dataset.serializedValue, checked: control.querySelector('input[type="checkbox"]')?.checked };
+  })()`);
+  if (checkboxState.value !== "FALSE" || checkboxState.checked !== false) {
+    throw new Error(`La casilla localizada no se normalizÃ³ para Sheets: ${JSON.stringify(checkboxState)}`);
+  }
 
   sheets.Contactos.rows[0][1] = "Ana actualizada";
   sheets.Servicios.rows.push(["S-4", "C-1", "Instalación"]);
@@ -433,7 +514,82 @@ try {
   if (persistentTypes.nameType !== "longText" || persistentTypes.ageType !== "number") {
     throw new Error(`Los tipos no se conservaron al cambiar de hoja: ${JSON.stringify(persistentTypes)}`);
   }
-  console.log("RELACIONES_OK: Select, selección múltiple, fecha, hora, tipos persistentes y caché confirmados.");
+
+  sheets.Servicios.rows[0][2] = "FALSO";
+  delayServicesTable = false;
+  await cdp.evaluate(`(() => {
+    const tabs = Array.from(document.querySelectorAll(".docs-sheet-tab"));
+    tabs.forEach(tab => tab.classList.remove("docs-sheet-active-tab"));
+    tabs.find(tab => tab.textContent.includes("Servicios")).classList.add("docs-sheet-active-tab");
+    location.hash = "gid=1&range=A2";
+    const box = document.getElementById("t-name-box");
+    box.value = "A2";
+    box.dispatchEvent(new Event("input", { bubbles: true }));
+  })()`);
+  const checkboxLoadDeadline = Date.now() + 8_000;
+  let checkboxRow;
+  while (Date.now() < checkboxLoadDeadline) {
+    checkboxRow = await cdp.evaluate(`(() => {
+      const host = document.getElementById("sheets-session-probe");
+      const panel = host?.shadowRoot?.querySelector(".panel-frame")?.contentDocument;
+      return {
+        gid: host?.dataset.gid,
+        saveState: host?.dataset.saveState,
+        values: panel ? Array.from(panel.querySelectorAll("[data-column]"), control => control.dataset.serializedValue || "") : []
+      };
+    })()`);
+    if (checkboxRow.gid === "1" && checkboxRow.saveState === "saved" && checkboxRow.values[2] === "FALSE" && checkboxRow.values[3] === "Inicial") break;
+    await delay(100);
+  }
+  if (checkboxRow?.values?.[2] !== "FALSE") throw new Error(`No se normalizó FALSO al cargar la fila: ${JSON.stringify(checkboxRow)}`);
+
+  await cdp.evaluate(`(() => {
+    window.__checkboxRepairPaste = null;
+    document.addEventListener("paste", event => {
+      window.__checkboxRepairPaste = event.clipboardData?.getData("text/plain") || "";
+    }, { capture: true, once: true });
+    const panel = document.getElementById("sheets-session-probe").shadowRoot.querySelector(".panel-frame").contentDocument;
+    panel.querySelector(".save").click();
+  })()`);
+  const checkboxRepairDeadline = Date.now() + 3_000;
+  let checkboxRepairPaste = null;
+  while (Date.now() < checkboxRepairDeadline) {
+    checkboxRepairPaste = await cdp.evaluate("window.__checkboxRepairPaste");
+    if (checkboxRepairPaste !== null) break;
+    await delay(50);
+  }
+  if (checkboxRepairPaste !== "FALSE") {
+    throw new Error(`Guardar no reparó la casilla localizada existente: ${JSON.stringify(checkboxRepairPaste)}`);
+  }
+  await delay(650);
+
+  await cdp.evaluate(`(() => {
+    window.__checkboxBlockPaste = null;
+    document.addEventListener("paste", event => {
+      window.__checkboxBlockPaste = event.clipboardData?.getData("text/plain") || "";
+    }, { capture: true, once: true });
+    const panel = document.getElementById("sheets-session-probe").shadowRoot.querySelector(".panel-frame").contentDocument;
+    const setter = Object.getOwnPropertyDescriptor(panel.defaultView.HTMLInputElement.prototype, "value").set;
+    const update = (column, value) => {
+      const input = panel.querySelector('[data-column="' + column + '"] input');
+      setter.call(input, value);
+      input.dispatchEvent(new panel.defaultView.Event("input", { bubbles: true }));
+    };
+    update(2, "C-9");
+    update(4, "Actualizada");
+    panel.querySelector(".save").click();
+  })()`);
+  const checkboxPasteDeadline = Date.now() + 3_000;
+  let checkboxBlockPaste = null;
+  while (Date.now() < checkboxPasteDeadline) {
+    checkboxBlockPaste = await cdp.evaluate("window.__checkboxBlockPaste");
+    if (checkboxBlockPaste !== null) break;
+    await delay(50);
+  }
+  if (checkboxBlockPaste !== "C-9\tFALSE\tActualizada") {
+    throw new Error(`El bloque reinsertó el texto localizado de la casilla: ${JSON.stringify(checkboxBlockPaste)}`);
+  }
+  console.log("RELACIONES_OK: opciones con color, casillas localizadas, fecha y hora en español, tipos persistentes y caché confirmados.");
 } finally {
   cdp?.close();
   if (browser.pid) spawnSync("taskkill", ["/PID", String(browser.pid), "/T", "/F"], { stdio: "ignore", windowsHide: true });

@@ -10,23 +10,29 @@ import Input from "antd/es/input/index.js";
 import InputNumber from "antd/es/input-number/index.js";
 import Select from "antd/es/select/index.js";
 import Space from "antd/es/space/index.js";
+import Tag from "antd/es/tag/index.js";
 import TimePicker from "antd/es/time-picker/index.js";
 import {
   CalculatorOutlined,
   CalendarOutlined,
   CheckSquareOutlined,
+  DeleteOutlined,
   LinkOutlined,
   MailOutlined,
   PhoneOutlined,
+  PlusOutlined,
   UnorderedListOutlined
 } from "@ant-design/icons";
 import esES from "antd/es/locale/es_ES.js";
 import dayjs from "dayjs";
+import "dayjs/locale/es.js";
 import { CircleDollarSign, Clock3, Hash, ListChecks, Type } from "lucide-react";
 import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
 
 (() => {
   "use strict";
+
+  dayjs.locale("es");
 
   function installTrustedHtmlBridge(view) {
     const factory = view?.trustedTypes;
@@ -82,6 +88,16 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
     { value: "email", label: "Correo electrónico" }
   ];
   const FIELD_TYPE_VALUES = new Set(FIELD_TYPES.map((type) => type.value));
+  const OPTION_PALETTE = [
+    "#91caff",
+    "#87e8de",
+    "#b7eb8f",
+    "#ffe58f",
+    "#ffc069",
+    "#ffadd2",
+    "#d3adf7",
+    "#d9d9d9"
+  ];
   const state = {
     row: null,
     gid: null,
@@ -297,6 +313,20 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
     .property-type-option-icon svg { display: block; width: 14px; height: 14px; }
     .property-help { margin-top: 6px; color: ${antdTokens.colorTextTertiary}; font-size: 12px; }
     .property-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    .option-editor { border: 1px solid ${antdTokens.colorBorder}; border-radius: ${antdTokens.borderRadius}px; padding: 10px; }
+    .option-editor-header {
+      display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; font-weight: 700;
+    }
+    .option-row { display: flex; width: 100%; margin-bottom: 8px; }
+    .option-row:last-of-type { margin-bottom: 0; }
+    .option-row .ant-space-item:nth-child(2) { flex: 1; min-width: 0; }
+    .option-row .ant-input { min-width: 0; }
+    .color-swatch { display: block; width: 42px; height: 18px; border-radius: 999px; }
+    .color-select .ant-select-selection-item {
+      display: flex; align-items: center; justify-content: center; padding-inline-end: 0;
+    }
+    .color-select .ant-select-selection-item-content { display: flex; max-width: none; overflow: visible; }
+    .option-tag.ant-tag { margin-inline-end: 0; }
     .property-source {
       margin-bottom: 22px; border-radius: ${antdTokens.borderRadius}px; padding: 10px 12px;
       background: ${antdTokens.colorFillQuaternary}; color: ${antdTokens.colorTextSecondary}; font-size: 12px;
@@ -325,6 +355,7 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
     th { color: ${antdTokens.colorTextSecondary}; background: ${workspaceTokens.surfaceMuted}; font-weight: 600; }
     tbody tr:nth-child(even) { background: var(--workspace-surface-subtle); }
     .relation-more { padding: 8px 10px; border-top: 1px solid var(--workspace-border-soft); color: var(--workspace-text-muted); font-size: 11px; }
+    .workspace-date-picker-popup .ant-picker-panel-container { max-width: calc(100vw - 16px); }
     footer { padding: 12px 24px 16px; border-top: 1px solid ${antdTokens.colorBorderSecondary}; background: ${antdTokens.colorBgContainer}; }
     .meta { margin-bottom: 9px; color: ${antdTokens.colorTextTertiary}; font-size: 11px; }
     .save {
@@ -335,12 +366,21 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
     }
     .save:hover { background: ${antdTokens.colorPrimaryHover}; border-color: ${antdTokens.colorPrimaryHover}; }
     .save:disabled { border-color: ${antdTokens.colorBgContainerDisabled}; background: ${antdTokens.colorBgContainerDisabled}; color: ${antdTokens.colorTextDisabled}; box-shadow: none; cursor: default; }
-    @media (max-width: 540px) {
+    @media (max-width: 640px) {
       main { padding: 16px 14px 24px; }
       header, footer { padding-inline: 16px; }
       .field { grid-template-columns: minmax(86px, 34%) minmax(0, 1fr); gap: 10px; }
       .property-header, .property-body { padding-inline: 16px; }
       .property-grid { grid-template-columns: 1fr; gap: 0; }
+      .workspace-date-picker-popup {
+        top: 50% !important; left: 50% !important; right: auto !important;
+        width: auto; transform: translate(-50%, -50%) !important;
+      }
+      .workspace-date-picker-popup .ant-picker-panel-container {
+        max-width: 100%; max-height: calc(100vh - 16px); overflow: auto;
+      }
+      .workspace-date-picker-popup .ant-picker-panel-layout { width: 100%; }
+      .workspace-date-picker-popup .ant-picker-datetime-panel { flex-direction: column; }
     }
     @media (prefers-reduced-motion: reduce) {
       .save-state.is-saving .save-state-spinner, .save-state.is-saved .save-state-check { animation: none; }
@@ -359,6 +399,115 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
     ...esES.DatePicker,
     lang: { ...esES.DatePicker.lang, ok: "OK" }
   };
+  const workspaceLocale = { ...esES, DatePicker: datePickerLocale };
+
+  function validOptionColor(value, fallback = "") {
+    const color = String(value || "").trim();
+    return /^#[0-9a-f]{6}$/i.test(color) ? color : fallback;
+  }
+
+  function propertyOptionEntries(property) {
+    return (property.options || []).map((label, index) => ({
+      label: String(label),
+      color: validOptionColor(property.optionColors?.[label], OPTION_PALETTE[index % OPTION_PALETTE.length])
+    }));
+  }
+
+  function readableTagTextColor(color) {
+    if (!validOptionColor(color)) return undefined;
+    const red = parseInt(color.slice(1, 3), 16);
+    const green = parseInt(color.slice(3, 5), 16);
+    const blue = parseInt(color.slice(5, 7), 16);
+    return (0.299 * red + 0.587 * green + 0.114 * blue) / 255 > 0.58 ? "#1f2937" : "#ffffff";
+  }
+
+  function optionTag(label, color, extraProps = {}) {
+    return React.createElement(Tag, {
+      ...extraProps,
+      className: `option-tag ${extraProps.className || ""}`.trim(),
+      color: validOptionColor(color) || undefined,
+      style: {
+        borderColor: "transparent",
+        ...(validOptionColor(color) ? { color: readableTagTextColor(color) } : {}),
+        ...(extraProps.style || {})
+      }
+    }, label);
+  }
+
+  function PropertyOptionsEditor({ property }) {
+    const [entries, setEntries] = React.useState(() => propertyOptionEntries(property));
+    const updateEntry = (index, patch) => setEntries((current) => current.map((entry, entryIndex) => (
+      entryIndex === index ? { ...entry, ...patch } : entry
+    )));
+    const addEntry = () => setEntries((current) => [
+      ...current,
+      {
+        label: `Nueva opción ${current.length + 1}`,
+        color: OPTION_PALETTE[current.length % OPTION_PALETTE.length]
+      }
+    ]);
+    const removeEntry = (index) => setEntries((current) => current.filter((_, entryIndex) => entryIndex !== index));
+    const colorOptions = OPTION_PALETTE.map((color) => ({
+      value: color,
+      label: React.createElement("span", { className: "color-swatch", style: { backgroundColor: color } })
+    }));
+    const colors = Object.fromEntries(entries.map((entry, index) => [
+      entry.label.trim(),
+      validOptionColor(entry.color, OPTION_PALETTE[index % OPTION_PALETTE.length])
+    ]).filter(([label]) => label));
+
+    return React.createElement(
+      "div",
+      { className: "option-editor", "data-option-editor": "" },
+      React.createElement(
+        "div",
+        { className: "option-editor-header" },
+        React.createElement("span", null, "Opciones"),
+        React.createElement(Button, {
+          type: "link",
+          htmlType: "button",
+          icon: React.createElement(PlusOutlined),
+          onClick: addEntry
+        }, "Agregar")
+      ),
+      ...entries.map((entry, index) => React.createElement(
+        Space,
+        { key: index, align: "baseline", className: "option-row", size: 8 },
+        React.createElement(Select, {
+          className: "color-select",
+          popupMatchSelectWidth: false,
+          value: entry.color,
+          onChange: (color) => updateEntry(index, { color }),
+          options: colorOptions,
+          style: { width: 82 }
+        }),
+        React.createElement(Input, {
+          value: entry.label,
+          placeholder: `Opción ${index + 1}`,
+          onChange: (event) => updateEntry(index, { label: event.target.value }),
+          style: { flex: 1 }
+        }),
+        React.createElement(Button, {
+          htmlType: "button",
+          icon: React.createElement(DeleteOutlined),
+          "aria-label": `Eliminar opción ${index + 1}`,
+          onClick: () => removeEntry(index)
+        })
+      )),
+      React.createElement("textarea", {
+        name: "options",
+        value: entries.map((entry) => entry.label).join("\n"),
+        readOnly: true,
+        hidden: true
+      }),
+      React.createElement("input", {
+        name: "optionColors",
+        type: "hidden",
+        value: JSON.stringify(colors),
+        readOnly: true
+      })
+    );
+  }
 
   function typeIcon(type, size = 14) {
     const lucideProps = { size, strokeWidth: 2 };
@@ -389,7 +538,7 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
         ConfigProvider,
         {
           theme: workspaceThemeConfig,
-          locale: esES,
+          locale: workspaceLocale,
           getPopupContainer: () => panelDocument.body
         },
         child
@@ -464,25 +613,39 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
     }
 
     if (["select", "status"].includes(property.type)) {
-      const values = [...new Set([...(property.options || []), ...(value ? [String(value)] : [])])];
+      const entries = propertyOptionEntries(property);
+      if (value && !entries.some((entry) => entry.label === String(value))) {
+        entries.push({ label: String(value), color: "" });
+      }
       return React.createElement(Select, {
         allowClear: true,
         value: value || undefined,
         onChange: (nextValue) => update(nextValue || ""),
-        options: values.map((option) => ({ value: option, label: option })),
+        options: entries.map((entry) => ({
+          value: entry.label,
+          title: entry.label,
+          label: optionTag(entry.label, entry.color)
+        })),
         style: fullWidth
       });
     }
 
     if (property.type === "multiSelect") {
       const selected = Array.isArray(value) ? value : [];
-      const values = [...new Set([...(property.options || []), ...selected])];
+      const entries = propertyOptionEntries(property);
+      for (const selectedValue of selected) {
+        if (!entries.some((entry) => entry.label === selectedValue)) entries.push({ label: selectedValue, color: "" });
+      }
       return React.createElement(Select, {
         mode: "multiple",
         allowClear: true,
         value: selected,
         onChange: update,
-        options: values.map((option) => ({ value: option, label: option })),
+        options: entries.map((entry) => ({ value: entry.label, label: entry.label, title: entry.label })),
+        tagRender: ({ value: selectedValue, label, closable, onClose }) => {
+          const entry = entries.find((item) => item.label === selectedValue);
+          return optionTag(label || selectedValue, entry?.color, { closable, onClose });
+        },
         style: fullWidth
       });
     }
@@ -496,6 +659,7 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
       return React.createElement(DatePicker, {
         value: pickerValue,
         locale: datePickerLocale,
+        popupClassName: "workspace-date-picker-popup",
         placement: "bottomRight",
         showTime: usesTime ? { format: timeFormat, use12Hours: uses12Hours } : false,
         format,
@@ -510,6 +674,7 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
       const pickerValue = value && dayjs(`2000-01-01T${value}`).isValid() ? dayjs(`2000-01-01T${value}`) : null;
       return React.createElement(TimePicker, {
         value: pickerValue,
+        locale: datePickerLocale,
         format: timeFormat,
         use12Hours: uses12Hours,
         onChange: (time) => update(time ? time.format("HH:mm") : ""),
@@ -846,6 +1011,7 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
       customName: false,
       type: "text",
       options: [],
+      optionColors: {},
       currencySymbol: "$",
       currencyDecimals: 2,
       dateFormat: "DD/MM/YYYY",
@@ -858,6 +1024,17 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
   function normalizeProperty(property, index, header = "") {
     const fallback = defaultProperty(index, header);
     const source = property && typeof property === "object" ? property : {};
+    const options = [];
+    const optionColors = {};
+    for (const [optionIndex, rawOption] of (Array.isArray(source.options) ? source.options : []).entries()) {
+      const label = String(typeof rawOption === "string" ? rawOption : rawOption?.label || rawOption?.value || "").trim();
+      if (!label || options.includes(label)) continue;
+      options.push(label);
+      optionColors[label] = validOptionColor(
+        typeof rawOption === "object" ? rawOption?.color : source.optionColors?.[label],
+        OPTION_PALETTE[optionIndex % OPTION_PALETTE.length]
+      );
+    }
     return {
       ...fallback,
       ...source,
@@ -867,9 +1044,8 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
       name: String(source.name || header || fallback.name),
       customName: Boolean(source.customName),
       type: FIELD_TYPE_VALUES.has(source.type) ? source.type : "text",
-      options: Array.isArray(source.options)
-        ? source.options.map((option) => String(option).trim()).filter(Boolean)
-        : [],
+      options,
+      optionColors,
       currencySymbol: String(source.currencySymbol || "$"),
       currencyDecimals: Math.min(6, Math.max(0, Number(source.currencyDecimals ?? 2) || 0)),
       dateFormat: ["DD/MM/YYYY", "MM/DD/YYYY", "YYYY-MM-DD"].includes(source.dateFormat)
@@ -1424,6 +1600,22 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
       .filter(Boolean);
   }
 
+  function checkboxEditorValue(rawValue, property) {
+    const text = comparable(rawValue);
+    if (text.toLowerCase() === comparable(property.checkedValue).toLowerCase()) return true;
+    if (text.toLowerCase() === comparable(property.uncheckedValue).toLowerCase()) return false;
+    const normalized = text.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase();
+    return ["TRUE", "VERDADERO", "SI", "YES", "1"].includes(normalized);
+  }
+
+  function checkboxNeedsCanonicalWrite(rawValue, property) {
+    const text = comparable(rawValue);
+    const normalized = text.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase();
+    if (!["VERDADERO", "FALSO"].includes(normalized)) return false;
+    const canonical = serializeEditorValue(checkboxEditorValue(text, property), property);
+    return text.toLowerCase() !== comparable(canonical).toLowerCase();
+  }
+
   function createFieldControl(property, index) {
     const control = element("div", "antd-field-control");
     control.dataset.column = String(index + 1);
@@ -1436,7 +1628,7 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
   function editorValueFromRaw(rawValue, property) {
     const text = String(rawValue ?? "");
     if (property.type === "checkbox") {
-      return comparable(text).toLowerCase() === comparable(property.checkedValue).toLowerCase();
+      return checkboxEditorValue(text, property);
     }
     if (property.type === "multiSelect") return splitMultipleValues(text);
     if (property.type === "date") return dateInputValue(text, property.dateFormat);
@@ -1504,8 +1696,7 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
       return sameValues(splitMultipleValues(left), splitMultipleValues(right));
     }
     if (property.type === "checkbox") {
-      const checked = (value) => comparable(value).toLowerCase() === comparable(property.checkedValue).toLowerCase();
-      return checked(left) === checked(right);
+      return checkboxEditorValue(left, property) === checkboxEditorValue(right, property);
     }
     return String(left ?? "") === String(right ?? "");
   }
@@ -1741,15 +1932,23 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
     if (index === null) return;
     const property = propertyForColumn(index);
     const type = ui.propertyType.value;
+    ui.propertySettings._optionsRoot?.unmount();
+    delete ui.propertySettings._optionsRoot;
     ui.propertySettings.replaceChildren();
 
     if (["select", "multiSelect", "status"].includes(type)) {
-      ui.propertySettings.appendChild(propertyFormItem(
-        "options",
-        "Opciones",
-        (property.options || []).join("\n"),
-        { kind: "textarea", help: "Escribe una opción por línea. Los valores se guardan como texto en Sheets." }
+      const optionsHost = element("div", "property-form-item");
+      const editorHost = element("div");
+      optionsHost.append(editorHost, element(
+        "div",
+        "property-help",
+        "Cada opción conserva su texto en Sheets y su color en este workspace local."
       ));
+      ui.propertySettings.appendChild(optionsHost);
+      ui.propertySettings._optionsRoot = createRoot(editorHost);
+      flushSync(() => ui.propertySettings._optionsRoot.render(antdTree(
+        React.createElement(PropertyOptionsEditor, { property })
+      )));
     }
 
     if (type === "currency") {
@@ -1822,12 +2021,24 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
     const options = optionsField
       ? [...new Set(String(optionsField.value || "").split(/\r?\n/).map((value) => value.trim()).filter(Boolean))]
       : previous.options;
+    let submittedColors = previous.optionColors || {};
+    try {
+      submittedColors = JSON.parse(String(formData.get("optionColors") || "{}"));
+    } catch {}
+    const optionColors = Object.fromEntries(options.map((label, optionIndex) => [
+      label,
+      validOptionColor(
+        submittedColors?.[label] || previous.optionColors?.[label],
+        OPTION_PALETTE[optionIndex % OPTION_PALETTE.length]
+      )
+    ]));
     const next = normalizeProperty({
       ...previous,
       name,
       customName: name !== previous.sourceHeader,
       type,
       options,
+      optionColors,
       currencySymbol: formData.get("currencySymbol") ?? previous.currencySymbol,
       currencyDecimals: formData.get("currencyDecimals") ?? previous.currencyDecimals,
       dateFormat: formData.get("dateFormat") ?? previous.dateFormat,
@@ -1896,7 +2107,8 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
       const index = Number(control.dataset.column) - 1;
       const property = propertyForColumn(index);
       const value = controlValue(control, property);
-      return valuesEqualForProperty(value, state.values[index], property) ? [] : [{ index, value }];
+      const needsCheckboxRepair = property.type === "checkbox" && checkboxNeedsCanonicalWrite(state.values[index], property);
+      return valuesEqualForProperty(value, state.values[index], property) && !needsCheckboxRepair ? [] : [{ index, value }];
     });
     if (!changes.length) {
       setStatus("No hay cambios pendientes");
@@ -1912,7 +2124,12 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
       const changedValues = new Map(changes.map((change) => [change.index, change.value]));
       const blockValues = controls.slice(firstChanged, lastChanged + 1).map((control) => {
         const index = Number(control.dataset.column) - 1;
-        return changedValues.has(index) ? changedValues.get(index) : state.values[index];
+        if (changedValues.has(index)) return changedValues.get(index);
+        const property = propertyForColumn(index);
+        if (property.type === "checkbox") {
+          return serializeEditorValue(checkboxEditorValue(state.values[index], property), property);
+        }
+        return state.values[index];
       });
       await writeRange(`${columnName(firstChanged + 1)}${state.row}`, blockValues);
       let verified = false;

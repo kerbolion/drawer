@@ -13,6 +13,9 @@ La interfaz usa Ant Design `5.15.4` y replica los tokens claros del drawer de `w
 - Conserva una configuración independiente por documento y pestaña en `chrome.storage.local`.
 - Permite configurar cada columna como texto, área de texto, número, monto, fecha, fecha y hora, hora, selección, selección múltiple, estado, casilla, URL, teléfono o correo.
 - Usa los componentes reales de Ant Design para editar cada tipo y muestra el mismo icono de propiedad que Workspace.
+- Permite agregar, eliminar y colorear las opciones de selección y Estado con la paleta de Workspace.
+- Muestra calendarios y selectores de hora en español con el mismo comportamiento responsive de Workspace.
+- Normaliza `VERDADERO`/`FALSO` a los valores válidos de las casillas de Sheets al guardar bloques.
 - Muestra la actividad con el indicador del encabezado: spinner azul durante la lectura o el guardado y check verde al terminar, sin mensajes rutinarios dentro del formulario.
 - Aísla el formulario para que `Ctrl+V` permanezca dentro del input.
 - Guarda el rango editado mediante un único pegado TSV horizontal de Sheets.
@@ -44,7 +47,7 @@ La caché conserva hasta 120 entradas recientes en `chrome.storage.local`. Al vo
 
 Cada archivo de Sheets se guarda como un workspace local. Las pestañas se identifican por su `gid` y cada columna mantiene su nombre visible, tipo y opciones. Esta configuración no caduca junto con la caché de filas.
 
-Pulsa el icono de tipo junto al nombre de una propiedad para abrir **Editar propiedad**. Todas las columnas nuevas comienzan como **Texto** y la extensión no intenta adivinar el tipo. Los desplegables y estados reciben una opción por línea; las casillas permiten definir el valor activado y desactivado; montos, fechas y horas conservan sus ajustes de presentación.
+Pulsa el icono de tipo junto al nombre de una propiedad para abrir **Editar propiedad**. Todas las columnas nuevas comienzan como **Texto** y la extensión no intenta adivinar el tipo. Los desplegables y estados tienen un editor de opciones con colores; las casillas permiten definir el valor activado y desactivado; montos, fechas y horas conservan sus ajustes de presentación.
 
 El icono junto a cada propiedad indica su tipo y abre su configuración. Fechas y horas usan los selectores de Ant Design; números y montos usan `InputNumber`; opciones simples y múltiples usan `Select`; las casillas usan `Checkbox`.
 
