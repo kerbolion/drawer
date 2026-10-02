@@ -42,7 +42,26 @@
 
   window.addEventListener("message", async (event) => {
     const message = event.data;
-    if (event.source !== window || message?.source !== SOURCE || message?.type !== "write-range") return;
+    if (event.source !== window || message?.source !== SOURCE) return;
+
+    if (message?.type === "focus-range") {
+      try {
+        focusCell(String(message.reference || ""));
+        await wait(180);
+        window.postMessage({ source: SOURCE, type: "focus-result", requestId: message.requestId, ok: true }, location.origin);
+      } catch (error) {
+        window.postMessage({
+          source: SOURCE,
+          type: "focus-result",
+          requestId: message.requestId,
+          ok: false,
+          error: error instanceof Error ? error.message : String(error)
+        }, location.origin);
+      }
+      return;
+    }
+
+    if (message?.type !== "write-range") return;
 
     try {
       const operations = Array.isArray(message.operations) && message.operations.length

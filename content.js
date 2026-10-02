@@ -3,6 +3,7 @@ import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
 import { StyleProvider } from "@ant-design/cssinjs";
 import Button from "antd/es/button/index.js";
+import Card from "antd/es/card/index.js";
 import Checkbox from "antd/es/checkbox/index.js";
 import ConfigProvider from "antd/es/config-provider/index.js";
 import DatePicker from "antd/es/date-picker/index.js";
@@ -14,6 +15,7 @@ import Pagination from "antd/es/pagination/index.js";
 import Segmented from "antd/es/segmented/index.js";
 import Select from "antd/es/select/index.js";
 import Space from "antd/es/space/index.js";
+import Spin from "antd/es/spin/index.js";
 import Tag from "antd/es/tag/index.js";
 import TimePicker from "antd/es/time-picker/index.js";
 import {
@@ -23,11 +25,14 @@ import {
   CheckSquareOutlined,
   DeleteOutlined,
   DownOutlined,
+  DragOutlined,
+  LeftOutlined,
   LinkOutlined,
   MailOutlined,
   PhoneOutlined,
   PlusOutlined,
   RightOutlined,
+  SearchOutlined,
   TableOutlined,
   UnorderedListOutlined
 } from "@ant-design/icons";
@@ -131,6 +136,7 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
     workspaceWriteQueue: Promise.resolve(),
     propertyColumn: null,
     pendingWrites: new Map(),
+    sheetViewWrites: new Map(),
     relations: [],
     relatedDrafts: new Map(),
     relatedDraftListeners: new Set(),
@@ -329,6 +335,9 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
     .eyebrow { color: ${antdTokens.colorTextTertiary}; font-size: 11px; font-weight: 600; letter-spacing: .08em; }
     .title-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
     .header-actions { display: flex; align-items: center; gap: 8px; }
+    .sheet-view-actions { display: inline-flex; align-items: center; gap: 2px; }
+    .sheet-view-actions .ant-btn { color: var(--workspace-text-muted); }
+    .sheet-view-actions .ant-btn:hover { color: var(--workspace-primary); }
     .drawer h1 { margin: 6px 0 0; color: ${antdTokens.colorTextHeading}; font-size: 18px; line-height: 1.35; }
     .icon-button {
       width: ${antdTokens.controlHeight}px; height: ${antdTokens.controlHeight}px;
@@ -557,6 +566,79 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
     .related-drawer-footer { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 8px; }
     .related-drawer-footer .ant-btn { min-height: ${antdTokens.controlHeightLG}px; font-weight: 600; }
     .relation-pagination { display: flex; justify-content: center; padding: 12px 14px 0; }
+    .sheet-view-drawer-root .ant-drawer-content-wrapper { width: min(720px, 100%) !important; }
+    .sheet-view-drawer .ant-drawer-header { background: var(--workspace-surface); border-bottom-color: var(--workspace-border-soft); }
+    .sheet-view-drawer .ant-drawer-body {
+      min-width: 0; min-height: 0; overflow: hidden; padding: 0; background: var(--workspace-bg);
+    }
+    .sheet-view-surface { display: flex; width: 100%; height: 100%; min-width: 0; min-height: 0; flex-direction: column; }
+    .sheet-view-loading, .sheet-view-empty {
+      display: flex; flex: 1; min-height: 320px; align-items: center; justify-content: center; padding: 32px;
+      background: var(--workspace-surface);
+    }
+    .view-controls {
+      display: flex; flex: 0 0 auto; align-items: center; justify-content: space-between; gap: 12px;
+      padding: 12px; border-bottom: 1px solid var(--workspace-border); background: var(--workspace-surface);
+    }
+    .view-controls .view-search { width: min(280px, 100%); }
+    .kanban-view, .calendar-view { display: flex; min-width: 0; min-height: 0; flex: 1; flex-direction: column; }
+    .kanban-board {
+      display: grid; flex: 1; min-height: 0; grid-auto-columns: minmax(260px, 1fr); grid-auto-flow: column;
+      gap: 12px; overflow: auto; padding: 12px; background: var(--workspace-surface-muted);
+    }
+    .kanban-column {
+      display: flex; min-height: 390px; flex-direction: column; padding: 10px; border: 1px solid var(--workspace-border);
+      border-radius: 6px; background: var(--workspace-surface);
+    }
+    .kanban-column.is-drag-over { border-color: var(--workspace-primary); box-shadow: 0 0 0 2px var(--workspace-primary-soft); }
+    .kanban-column-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
+    .kanban-column-title { display: flex; min-width: 0; align-items: center; gap: 6px; color: var(--workspace-text); font-weight: 700; }
+    .kanban-column-title .ant-tag { max-width: 190px; margin-inline-end: 0; overflow: hidden; text-overflow: ellipsis; }
+    .kanban-count { color: var(--workspace-text-muted); font-size: 12px; }
+    .kanban-cards { display: flex; flex-direction: column; gap: 8px; }
+    .kanban-card-shell { cursor: pointer; }
+    .kanban-card-shell.is-moving { opacity: .55; pointer-events: none; }
+    .kanban-card { border-color: var(--workspace-border); background: var(--workspace-surface); }
+    .kanban-card:hover { border-color: var(--workspace-primary-border); box-shadow: 0 8px 22px var(--workspace-shadow); }
+    .kanban-card .ant-card-head { min-height: 38px; padding: 0 10px; }
+    .kanban-card .ant-card-head-title { padding: 8px 0; }
+    .kanban-card .ant-card-body { padding: 10px; }
+    .kanban-card-title { display: flex; min-width: 0; align-items: center; gap: 6px; color: var(--workspace-text); font-weight: 700; }
+    .kanban-card-title > span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .kanban-card-drag { display: inline-flex; color: var(--workspace-text-muted); cursor: grab; }
+    .kanban-field {
+      display: grid; min-width: 0; grid-template-columns: auto minmax(0, 1fr); align-items: center;
+      gap: 2px 8px; margin-top: 8px;
+    }
+    .kanban-field .property-type-icon { grid-row: 1 / span 2; width: 28px; min-height: 28px; }
+    .kanban-field > span:not(.property-type-icon) { color: var(--workspace-text-muted); font-size: 11px; }
+    .kanban-field strong { overflow: hidden; color: var(--workspace-text); font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+    .kanban-empty-drop {
+      display: flex; min-height: 80px; align-items: center; justify-content: center; padding: 12px;
+      border: 1px dashed var(--workspace-border-soft); border-radius: 6px; color: var(--workspace-text-muted); font-size: 12px;
+    }
+    .kanban-footer { display: flex; flex: 0 0 auto; justify-content: flex-end; padding: 10px 12px; border-top: 1px solid var(--workspace-border); background: var(--workspace-surface); }
+    .month-controls { display: flex; align-items: center; gap: 8px; }
+    .month-controls strong { min-width: 140px; color: var(--workspace-text); text-align: center; text-transform: capitalize; }
+    .calendar-scroll { flex: 1; min-width: 0; min-height: 0; overflow: auto; background: var(--workspace-surface); }
+    .calendar-grid { display: grid; min-width: 700px; grid-template-columns: repeat(7, minmax(100px, 1fr)); }
+    .calendar-weekday {
+      position: sticky; z-index: 1; top: 0; padding: 10px; border-right: 1px solid var(--workspace-border);
+      border-bottom: 1px solid var(--workspace-border); background: var(--workspace-surface-muted);
+      color: var(--workspace-text-secondary); font-size: 12px; font-weight: 700; text-align: center;
+    }
+    .calendar-day { min-height: 116px; padding: 8px; border-right: 1px solid var(--workspace-border); border-bottom: 1px solid var(--workspace-border); background: var(--workspace-surface); }
+    .calendar-day.is-muted { background: var(--workspace-surface-subtle); color: var(--workspace-text-muted); }
+    .calendar-day.is-today .calendar-day-number { background: var(--workspace-primary); color: #fff; }
+    .calendar-day-header { display: flex; align-items: center; justify-content: space-between; }
+    .calendar-day-number { display: inline-flex; min-width: 24px; height: 24px; align-items: center; justify-content: center; border-radius: 999px; font-size: 12px; }
+    .calendar-items { display: grid; gap: 6px; margin-top: 8px; }
+    .calendar-item {
+      width: 100%; overflow: hidden; padding: 5px 7px; border: 1px solid var(--workspace-primary-border);
+      border-radius: 5px; background: var(--workspace-primary-soft); color: var(--workspace-text);
+      cursor: pointer; font-size: 12px; text-align: left; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .calendar-item:hover { background: var(--workspace-primary-hover); }
     .workspace-date-picker-popup .ant-picker-panel-container { max-width: calc(100vw - 16px); }
     .drawer > footer { min-width: 0; padding: 12px 24px 16px; border-top: 1px solid ${antdTokens.colorBorderSecondary}; background: ${antdTokens.colorBgContainer}; }
     .meta { margin-bottom: 9px; color: ${antdTokens.colorTextTertiary}; font-size: 11px; }
@@ -585,6 +667,9 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
       .relation-heading-copy { min-width: calc(100% - 36px); }
       .relation-actions { width: 100%; padding-left: 36px; justify-content: space-between; }
       .related-record-drawer .ant-drawer-body { padding-inline: 14px; }
+      .view-controls { align-items: stretch; flex-direction: column; }
+      .view-controls .view-search, .view-controls .ant-select { width: 100% !important; }
+      .month-controls { justify-content: space-between; }
       .property-header, .property-body { padding-inline: 16px; }
       .property-grid { grid-template-columns: 1fr; gap: 0; }
       .workspace-date-picker-popup {
@@ -778,6 +863,520 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
     flushSync(() => button._iconRoot.render(typeBadge(type)));
   }
 
+  function sheetViewRows(table) {
+    return (table?.rows || []).filter((row) => row.cells.some((value) => String(value || "").trim()));
+  }
+
+  function sheetViewRowTitle(row, columns) {
+    const titleColumn = columns.find((column) => column.type === "text" && String(row.cells[column.index] || "").trim())
+      || columns.find((column) => String(row.cells[column.index] || "").trim());
+    return titleColumn ? String(row.cells[titleColumn.index]).trim() : `Fila ${row.number}`;
+  }
+
+  function sheetViewCellLabel(value, property) {
+    if (property.type === "checkbox") return checkboxEditorValue(value, property) ? "Sí" : "No";
+    return String(value ?? "").trim();
+  }
+
+  function SheetViewEmpty({ description }) {
+    return React.createElement(
+      "div",
+      { className: "sheet-view-empty" },
+      React.createElement(Empty, { image: Empty.PRESENTED_IMAGE_SIMPLE, description })
+    );
+  }
+
+  function SheetKanban({ table, columns, initialColumnId, movingRow, onColumnChange, onMoveRow, onOpenRow }) {
+    const statusColumns = columns.filter((column) => column.type === "status");
+    const [columnId, setColumnId] = React.useState(() => (
+      statusColumns.some((column) => column.id === initialColumnId) ? initialColumnId : statusColumns[0]?.id || ""
+    ));
+    const [search, setSearch] = React.useState("");
+    const [page, setPage] = React.useState(1);
+    const [dragOverGroup, setDragOverGroup] = React.useState("");
+    const pageSize = 8;
+    const statusColumn = statusColumns.find((column) => column.id === columnId) || statusColumns[0];
+    const rows = sheetViewRows(table);
+
+    React.useEffect(() => {
+      if (!statusColumns.some((column) => column.id === columnId)) {
+        const next = statusColumns[0]?.id || "";
+        setColumnId(next);
+        if (next) onColumnChange(next);
+      }
+    }, [columnId, statusColumns.map((column) => column.id).join("|")]);
+
+    React.useEffect(() => setPage(1), [columnId, search]);
+    if (!statusColumn) return React.createElement(SheetViewEmpty, { description: "Configura una columna como Estado para usar Kanban" });
+
+    const normalizedSearch = normalizedColumn(search);
+    const filteredRows = normalizedSearch
+      ? rows.filter((row) => normalizedColumn(row.cells.join(" ")).includes(normalizedSearch))
+      : rows;
+    const configuredGroups = propertyOptionEntries(statusColumn).map((option) => ({
+      id: option.label,
+      label: option.label,
+      color: option.color
+    }));
+    const knownGroups = new Set(configuredGroups.map((group) => group.id));
+    const inferredGroups = [];
+    for (const row of filteredRows) {
+      const value = String(row.cells[statusColumn.index] || "").trim();
+      if (!value || knownGroups.has(value)) continue;
+      knownGroups.add(value);
+      inferredGroups.push({ id: value, label: value, color: "" });
+    }
+    const groups = [...configuredGroups, ...inferredGroups, { id: "__empty__", label: "Sin selección", color: "" }];
+    const groupedRows = Object.fromEntries(groups.map((group) => [group.id, []]));
+    for (const row of filteredRows) {
+      const value = String(row.cells[statusColumn.index] || "").trim();
+      const groupId = groupedRows[value] ? value : "__empty__";
+      groupedRows[groupId].push(row);
+    }
+    const longestGroup = Math.max(0, ...Object.values(groupedRows).map((groupRows) => groupRows.length));
+    const totalPages = Math.max(1, Math.ceil(longestGroup / pageSize));
+    const safePage = Math.min(page, totalPages);
+    const titleColumn = columns.find((column) => column.type === "text") || columns[0];
+
+    const selectColumn = (nextColumnId) => {
+      setColumnId(nextColumnId);
+      onColumnChange(nextColumnId);
+    };
+
+    return React.createElement(
+      "div",
+      { className: "kanban-view" },
+      React.createElement(
+        "div",
+        { className: "view-controls" },
+        React.createElement(Input, {
+          allowClear: true,
+          className: "view-search",
+          prefix: React.createElement(SearchOutlined),
+          placeholder: "Buscar",
+          value: search,
+          onChange: (event) => setSearch(event.target.value)
+        }),
+        React.createElement(Select, {
+          value: statusColumn.id,
+          onChange: selectColumn,
+          options: statusColumns.map((column) => ({ value: column.id, label: column.name })),
+          style: { minWidth: 190 }
+        })
+      ),
+      React.createElement(
+        "div",
+        { className: "kanban-board" },
+        ...groups.map((group) => {
+          const groupRows = groupedRows[group.id] || [];
+          const visibleRows = groupRows.slice((safePage - 1) * pageSize, safePage * pageSize);
+          return React.createElement(
+            "section",
+            {
+              className: `kanban-column ${dragOverGroup === group.id ? "is-drag-over" : ""}`.trim(),
+              "data-kanban-group": group.id,
+              key: group.id,
+              onDragEnter: (event) => {
+                event.preventDefault();
+                setDragOverGroup(group.id);
+              },
+              onDragOver: (event) => event.preventDefault(),
+              onDragLeave: (event) => {
+                if (!event.currentTarget.contains(event.relatedTarget)) setDragOverGroup("");
+              },
+              onDrop: (event) => {
+                event.preventDefault();
+                setDragOverGroup("");
+                const rowNumber = Number(event.dataTransfer.getData("text/sheets-row-number"));
+                const row = rows.find((candidate) => candidate.number === rowNumber);
+                if (!row) return;
+                const nextValue = group.id === "__empty__" ? "" : group.label;
+                if (String(row.cells[statusColumn.index] || "").trim() === nextValue) return;
+                void onMoveRow(row, statusColumn, nextValue);
+              }
+            },
+            React.createElement(
+              "div",
+              { className: "kanban-column-header" },
+              React.createElement(
+                "div",
+                { className: "kanban-column-title" },
+                group.color ? optionTag(group.label, group.color) : React.createElement("span", null, group.label)
+              ),
+              React.createElement("span", { className: "kanban-count" }, String(groupRows.length))
+            ),
+            React.createElement(
+              "div",
+              { className: "kanban-cards" },
+              ...(visibleRows.length ? visibleRows.map((row) => {
+                const fields = columns.filter((column) => (
+                  column.index !== statusColumn.index
+                  && column.index !== titleColumn?.index
+                  && String(row.cells[column.index] || "").trim()
+                )).slice(0, 3);
+                return React.createElement(
+                  "div",
+                  {
+                    className: `kanban-card-shell ${movingRow === row.number ? "is-moving" : ""}`.trim(),
+                    "data-sheet-row": String(row.number),
+                    key: row.number,
+                    role: "button",
+                    tabIndex: 0,
+                    onClick: () => onOpenRow(row.number),
+                    onKeyDown: (event) => {
+                      if (event.key === "Enter" || event.key === " ") onOpenRow(row.number);
+                    }
+                  },
+                  React.createElement(
+                    Card,
+                    {
+                      className: "kanban-card",
+                      size: "small",
+                      title: React.createElement(
+                        "div",
+                        { className: "kanban-card-title" },
+                        React.createElement(
+                          "span",
+                          {
+                            className: "kanban-card-drag",
+                            draggable: true,
+                            title: "Mover ficha",
+                            "aria-label": "Mover ficha",
+                            onClick: (event) => event.stopPropagation(),
+                            onDragStart: (event) => {
+                              event.stopPropagation();
+                              event.dataTransfer.effectAllowed = "move";
+                              event.dataTransfer.setData("text/sheets-row-number", String(row.number));
+                            }
+                          },
+                          React.createElement(DragOutlined)
+                        ),
+                        React.createElement("span", null, sheetViewRowTitle(row, columns))
+                      )
+                    },
+                    ...fields.map((column) => React.createElement(
+                      "div",
+                      { className: "kanban-field", key: column.id },
+                      React.createElement("span", { className: "property-type-icon" }, typeBadge(column.type, 12)),
+                      React.createElement("span", null, column.name),
+                      React.createElement("strong", null, sheetViewCellLabel(row.cells[column.index], column) || "Sin valor")
+                    ))
+                  )
+                );
+              }) : [React.createElement("div", { className: "kanban-empty-drop", key: "empty" }, "Arrastra registros aquí.")])
+            )
+          );
+        })
+      ),
+      longestGroup > pageSize
+        ? React.createElement(
+          "div",
+          { className: "kanban-footer" },
+          React.createElement(Pagination, {
+            current: safePage,
+            pageSize,
+            showSizeChanger: false,
+            total: longestGroup,
+            onChange: setPage
+          })
+        )
+        : null
+    );
+  }
+
+  function SheetCalendar({ table, columns, initialColumnId, onColumnChange, onOpenRow }) {
+    const dateColumns = columns.filter((column) => column.type === "date");
+    const [columnId, setColumnId] = React.useState(() => (
+      dateColumns.some((column) => column.id === initialColumnId) ? initialColumnId : dateColumns[0]?.id || ""
+    ));
+    const [currentMonth, setCurrentMonth] = React.useState(() => dayjs().startOf("month"));
+    const dateColumn = dateColumns.find((column) => column.id === columnId) || dateColumns[0];
+
+    React.useEffect(() => {
+      if (!dateColumns.some((column) => column.id === columnId)) {
+        const next = dateColumns[0]?.id || "";
+        setColumnId(next);
+        if (next) onColumnChange(next);
+      }
+    }, [columnId, dateColumns.map((column) => column.id).join("|")]);
+    if (!dateColumn) return React.createElement(SheetViewEmpty, { description: "Configura una columna como Fecha para usar Calendario" });
+
+    const start = currentMonth.startOf("month").startOf("week").add(1, "day");
+    const end = currentMonth.endOf("month").endOf("week").add(1, "day");
+    const days = Array.from({ length: end.diff(start, "day") + 1 }, (_, index) => start.add(index, "day"));
+    const rowsByDate = {};
+    for (const row of sheetViewRows(table)) {
+      const key = dateInputValue(row.cells[dateColumn.index], dateColumn.dateFormat);
+      if (!key) continue;
+      if (!rowsByDate[key]) rowsByDate[key] = [];
+      rowsByDate[key].push(row);
+    }
+    const selectColumn = (nextColumnId) => {
+      setColumnId(nextColumnId);
+      onColumnChange(nextColumnId);
+    };
+
+    return React.createElement(
+      "div",
+      { className: "calendar-view" },
+      React.createElement(
+        "div",
+        { className: "view-controls" },
+        React.createElement(Select, {
+          value: dateColumn.id,
+          onChange: selectColumn,
+          options: dateColumns.map((column) => ({ value: column.id, label: column.name })),
+          style: { minWidth: 220 }
+        }),
+        React.createElement(
+          "div",
+          { className: "month-controls" },
+          React.createElement(Button, {
+            icon: React.createElement(LeftOutlined),
+            "aria-label": "Mes anterior",
+            onClick: () => setCurrentMonth((month) => month.subtract(1, "month"))
+          }),
+          React.createElement("strong", null, currentMonth.format("MMMM YYYY")),
+          React.createElement(Button, {
+            icon: React.createElement(RightOutlined),
+            "aria-label": "Mes siguiente",
+            onClick: () => setCurrentMonth((month) => month.add(1, "month"))
+          })
+        )
+      ),
+      React.createElement(
+        "div",
+        { className: "calendar-scroll" },
+        React.createElement(
+          "div",
+          { className: "calendar-grid" },
+          ...["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"].map((day) => React.createElement(
+            "div",
+            { className: "calendar-weekday", key: day },
+            day
+          )),
+          ...days.map((day) => {
+            const key = day.format("YYYY-MM-DD");
+            const rows = rowsByDate[key] || [];
+            const className = [
+              "calendar-day",
+              day.month() !== currentMonth.month() ? "is-muted" : "",
+              day.isSame(dayjs(), "day") ? "is-today" : ""
+            ].filter(Boolean).join(" ");
+            return React.createElement(
+              "section",
+              { className, key },
+              React.createElement(
+                "div",
+                { className: "calendar-day-header" },
+                React.createElement("span", { className: "calendar-day-number" }, String(day.date()))
+              ),
+              React.createElement(
+                "div",
+                { className: "calendar-items" },
+                ...rows.map((row) => React.createElement(
+                  "button",
+                  {
+                    className: "calendar-item",
+                    "data-sheet-row": String(row.number),
+                    key: row.number,
+                    type: "button",
+                    onClick: () => onOpenRow(row.number)
+                  },
+                  sheetViewRowTitle(row, columns)
+                ))
+              )
+            );
+          })
+        )
+      )
+    );
+  }
+
+  function SheetViewActions({ sheetKey, sheetName, columns, settings }) {
+    const [view, setView] = React.useState("");
+    const [table, setTable] = React.useState(null);
+    const [loading, setLoading] = React.useState(false);
+    const [error, setError] = React.useState("");
+    const [movingRow, setMovingRow] = React.useState(null);
+    const activeSheetKey = React.useRef(sheetKey);
+    activeSheetKey.current = sheetKey;
+    const statusColumns = columns.filter((column) => column.type === "status");
+    const dateColumns = columns.filter((column) => column.type === "date");
+
+    React.useEffect(() => {
+      setView("");
+      setTable(null);
+      setError("");
+      setMovingRow(null);
+    }, [sheetKey]);
+
+    React.useEffect(() => {
+      if (!view) return undefined;
+      const controller = new AbortController();
+      let active = true;
+      setLoading(true);
+      setError("");
+      setActivity("views", true);
+      cachedSheetTable(sheetName, true, controller.signal).then((nextTable) => {
+        if (active) setTable(nextTable);
+      }).catch((loadError) => {
+        if (active && loadError.name !== "AbortError") setError(loadError.message);
+      }).finally(() => {
+        if (active) {
+          setLoading(false);
+          setActivity("views", false);
+        }
+      });
+      return () => {
+        active = false;
+        controller.abort();
+        setActivity("views", false);
+      };
+    }, [view, sheetKey]);
+
+    React.useEffect(() => {
+      if (view === "kanban" && !statusColumns.length) setView("");
+      if (view === "calendar" && !dateColumns.length) setView("");
+    }, [view, statusColumns.length, dateColumns.length]);
+
+    const openRow = async (rowNumber) => {
+      if (collectPendingChanges().length || state.relatedDrafts.size) {
+        setError("Guarda o cancela los cambios pendientes antes de abrir otra fila.");
+        return;
+      }
+      try {
+        await focusSheetRange(`A${rowNumber}`);
+        setView("");
+      } catch (focusError) {
+        setError(focusError.message);
+      }
+    };
+
+    const moveRow = async (row, property, nextValue) => {
+      if (movingRow !== null) return;
+      if (collectPendingChanges().length || state.relatedDrafts.size) {
+        setError("Guarda o cancela los cambios pendientes antes de mover una ficha.");
+        return;
+      }
+      const previousValue = String(row.cells[property.index] || "");
+      setMovingRow(row.number);
+      setError("");
+      setTable((current) => ({
+        ...current,
+        rows: current.rows.map((item) => item.number === row.number
+          ? { ...item, cells: item.cells.map((value, index) => index === property.index ? nextValue : value) }
+          : item)
+      }));
+      try {
+        await writeSheetViewValue(row.number, property, nextValue, previousValue, {
+          onRevert: () => {
+            if (activeSheetKey.current !== sheetKey) return;
+            setTable((current) => ({
+              ...current,
+              rows: current.rows.map((item) => item.number === row.number
+                ? { ...item, cells: item.cells.map((value, index) => index === property.index ? previousValue : value) }
+                : item)
+            }));
+          },
+          onError: (message) => {
+            if (activeSheetKey.current === sheetKey) setError(message);
+          }
+        });
+      } catch (writeError) {
+        setTable((current) => ({
+          ...current,
+          rows: current.rows.map((item) => item.number === row.number
+            ? { ...item, cells: item.cells.map((value, index) => index === property.index ? previousValue : value) }
+            : item)
+        }));
+        setError(writeError.message);
+      } finally {
+        setMovingRow(null);
+      }
+    };
+
+    const content = loading
+      ? React.createElement("div", { className: "sheet-view-loading" }, React.createElement(Spin, { size: "large" }))
+      : error && !table
+        ? React.createElement(SheetViewEmpty, { description: error })
+        : view === "kanban"
+          ? React.createElement(SheetKanban, {
+            table,
+            columns,
+            initialColumnId: settings.kanbanColumnId,
+            movingRow,
+            onColumnChange: (columnId) => setCurrentSheetViewSetting("kanbanColumnId", columnId),
+            onMoveRow: moveRow,
+            onOpenRow: openRow
+          })
+          : view === "calendar"
+            ? React.createElement(SheetCalendar, {
+              table,
+              columns,
+              initialColumnId: settings.calendarColumnId,
+              onColumnChange: (columnId) => setCurrentSheetViewSetting("calendarColumnId", columnId),
+              onOpenRow: openRow
+            })
+            : null;
+
+    return React.createElement(
+      React.Fragment,
+      null,
+      statusColumns.length ? React.createElement(Button, {
+        type: "text",
+        shape: "circle",
+        size: "small",
+        icon: React.createElement(AppstoreOutlined),
+        title: "Abrir vista Kanban",
+        "aria-label": "Abrir vista Kanban",
+        "data-sheet-view": "kanban",
+        onClick: () => setView("kanban")
+      }) : null,
+      dateColumns.length ? React.createElement(Button, {
+        type: "text",
+        shape: "circle",
+        size: "small",
+        icon: React.createElement(CalendarOutlined),
+        title: "Abrir vista Calendario",
+        "aria-label": "Abrir vista Calendario",
+        "data-sheet-view": "calendar",
+        onClick: () => setView("calendar")
+      }) : null,
+      React.createElement(
+        Drawer,
+        {
+          open: Boolean(view),
+          onClose: () => setView(""),
+          width: 720,
+          destroyOnClose: true,
+          className: "sheet-view-drawer",
+          rootClassName: "sheet-view-drawer-root",
+          getContainer: () => panelDocument.body,
+          title: `${view === "kanban" ? "Kanban" : "Calendario"} · ${sheetName}`
+        },
+        React.createElement(
+          "div",
+          { className: "sheet-view-surface", "data-active-sheet-view": view },
+          error && table ? React.createElement("div", { className: "status error" }, error) : null,
+          content
+        )
+      )
+    );
+  }
+
+  function renderSheetViewActions() {
+    if (!ui.sheetViewActions?._reactRoot) return;
+    const sheet = currentSheetConfiguration();
+    const columns = (sheet?.columns || []).filter((column) => String(column.sourceHeader || "").trim());
+    flushSync(() => ui.sheetViewActions._reactRoot.render(antdTree(React.createElement(SheetViewActions, {
+      sheetKey: `${currentGid()}:${sheet?.updatedAt || 0}`,
+      sheetName: sheet?.name || activeSheetName() || `Hoja ${currentGid()}`,
+      columns,
+      settings: { ...currentSheetViewSettings() }
+    }))));
+  }
+
   function updateAntdControl(host, property, nextValue, refresh) {
     host._editorValue = nextValue;
     host._value = serializeEditorValue(nextValue, property);
@@ -957,6 +1556,7 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
   const titleRow = element("div", "title-row");
   const title = element("h1", "", "Detalles de la fila");
   const headerActions = element("div", "header-actions");
+  const sheetViewActions = element("div", "sheet-view-actions");
   const saveState = element("span", "save-state is-saving");
   saveState.title = "Cargando";
   saveState.setAttribute("role", "status");
@@ -990,7 +1590,7 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
   close.type = "button";
   close.title = "Cerrar";
   close.setAttribute("aria-label", "Cerrar");
-  headerActions.append(saveState, close);
+  headerActions.append(sheetViewActions, saveState, close);
   titleRow.append(title, headerActions);
   panelHeader.append(eyebrow, titleRow);
 
@@ -1069,6 +1669,7 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
     drawer,
     close,
     reopen,
+    sheetViewActions,
     saveState,
     status,
     emptyState,
@@ -1097,6 +1698,7 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
       description: "Nada para mostrar"
     })
   )));
+  sheetViewActions._reactRoot = createRoot(sheetViewActions);
 
   ui.close.addEventListener("click", () => {
     ui.frame.hidden = true;
@@ -1262,6 +1864,7 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
       spreadsheetId: spreadsheetId(),
       sheets: {},
       relationViews: {},
+      sheetViews: {},
       updatedAt: Date.now()
     };
   }
@@ -1327,6 +1930,13 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
     clean.updatedAt = Number(workspace.updatedAt || Date.now());
     for (const [key, view] of Object.entries(workspace.relationViews || {})) {
       if (view === "deck" || view === "table") clean.relationViews[String(key)] = view;
+    }
+    for (const [key, view] of Object.entries(workspace.sheetViews || {})) {
+      if (!view || typeof view !== "object") continue;
+      clean.sheetViews[String(key)] = {
+        calendarColumnId: String(view.calendarColumnId || ""),
+        kanbanColumnId: String(view.kanbanColumnId || "")
+      };
     }
     for (const [gid, sheet] of Object.entries(workspace.sheets || {})) {
       if (!sheet || typeof sheet !== "object") continue;
@@ -1406,6 +2016,20 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
 
   function currentSheetConfiguration() {
     return state.workspace?.sheets?.[String(currentGid())] || null;
+  }
+
+  function currentSheetViewSettings() {
+    return state.workspace?.sheetViews?.[String(currentGid())] || {};
+  }
+
+  function setCurrentSheetViewSetting(name, value) {
+    if (!state.workspace) state.workspace = createWorkspace();
+    if (!state.workspace.sheetViews) state.workspace.sheetViews = {};
+    const key = String(currentGid());
+    const previous = state.workspace.sheetViews[key] || {};
+    if (previous[name] === value) return;
+    state.workspace.sheetViews[key] = { ...previous, [name]: String(value || "") };
+    void writeWorkspace();
   }
 
   function sheetConfigurationByName(sheetName) {
@@ -2447,6 +3071,7 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
     state.values = Array.from({ length: width }, (_, index) => values[index] || "");
     state.fields = Array.from({ length: width }, (_, index) => labels[index] || `Columna ${columnName(index + 1)}`);
     reconcileSheetConfiguration(currentGid(), activeSheetName() || `Hoja ${currentGid()}`, state.fields);
+    renderSheetViewActions();
     setEmptyState(false);
     renderFields(new Map(drafts.map((draft) => [draft.index, draft.value])));
     state.viewRow = row;
@@ -2481,6 +3106,8 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
     setActivity("relations", false);
     state.fields = [...labels];
     state.values = Array.from({ length: labels.length }, () => "");
+    reconcileSheetConfiguration(currentGid(), activeSheetName() || `Hoja ${currentGid()}`, state.fields);
+    renderSheetViewActions();
     state.viewRow = row;
     state.viewGid = currentGid();
     host.dataset.row = String(row);
@@ -2505,6 +3132,7 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
     state.row = row;
     state.gid = gid;
     state.sheetName = activeSheetName() || `Hoja ${gid}`;
+    renderSheetViewActions();
     syncPendingActions();
     ui.fields.inert = true;
     ui.fields.setAttribute("aria-busy", "true");
@@ -2865,6 +3493,7 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
     state.activity.config = true;
     syncSaveState();
     renderFields(drafts);
+    renderSheetViewActions();
     closePropertyEditor();
     try {
       await writeWorkspace();
@@ -2884,6 +3513,33 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
   function qualifiedReference(sheetName, reference) {
     const escapedName = String(sheetName || "").replace(/'/g, "''");
     return escapedName ? `'${escapedName}'!${reference}` : reference;
+  }
+
+  function focusSheetRange(reference) {
+    return new Promise((resolve, reject) => {
+      const requestId = `${Date.now()}-${++state.writeRequest}`;
+      const timeout = setTimeout(() => {
+        window.removeEventListener("message", receive);
+        reject(new Error("Sheets no respondió al intentar abrir la fila"));
+      }, 4_000);
+
+      function receive(event) {
+        const message = event.data;
+        if (event.source !== window || message?.source !== "sheets-row-drawer" || message?.type !== "focus-result" || message.requestId !== requestId) return;
+        clearTimeout(timeout);
+        window.removeEventListener("message", receive);
+        if (message.ok) resolve();
+        else reject(new Error(message.error || "No se pudo abrir la fila"));
+      }
+
+      window.addEventListener("message", receive);
+      window.postMessage({
+        source: "sheets-row-drawer",
+        type: "focus-range",
+        requestId,
+        reference
+      }, location.origin);
+    });
   }
 
   function writeRanges(operations, restoreReference = "") {
@@ -2920,6 +3576,120 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
     });
   }
 
+  function hasPendingWriteVerification() {
+    return state.pendingWrites.size > 0 || state.sheetViewWrites.size > 0;
+  }
+
+  async function verifySheetViewWrite(entry) {
+    let verificationError = null;
+    try {
+      for (const delay of [600, 1_200, 2_200, 4_000]) {
+        await wait(delay);
+        if (entry.controller.signal.aborted || state.sheetViewWrites.get(entry.key) !== entry) return;
+        try {
+          const rows = await readRange(`A${entry.row}:${MAX_COLUMN}${entry.row}`, entry.controller.signal, entry.gid);
+          const values = rows.find((row) => row.number === entry.row)?.cells || [];
+          if (!valuesEqualForProperty(values[entry.property.index], entry.value, entry.property)) continue;
+          state.sheetViewWrites.delete(entry.key);
+          state.sheetCache.clear();
+          if (state.gid === entry.gid && state.row === entry.row) {
+            const confirmedValues = Array.from(
+              { length: Math.max(state.fields.length, values.length) },
+              (_, index) => index === entry.property.index ? entry.value : String(values[index] ?? state.values[index] ?? "")
+            );
+            state.values = confirmedValues;
+            void writePersistentCache(cacheKey("row", entry.gid, entry.row), {
+              labels: [...state.fields],
+              values: confirmedValues,
+              updatedAt: Date.now()
+            });
+          }
+          host.dataset.writeVerification = hasPendingWriteVerification() ? "pending" : "verified";
+          return;
+        } catch (error) {
+          if (error.name === "AbortError") return;
+          verificationError = error;
+        }
+      }
+
+      if (state.sheetViewWrites.get(entry.key) !== entry) return;
+      state.sheetViewWrites.delete(entry.key);
+      state.sheetCache.clear();
+      if (state.gid === entry.gid && state.row === entry.row) {
+        const drafts = currentInputValues().flatMap((value, index) => (
+          index !== entry.property.index && !valuesEqualForProperty(value, state.values[index], propertyForColumn(index))
+            ? [{ index, value }]
+            : []
+        ));
+        state.values[entry.property.index] = entry.previousValue;
+        void writePersistentCache(cacheKey("row", entry.gid, entry.row), {
+          labels: [...state.fields],
+          values: [...state.values],
+          updatedAt: Date.now()
+        });
+        renderFields(new Map(drafts.map((draft) => [draft.index, draft.value])));
+      }
+      const message = verificationError?.message || `Sheets no confirmó el cambio en la fila ${entry.row}`;
+      host.dataset.writeVerification = "failed";
+      setStatus(message, "error");
+      entry.onRevert?.();
+      entry.onError?.(message);
+    } finally {
+      if (state.sheetViewWrites.get(entry.key) === entry && entry.controller.signal.aborted) {
+        state.sheetViewWrites.delete(entry.key);
+      }
+    }
+  }
+
+  async function writeSheetViewValue(row, property, value, previousValue, callbacks = {}) {
+    if (state.saving) throw new Error("Espera a que termine el guardado actual");
+    const gid = currentGid();
+    const sheetName = activeSheetName() || state.sheetName || `Hoja ${gid}`;
+    const selectedReference = nameBoxValue().split("!").pop() || `A${state.row || row}`;
+    const restoreReference = qualifiedReference(sheetName, selectedReference);
+    state.saving = true;
+    syncSaveState();
+    try {
+      await writeRanges([{
+        reference: qualifiedReference(sheetName, `${columnName(property.index + 1)}${row}`),
+        values: [value]
+      }], restoreReference);
+      const key = `sheet-view:${gid}:${row}:${property.index}`;
+      state.sheetViewWrites.get(key)?.controller.abort();
+      const entry = {
+        key,
+        gid,
+        row,
+        property,
+        value: String(value ?? ""),
+        previousValue: String(previousValue ?? ""),
+        controller: new AbortController(),
+        onRevert: callbacks.onRevert,
+        onError: callbacks.onError
+      };
+      state.sheetViewWrites.set(key, entry);
+      state.sheetCache.clear();
+      host.dataset.writeVerification = "pending";
+      if (state.gid === gid && state.row === row) {
+        state.values[property.index] = entry.value;
+        const writtenCells = [{ index: property.index, value: entry.value }];
+        void writePersistentCache(cacheKey("row", gid, row), {
+          labels: [...state.fields],
+          values: [...state.values],
+          updatedAt: Date.now(),
+          pendingChanges: writtenCells,
+          pendingSince: Date.now()
+        });
+        renderFields();
+      }
+      void verifySheetViewWrite(entry);
+    } finally {
+      state.saving = false;
+      syncSaveState();
+      syncPendingActions();
+    }
+  }
+
   async function verifyPendingWrite(entry) {
     const verificationDelays = [600, 1_200, 2_200, 4_000];
     let verificationError = null;
@@ -2951,7 +3721,7 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
             state.values = confirmedValues;
             state.headerCache.delete(`${spreadsheetId()}:${entry.gid}`);
             state.sheetCache.clear();
-            host.dataset.writeVerification = state.pendingWrites.size ? "pending" : "verified";
+            host.dataset.writeVerification = hasPendingWriteVerification() ? "pending" : "verified";
             syncPendingActions();
             const relationshipKeyChanged = entry.writtenCells.some(({ index }) => /^id[a-z0-9]*/.test(normalizedColumn(entry.labels[index])));
             if (relationshipKeyChanged) startRelationships(state.fields, state.values, state.request?.signal, true);
@@ -3120,7 +3890,7 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
           state.pendingWrites.delete(entry.key);
           state.sheetCache.clear();
           persistVisibleRelations();
-          host.dataset.writeVerification = state.pendingWrites.size ? "pending" : "verified";
+          host.dataset.writeVerification = hasPendingWriteVerification() ? "pending" : "verified";
           notifyRelatedDrafts();
           return;
         } catch (error) {
@@ -3511,7 +4281,8 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
     if (state.saving) return;
     const reference = nameBoxValue();
     const gid = currentGid();
-    const signature = `${gid}:${reference}`;
+    const normalizedReference = reference.split("!").pop().replace(/\$/g, "");
+    const signature = `${gid}:${normalizedReference}`;
     if (!reference || signature === state.lastSelection) return;
     state.lastSelection = signature;
     if (state.propertyColumn !== null) closePropertyEditor();
@@ -3537,6 +4308,7 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
   }
 
   void ensureWorkspaceLoaded().finally(() => {
+    renderSheetViewActions();
     setInterval(pollSelection, POLL_MS);
     pollSelection();
     void pollCodexBridge();

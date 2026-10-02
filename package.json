@@ -1,12 +1,12 @@
 {
   "name": "sheets-row-drawer",
-  "version": "0.9.9",
+  "version": "0.10.0",
   "private": true,
   "type": "module",
   "scripts": {
     "build": "vite build",
     "sheets": "node .codex/skills/google-sheets-browser/scripts/sheets.mjs",
-    "test": "npm run build && node tests/validate-bridge.mjs && node tests/validate-public-sheet.mjs && node tests/validate-relations.mjs"
+    "test": "npm run build && node tests/validate-bridge.mjs && node tests/validate-public-sheet.mjs && node tests/validate-relations.mjs && node tests/validate-views.mjs"
   },
   "dependencies": {
     "@ant-design/cssinjs": "1.24.0",

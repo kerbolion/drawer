@@ -10,6 +10,9 @@ La interfaz usa Ant Design `5.29.3`, la misma versión instalada en `workspace-a
 - Detecta las demás hojas visibles y relaciona registros por columnas `ID ...` compartidas.
 - Muestra relaciones padre-hijo en ambos sentidos, como `Contactos -> Servicios` y `Servicios -> Contactos`.
 - Presenta los relacionados en vista **Deck** o **Tabla**, con paginación y una preferencia persistente por relación.
+- Muestra accesos de **Kanban** y **Calendario** en el encabezado cuando la hoja tiene columnas configuradas como Estado y Fecha.
+- Kanban agrupa toda la hoja por Estado, permite buscar y mover fichas entre columnas; cada movimiento escribe únicamente la celda de Estado y se verifica en segundo plano.
+- Calendario permite elegir la columna de Fecha, navegar por mes y abrir la fila asociada desde cada evento.
 - Abre cada tarjeta Deck en un segundo drawer de Ant Design, igual que Workspace; en equipos de escritorio se abre con doble clic y en dispositivos táctiles con un toque.
 - Permite editar los relacionados directamente en las celdas de la vista Tabla o desde su drawer usando los mismos controles tipados del formulario principal.
 - Integra los cambios relacionados con **Guardar cambios** y **Cancelar**, escribe únicamente las celdas modificadas en la hoja de destino, restaura la hoja principal y confirma cada fila en segundo plano.
@@ -38,7 +41,7 @@ La interfaz usa Ant Design `5.29.3`, la misma versión instalada en `workspace-a
 5. Recarga una hoja de Google Sheets que puedas editar.
 6. Selecciona cualquier celda debajo de la fila de encabezados.
 
-El panel debe cargar la fila automáticamente. Cambia un campo y pulsa **Guardar cambios** para validar la escritura y la lectura de comprobación.
+Pulsa el botón circular de Sheets CRM para abrir el panel. Cambia un campo y pulsa **Guardar cambios** para validar la escritura y la lectura de comprobación.
 
 Esta versión supone que los encabezados están en la fila 1 y admite columnas hasta `ZZ`.
 
@@ -95,4 +98,5 @@ La lectura y el cambio automático de fila se pueden volver a comprobar con:
 ```powershell
 node tests/validate-public-sheet.mjs
 node tests/validate-relations.mjs
+node tests/validate-views.mjs
 ```
