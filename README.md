@@ -7,6 +7,7 @@ Prototipo mínimo para validar el flujo antes de construir la extensión complet
 - Abre el formulario a la derecha.
 - Detecta las demás hojas visibles y relaciona registros por columnas `ID ...` compartidas.
 - Muestra relaciones padre-hijo en ambos sentidos, como `Contactos -> Servicios` y `Servicios -> Contactos`.
+- Guarda filas y relacionados en caché local persistente, los muestra primero y comprueba cambios en segundo plano.
 - Aísla el formulario para que `Ctrl+V` permanezca dentro del input.
 - Guarda el rango editado mediante un único pegado TSV horizontal de Sheets.
 - Verifica el guardado volviendo a leer la fila.
@@ -29,6 +30,10 @@ Esta versión supone que los encabezados están en la fila 1 y admite columnas h
 La clave principal se infiere usando el nombre de la hoja. Por ejemplo, `Contactos` busca `ID Contacto` y `Servicios` busca `ID Servicio`. Si `Servicios` también contiene `ID Contacto`, la extensión la considera una referencia a `Contactos` y muestra las filas coincidentes en la sección **Relacionados**.
 
 También se reconocen variantes de escritura como `id_contacto`, `Id Contacto` o `IDContacto`. Si el nombre de la hoja no coincide con ninguna columna, se usa la primera columna cuyo nombre comienza por `ID`.
+
+La caché conserva hasta 120 entradas recientes en `chrome.storage.local`. Al volver a una fila, el formulario aparece desde la caché y luego se compara con Sheets. Los cambios remotos reemplazan los datos almacenados, mientras que los valores que estés editando en ese momento se conservan.
+
+Al cambiar de fila, el formulario reutiliza los mismos campos y actualiza sus etiquetas y valores en el lugar. Esto evita el parpadeo causado por vaciar y reconstruir todo el formulario.
 
 La lectura y el cambio automático de fila se pueden volver a comprobar con:
 

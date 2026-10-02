@@ -6,9 +6,15 @@
 
   const MAX_COLUMN = "ZZ";
   const POLL_MS = 250;
+  const CACHE_PREFIX = "srd:v1";
+  const CACHE_INDEX_KEY = `${CACHE_PREFIX}:index`;
+  const MAX_PERSISTENT_ENTRIES = 120;
+  const SHEET_MEMORY_TTL = 5_000;
   const state = {
     row: null,
     gid: null,
+    viewRow: null,
+    viewGid: null,
     values: [],
     fields: [],
     loading: false,
@@ -17,7 +23,10 @@
     writeRequest: 0,
     lastSelection: "",
     headerCache: new Map(),
-    sheetCache: new Map()
+    sheetCache: new Map(),
+    relationRequest: null,
+    persistentFallback: new Map(),
+    cacheWriteQueue: Promise.resolve()
   };
 
   const host = document.createElement("div");
@@ -250,6 +259,52 @@
     return String(value ?? "").trim();
   }
 
+  function cacheKey(kind, gid, row) {
+    return `${CACHE_PREFIX}:${kind}:${encodeURIComponent(spreadsheetId())}:${encodeURIComponent(gid)}:${row}`;
+  }
+
+  function storageArea() {
+    try {
+      return globalThis.chrome?.storage?.local || null;
+    } catch {
+      return null;
+    }
+  }
+
+  async function readPersistentCache(key) {
+    if (state.persistentFallback.has(key)) return state.persistentFallback.get(key);
+    const area = storageArea();
+    if (!area) return null;
+    try {
+      const result = await area.get(key);
+      const value = result[key] || null;
+      if (value) state.persistentFallback.set(key, value);
+      return value;
+    } catch {
+      return null;
+    }
+  }
+
+  function writePersistentCache(key, value) {
+    state.persistentFallback.set(key, value);
+    const area = storageArea();
+    if (!area) return Promise.resolve();
+
+    state.cacheWriteQueue = state.cacheWriteQueue.then(async () => {
+      const stored = await area.get(CACHE_INDEX_KEY);
+      const previous = Array.isArray(stored[CACHE_INDEX_KEY]) ? stored[CACHE_INDEX_KEY] : [];
+      const index = [key, ...previous.filter((item) => item !== key)];
+      const expired = index.splice(MAX_PERSISTENT_ENTRIES);
+      await area.set({ [key]: value, [CACHE_INDEX_KEY]: index });
+      if (expired.length) await area.remove(expired);
+    }).catch(() => {});
+    return state.cacheWriteQueue;
+  }
+
+  function sameValues(left, right) {
+    return JSON.stringify(left) === JSON.stringify(right);
+  }
+
   function setStatus(message, kind = "ok") {
     ui.status.textContent = message;
     ui.status.className = `status ${kind === "ok" ? "" : kind}`.trim();
@@ -374,7 +429,7 @@
     const range = full ? `A1:${MAX_COLUMN}` : `A1:${MAX_COLUMN}2`;
     const key = `${spreadsheetId()}:${sheetName}:${full ? "full" : "header"}`;
     const cached = state.sheetCache.get(key);
-    if (cached && Date.now() - cached.loadedAt < 30_000) return cached.table;
+    if (cached && Date.now() - cached.loadedAt < SHEET_MEMORY_TTL) return cached.table;
     const table = await readSheetTable(sheetName, range, signal);
     if (!signal?.aborted) state.sheetCache.set(key, { loadedAt: Date.now(), table });
     return table;
@@ -393,17 +448,18 @@
   }
 
   function renderRelation(relation) {
+    const totalCount = relation.totalCount ?? relation.rows.length;
     const article = element("article", "relation");
     const heading = element("div", "relation-head");
     const headingText = element("div");
     const title = element("div", "relation-title", relation.sheetName);
     const kind = element("div", "relation-kind", relation.description);
-    const count = element("div", "relation-count", String(relation.rows.length));
+    const count = element("div", "relation-count", String(totalCount));
     headingText.append(title, kind);
     heading.append(headingText, count);
     article.appendChild(heading);
 
-    if (!relation.rows.length) {
+    if (!totalCount) {
       article.appendChild(element("div", "relation-empty", "No hay registros relacionados."));
       ui.relatedList.appendChild(article);
       return;
@@ -430,19 +486,68 @@
     table.append(thead, tbody);
     wrapper.appendChild(table);
     article.appendChild(wrapper);
-    if (relation.rows.length > 20) {
-      article.appendChild(element("div", "relation-more", `Y ${relation.rows.length - 20} registro(s) más.`));
+    if (totalCount > 20) {
+      article.appendChild(element("div", "relation-more", `Y ${totalCount - 20} registro(s) más.`));
     }
     ui.relatedList.appendChild(article);
   }
 
-  async function loadRelationships(currentHeaders, currentValues, signal) {
+  function storedRelations(relations) {
+    return relations.map((relation) => {
+      const columns = relationColumns(relation.headers);
+      return {
+        sheetName: relation.sheetName,
+        description: relation.description,
+        headers: columns.map((column) => column.header),
+        totalCount: relation.totalCount ?? relation.rows.length,
+        rows: relation.rows.slice(0, 50).map((row) => ({
+          number: row.number,
+          cells: columns.map((column) => row.cells[column.index] || "")
+        }))
+      };
+    });
+  }
+
+  function showRelations(relations) {
+    const signature = JSON.stringify(storedRelations(relations));
+    if (ui.relatedList.dataset.signature === signature) return;
     ui.relatedList.replaceChildren();
-    setRelatedStatus("Detectando relaciones por columnas ID…");
+    for (const relation of relations) renderRelation(relation);
+    ui.relatedList.dataset.signature = signature;
+  }
+
+  function clearRelations() {
+    ui.relatedList.replaceChildren();
+    delete ui.relatedList.dataset.signature;
+  }
+
+  function startRelationships(currentHeaders, currentValues, parentSignal) {
+    state.relationRequest?.abort();
+    const controller = new AbortController();
+    state.relationRequest = controller;
+    if (parentSignal?.aborted) controller.abort();
+    else parentSignal?.addEventListener("abort", () => controller.abort(), { once: true });
+    void loadRelationships(currentHeaders, currentValues, controller.signal);
+  }
+
+  async function loadRelationships(currentHeaders, currentValues, signal) {
     const currentSheet = activeSheetName();
+    const persistentKey = cacheKey("relations", currentGid(), state.row);
+    const cached = await readPersistentCache(persistentKey);
+    if (signal?.aborted) return;
+    const usableCache = cached?.currentSheet === currentSheet && Array.isArray(cached.relations);
+    if (usableCache) {
+      showRelations(cached.relations);
+      setRelatedStatus("Mostrando relacionados guardados · comprobando cambios…");
+    } else {
+      setRelatedStatus("Detectando relaciones por columnas ID…");
+    }
+
     const otherSheets = visibleSheetNames().filter((name) => name !== currentSheet);
     if (!otherSheets.length) {
+      showRelations([]);
       setRelatedStatus("No hay otras hojas visibles en este documento.");
+      void writePersistentCache(persistentKey, { currentSheet, relations: [], updatedAt: Date.now() });
       return;
     }
 
@@ -490,20 +595,28 @@
       }
 
       if (!descriptors.length) {
+        showRelations([]);
         setRelatedStatus("No encontré columnas ID compartidas con las otras hojas.");
+        void writePersistentCache(persistentKey, { currentSheet, relations: [], updatedAt: Date.now() });
         return;
       }
 
       const relationResults = await Promise.allSettled(descriptors.map(async (descriptor) => {
         const table = await cachedSheetTable(descriptor.sheetName, true, signal);
         const rows = table.rows.filter((row) => comparable(row.cells[descriptor.matchIndex]) === descriptor.matchValue);
-        return { ...descriptor, headers: table.headers, rows };
+        return { ...descriptor, headers: table.headers, rows, totalCount: rows.length };
       }));
       if (signal?.aborted) return;
 
       const relations = relationResults.flatMap((result) => result.status === "fulfilled" ? [result.value] : []);
+      const persistentRelations = storedRelations(relations);
+      if (!usableCache || !sameValues(cached.relations, persistentRelations)) showRelations(relations);
+      void writePersistentCache(persistentKey, {
+        currentSheet,
+        relations: persistentRelations,
+        updatedAt: Date.now()
+      });
       ui.relatedStatus.hidden = relations.length > 0;
-      for (const relation of relations) renderRelation(relation);
       const failures = relationResults.length - relations.length;
       if (!relations.length) setRelatedStatus("No pude leer las hojas relacionadas con la sesión actual.");
       else if (failures) setRelatedStatus(`Se cargaron relaciones, pero ${failures} hoja(s) no respondieron.`);
@@ -512,13 +625,31 @@
     }
   }
 
-  async function headers(signal) {
+  async function headers(signal, force = false) {
     const key = `${spreadsheetId()}:${currentGid()}`;
-    if (state.headerCache.has(key)) return state.headerCache.get(key);
+    if (!force && state.headerCache.has(key)) return state.headerCache.get(key);
     const rows = await readRange(`A1:${MAX_COLUMN}1`, signal);
     const labels = rows.find((row) => row.number === 1)?.cells || [];
     state.headerCache.set(key, labels);
     return labels;
+  }
+
+  function currentInputValues() {
+    return Array.from(ui.fields.querySelectorAll("input[data-column]"), (input) => input.value);
+  }
+
+  function applyRowData(labels, values, row, signal, drafts = []) {
+    const width = Math.max(labels.length, values.length);
+    state.values = Array.from({ length: width }, (_, index) => values[index] || "");
+    state.fields = Array.from({ length: width }, (_, index) => labels[index] || `Columna ${columnName(index + 1)}`);
+    renderFields(new Map(drafts.map((draft) => [draft.index, draft.value])));
+    state.viewRow = row;
+    state.viewGid = currentGid();
+    host.dataset.row = String(row);
+    ui.fields.inert = false;
+    ui.fields.removeAttribute("aria-busy");
+    ui.save.disabled = false;
+    startRelationships(labels, state.values, signal);
   }
 
   async function loadRow(row, force = false) {
@@ -531,51 +662,101 @@
     state.loading = true;
     state.row = row;
     state.gid = gid;
-    ui.save.disabled = true;
-    ui.relatedList.replaceChildren();
+    ui.fields.inert = true;
+    ui.fields.setAttribute("aria-busy", "true");
     setRelatedStatus("Detectando hojas y relaciones…");
     ui.meta.textContent = `${activeSheetName() || `Hoja ${gid}`} · fila ${row}`;
-    setStatus(`Leyendo la fila ${row} desde tu sesión de Google…`, "busy");
+    const persistentKey = cacheKey("row", gid, row);
+    let cached = null;
+
+    if (!force) {
+      cached = await readPersistentCache(persistentKey);
+      if (request.signal.aborted || state.request !== request) return;
+    }
+
+    if (cached?.labels && cached?.values) {
+      applyRowData(cached.labels, cached.values, row, request.signal);
+      setStatus(`Fila ${row} cargada desde caché · comprobando cambios…`);
+    } else {
+      ui.save.disabled = true;
+      setStatus(`Leyendo la fila ${row} desde tu sesión de Google…`, "busy");
+    }
 
     try {
       const [labels, rows] = await Promise.all([
-        headers(request.signal),
+        headers(request.signal, true),
         readRange(`A${row}:${MAX_COLUMN}${row}`, request.signal)
       ]);
       const values = rows.find((item) => item.number === row)?.cells || [];
       const width = Math.max(labels.length, values.length);
-      state.values = Array.from({ length: width }, (_, index) => values[index] || "");
-      state.fields = Array.from({ length: width }, (_, index) => labels[index] || `Columna ${columnName(index + 1)}`);
-      renderFields();
-      setStatus(`Lectura automática confirmada · fila ${row}`);
-      host.dataset.row = String(row);
-      ui.save.disabled = false;
-      void loadRelationships(labels, state.values, request.signal);
+      const freshValues = Array.from({ length: width }, (_, index) => values[index] || "");
+      const freshLabels = Array.from({ length: width }, (_, index) => labels[index] || "");
+      const changed = !cached || !sameValues(cached.labels, freshLabels) || !sameValues(cached.values, freshValues);
+      void writePersistentCache(persistentKey, {
+        labels: freshLabels,
+        values: freshValues,
+        updatedAt: Date.now()
+      });
+
+      if (!cached) {
+        applyRowData(freshLabels, freshValues, row, request.signal);
+        setStatus(`Lectura automática confirmada · fila ${row}`);
+      } else if (!changed) {
+        setStatus(`Fila ${row} actualizada · sin cambios nuevos`);
+      } else {
+        const draftValues = currentInputValues();
+        const dirty = draftValues.flatMap((value, index) =>
+          value !== state.values[index] ? [{ index, value }] : []
+        );
+        applyRowData(freshLabels, freshValues, row, request.signal, dirty);
+        setStatus(dirty.length
+          ? `Datos actualizados en segundo plano · ${dirty.length} cambio(s) tuyos conservados`
+          : `Datos actualizados en segundo plano · fila ${row}`
+        );
+      }
     } catch (error) {
       if (error.name !== "AbortError") {
-        ui.fields.replaceChildren();
-        ui.relatedList.replaceChildren();
-        setRelatedStatus("No se pudieron buscar relaciones para esta fila.");
-        setStatus(error.message, "error");
+        if (cached) {
+          setStatus(`Mostrando caché · no se pudo comprobar: ${error.message}`, "error");
+        } else {
+          ui.fields.inert = false;
+          ui.fields.removeAttribute("aria-busy");
+          clearRelations();
+          setRelatedStatus("No se pudieron buscar relaciones para esta fila.");
+          setStatus(error.message, "error");
+        }
       }
     } finally {
       if (state.request === request) state.loading = false;
     }
   }
 
-  function renderFields() {
-    ui.fields.replaceChildren();
+  function renderFields(drafts = new Map()) {
+    const existing = Array.from(ui.fields.children);
     state.fields.forEach((label, index) => {
-      const wrapper = element("label", "field");
-      const title = element("span", "", label);
-      const input = element("input");
-      input.type = "text";
-      input.value = state.values[index] || "";
+      let wrapper = existing[index];
+      let title = wrapper?.querySelector(":scope > span");
+      let input = wrapper?.querySelector(":scope > input");
+
+      if (!wrapper?.classList.contains("field") || !title || !input) {
+        wrapper = element("label", "field");
+        title = element("span");
+        input = element("input");
+        input.type = "text";
+        input.autocomplete = "off";
+        wrapper.append(title, input);
+        ui.fields.appendChild(wrapper);
+      }
+
+      title.textContent = label;
       input.dataset.column = String(index + 1);
-      input.autocomplete = "off";
-      wrapper.append(title, input);
-      ui.fields.appendChild(wrapper);
+      const nextValue = drafts.has(index) ? drafts.get(index) : (state.values[index] || "");
+      if (input.value !== nextValue) input.value = nextValue;
     });
+
+    for (let index = existing.length - 1; index >= state.fields.length; index -= 1) {
+      existing[index].remove();
+    }
   }
 
   const wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
@@ -615,6 +796,10 @@
 
   async function saveChanges() {
     if (state.saving || !state.row) return;
+    if (state.viewRow !== state.row || state.viewGid !== state.gid) {
+      setStatus("Espera a que termine de cargar la fila seleccionada", "busy");
+      return;
+    }
     const inputs = Array.from(ui.fields.querySelectorAll("input[data-column]"));
     const changes = inputs.flatMap((input) => {
       const index = Number(input.dataset.column) - 1;
@@ -660,14 +845,16 @@
     state.lastSelection = signature;
     const row = selectedRow(reference);
     if (!row) {
-      ui.relatedList.replaceChildren();
+      clearRelations();
       setRelatedStatus("Selecciona una fila para buscar relaciones.");
       setStatus("Selecciona una celda de la fila que quieres abrir", "busy");
       return;
     }
     if (row === 1) {
       ui.fields.replaceChildren();
-      ui.relatedList.replaceChildren();
+      clearRelations();
+      state.viewRow = null;
+      state.viewGid = null;
       setRelatedStatus("La fila de encabezados no tiene relaciones.");
       ui.save.disabled = true;
       ui.meta.textContent = "Fila de encabezados";

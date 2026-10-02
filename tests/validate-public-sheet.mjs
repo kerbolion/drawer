@@ -199,6 +199,18 @@ try {
   }
 
   await cdp.evaluate(`(() => {
+    const host = document.getElementById("sheets-session-probe");
+    const panel = host.shadowRoot.querySelector(".panel-frame").contentDocument;
+    window.__probeFieldRoot = panel.querySelector(".fields");
+    window.__probeFirstInput = panel.querySelector(".field input");
+    window.__probeFieldMutations = 0;
+    window.__probeFieldObserver = new MutationObserver(records => {
+      window.__probeFieldMutations += records.filter(record => record.type === "childList").length;
+    });
+    window.__probeFieldObserver.observe(window.__probeFieldRoot, { childList: true });
+  })()`);
+
+  await cdp.evaluate(`(() => {
     const box = document.getElementById("t-name-box");
     box.focus();
     box.value = "A3";
@@ -225,7 +237,19 @@ try {
     throw new Error("El formulario no siguio automaticamente el cambio a la fila 3");
   }
 
-  console.log("VALIDACION_OK: lectura, cambio de fila, foco aislado y pegado TSV unico confirmados.");
+  const stableRender = await cdp.evaluate(`(() => {
+    const currentInput = window.__probeFieldRoot?.querySelector(".field input");
+    window.__probeFieldObserver?.disconnect();
+    return {
+      sameInput: currentInput === window.__probeFirstInput,
+      rootMutations: window.__probeFieldMutations
+    };
+  })()`);
+  if (!stableRender.sameInput || stableRender.rootMutations !== 0) {
+    throw new Error(`El cambio de fila reconstruyo el formulario: ${JSON.stringify(stableRender)}`);
+  }
+
+  console.log("VALIDACION_OK: lectura, cambio de fila sin rerender, foco aislado y pegado TSV unico confirmados.");
 } finally {
   cdp?.close();
   if (browser.pid) spawnSync("taskkill", ["/PID", String(browser.pid), "/T", "/F"], { stdio: "ignore", windowsHide: true });

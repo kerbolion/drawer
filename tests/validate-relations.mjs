@@ -33,6 +33,8 @@ const sheets = {
     rows: [["S-1", "C-1", "Limpieza"], ["S-2", "C-1", "Entrega"], ["S-3", "C-2", "Reparación"]]
   }
 };
+let delayContactRow = false;
+let delayServicesTable = false;
 
 function cells(values) {
   return values.map((value) => `<td>${value}</td>`).join("");
@@ -62,12 +64,16 @@ const webServer = http.createServer((request, response) => {
   if (url.pathname.endsWith("/htmlembed/sheet")) {
     const sheet = url.searchParams.get("gid") === "1" ? sheets.Servicios : sheets.Contactos;
     const rowNumber = Number(url.searchParams.get("range")?.match(/A(\d+)/)?.[1] || 1);
-    response.end(waffle(sheet, rowNumber));
+    const send = () => response.end(waffle(sheet, rowNumber));
+    if (delayContactRow && sheet === sheets.Contactos && rowNumber === 2) setTimeout(send, 900);
+    else send();
     return;
   }
   if (url.pathname.endsWith("/gviz/tq")) {
     const sheet = sheets[url.searchParams.get("sheet")] || { headers: [], rows: [] };
-    response.end(gviz(sheet));
+    const send = () => response.end(gviz(sheet));
+    if (delayServicesTable && sheet === sheets.Servicios) setTimeout(send, 900);
+    else send();
     return;
   }
   response.statusCode = 404;
@@ -153,7 +159,9 @@ try {
     const panel = host?.shadowRoot?.querySelector(".panel-frame")?.contentDocument;
     return {
       row: host?.dataset.row || null,
-      status: panel?.querySelector(".related-status")?.textContent || "",
+      formStatus: panel?.querySelector(".status")?.textContent || "",
+      relatedStatus: panel?.querySelector(".related-status")?.textContent || "",
+      fields: panel ? Array.from(panel.querySelectorAll(".field input"), input => input.value) : [],
       relations: panel ? Array.from(panel.querySelectorAll(".relation"), relation => ({
         title: relation.querySelector(".relation-title")?.textContent || "",
         count: relation.querySelector(".relation-count")?.textContent || "",
@@ -196,7 +204,54 @@ try {
     throw new Error(`Relacion Servicios -> Contactos incorrecta: ${JSON.stringify(contact)}`);
   }
 
-  console.log("RELACIONES_OK: Contactos -> Servicios (2) y Servicios -> Contactos (1) detectadas automaticamente.");
+  sheets.Contactos.rows[0][1] = "Ana actualizada";
+  sheets.Servicios.rows.push(["S-4", "C-1", "Instalación"]);
+  delayContactRow = true;
+  delayServicesTable = true;
+  await cdp.evaluate(`(() => {
+    const tabs = Array.from(document.querySelectorAll(".docs-sheet-tab"));
+    tabs.forEach(tab => tab.classList.remove("docs-sheet-active-tab"));
+    tabs.find(tab => tab.textContent.includes("Contactos")).classList.add("docs-sheet-active-tab");
+    location.hash = "gid=0&range=A2";
+    const box = document.getElementById("t-name-box");
+    box.value = "A2";
+    box.dispatchEvent(new Event("input", { bubbles: true }));
+  })()`);
+
+  const cacheDeadline = Date.now() + 800;
+  let cachedSnapshot;
+  while (Date.now() < cacheDeadline) {
+    cachedSnapshot = await cdp.evaluate(snapshot);
+    const cachedServices = cachedSnapshot.relations.find((relation) => relation.title === "Servicios");
+    if (cachedSnapshot.formStatus.includes("caché") && cachedSnapshot.fields.includes("Ana") && cachedServices?.count === "2") break;
+    await delay(50);
+  }
+  const cachedServices = cachedSnapshot?.relations.find((relation) => relation.title === "Servicios");
+  if (!cachedSnapshot?.formStatus.includes("caché") || !cachedSnapshot.fields.includes("Ana") || cachedServices?.count !== "2") {
+    throw new Error(`La caché no apareció antes de la red: ${JSON.stringify(cachedSnapshot)}`);
+  }
+  await cdp.evaluate(`(() => {
+    const host = document.getElementById("sheets-session-probe");
+    const panel = host.shadowRoot.querySelector(".panel-frame").contentDocument;
+    const age = panel.querySelectorAll(".field input")[2];
+    age.value = "31";
+    age.dispatchEvent(new Event("input", { bubbles: true }));
+  })()`);
+
+  const refreshDeadline = Date.now() + 8_000;
+  let refreshedSnapshot;
+  while (Date.now() < refreshDeadline) {
+    refreshedSnapshot = await cdp.evaluate(snapshot);
+    const refreshedServices = refreshedSnapshot.relations.find((relation) => relation.title === "Servicios");
+    if (refreshedSnapshot.fields.includes("Ana actualizada") && refreshedSnapshot.fields.includes("31") && refreshedServices?.count === "3") break;
+    await delay(100);
+  }
+  const refreshedServices = refreshedSnapshot?.relations.find((relation) => relation.title === "Servicios");
+  if (!refreshedSnapshot?.fields.includes("Ana actualizada") || !refreshedSnapshot?.fields.includes("31") || refreshedServices?.count !== "3") {
+    throw new Error(`La actualización en segundo plano no reemplazó la caché: ${JSON.stringify(refreshedSnapshot)}`);
+  }
+
+  console.log("RELACIONES_OK: detección automática, caché inmediata y actualización en segundo plano confirmadas.");
 } finally {
   cdp?.close();
   if (browser.pid) spawnSync("taskkill", ["/PID", String(browser.pid), "/T", "/F"], { stdio: "ignore", windowsHide: true });
