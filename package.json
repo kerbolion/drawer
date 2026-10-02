@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "build": "vite build",
-    "sheets": "node skills/google-sheets-browser/scripts/sheets.mjs",
+    "sheets": "node .codex/skills/google-sheets-browser/scripts/sheets.mjs",
     "test": "npm run build && node tests/validate-bridge.mjs && node tests/validate-public-sheet.mjs && node tests/validate-relations.mjs"
   },
   "dependencies": {

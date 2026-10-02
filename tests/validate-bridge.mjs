@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import vm from "node:vm";
 
-const script = path.resolve(import.meta.dirname, "..", "skills", "google-sheets-browser", "scripts", "sheets.mjs");
+const script = path.resolve(import.meta.dirname, "..", ".codex", "skills", "google-sheets-browser", "scripts", "sheets.mjs");
 const url = "https://docs.google.com/spreadsheets/d/test-spreadsheet/edit#gid=7";
 const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 

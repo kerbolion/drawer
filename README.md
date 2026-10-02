@@ -42,13 +42,27 @@ El panel debe cargar la fila automáticamente. Cambia un campo y pulsa **Guardar
 
 Esta versión supone que los encabezados están en la fila 1 y admite columnas hasta `ZZ`.
 
+## Compartir la carpeta
+
+El directorio ya incluye el skill de Codex en `.codex/skills/google-sheets-browser`. Para usarlo en otra computadora basta con compartir la carpeta completa:
+
+1. Instala una versión actual de Node.js.
+2. Abre `chrome://extensions`, activa **Modo de desarrollador** y carga esta carpeta con **Cargar descomprimida**.
+3. Abre esta misma carpeta como proyecto en Codex e inicia una conversación nueva.
+4. Abre en el navegador la hoja de Google Sheets y conserva iniciada la sesión de Google.
+5. Escribe: `Usa $google-sheets-browser para inspeccionar esta hoja: URL_DE_LA_HOJA`.
+
+Codex detecta el skill desde el proyecto; no es necesario copiarlo al perfil del usuario. La IA debe ejecutarse localmente en la misma computadora que el navegador, porque el puente solo escucha en `127.0.0.1:17373`.
+
+Para otro agente local con acceso a terminal, indícale que lea `.codex/skills/google-sheets-browser/SKILL.md` y use únicamente el script allí documentado como transporte. Un agente remoto sin acceso al equipo y a `127.0.0.1` no puede comunicarse con la extensión.
+
 ## Conexión local con Codex
 
 La extensión incluye el skill `google-sheets-browser`, basado en el mismo principio de `claude-cowork-google-sheets`: usa la sesión de Google ya abierta en el navegador, lee mediante `htmlembed` y escribe mediante un único pegado TSV. No necesita Google Sheets API, OAuth ni cuentas de servicio.
 
-La comunicación usa un servidor efímero limitado a `127.0.0.1:17373`. Solo existe mientras Codex ejecuta un comando y la extensión únicamente acepta las operaciones `info`, `read`, `write` y `clear`.
+La comunicación usa un servidor efímero limitado a `127.0.0.1:17373`. Solo existe mientras Codex ejecuta un comando y la extensión únicamente acepta las operaciones `info`, `read`, `inspect`, `write` y `clear`.
 
-Para instalar el skill en Codex, copia `skills/google-sheets-browser` a `%USERPROFILE%\.codex\skills\google-sheets-browser`. Después de recargar la extensión, deja abierta la hoja objetivo y Codex podrá inspeccionar, leer, escribir o limpiar rangos usando la sesión actual del navegador.
+El skill está incluido en `.codex/skills/google-sheets-browser`, por lo que Codex lo descubre al abrir este directorio como proyecto. Si se desea usarlo desde cualquier proyecto, se puede copiar esa carpeta a `%USERPROFILE%\.codex\skills\google-sheets-browser`.
 
 Ejemplo directo desde este proyecto:
 
