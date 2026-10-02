@@ -1,0 +1,4 @@
+interface:
+  display_name: "Google Sheets en navegador"
+  short_description: "Lee y edita Sheets con la sesión del navegador"
+  default_prompt: "Usa $google-sheets-browser para leer o modificar esta hoja de Google Sheets."

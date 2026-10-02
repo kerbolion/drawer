@@ -42,6 +42,20 @@ El panel debe cargar la fila automáticamente. Cambia un campo y pulsa **Guardar
 
 Esta versión supone que los encabezados están en la fila 1 y admite columnas hasta `ZZ`.
 
+## Conexión local con Codex
+
+La extensión incluye el skill `google-sheets-browser`, basado en el mismo principio de `claude-cowork-google-sheets`: usa la sesión de Google ya abierta en el navegador, lee mediante `htmlembed` y escribe mediante un único pegado TSV. No necesita Google Sheets API, OAuth ni cuentas de servicio.
+
+La comunicación usa un servidor efímero limitado a `127.0.0.1:17373`. Solo existe mientras Codex ejecuta un comando y la extensión únicamente acepta las operaciones `info`, `read`, `write` y `clear`.
+
+Para instalar el skill en Codex, copia `skills/google-sheets-browser` a `%USERPROFILE%\.codex\skills\google-sheets-browser`. Después de recargar la extensión, deja abierta la hoja objetivo y Codex podrá inspeccionar, leer, escribir o limpiar rangos usando la sesión actual del navegador.
+
+Ejemplo directo desde este proyecto:
+
+```powershell
+npm run sheets -- read --url "https://docs.google.com/spreadsheets/d/.../edit#gid=0" --range "A1:D20"
+```
+
 ## Relaciones automáticas
 
 La clave principal se infiere usando el nombre de la hoja. Por ejemplo, `Contactos` busca `ID Contacto` y `Servicios` busca `ID Servicio`. Si `Servicios` también contiene `ID Contacto`, la extensión la considera una referencia a `Contactos` y muestra las filas coincidentes en la sección **Relacionados**.

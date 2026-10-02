@@ -118,6 +118,33 @@ try {
   });
   const writeScript = await readFile(path.join(extensionDir, "page-write.js"), "utf8");
   await cdp.evaluate(writeScript);
+  await cdp.evaluate(`(() => {
+    globalThis.__codexBridgeTest = { delivered: false, result: null };
+    globalThis.chrome = {
+      runtime: {
+        lastError: null,
+        sendMessage(message, callback) {
+          if (message?.source !== "sheets-row-drawer-codex") return callback(null);
+          if (message.type === "poll") {
+            if (globalThis.__codexBridgeTest.delivered) return callback({ command: null });
+            globalThis.__codexBridgeTest.delivered = true;
+            return callback({
+              command: {
+                id: "browser-read-test",
+                action: "read",
+                params: { gid: "0", range: "A1:F3", sheet: "" }
+              }
+            });
+          }
+          if (message.type === "result") {
+            globalThis.__codexBridgeTest.result = message.payload;
+            return callback({ ok: true });
+          }
+          callback(null);
+        }
+      }
+    };
+  })()`, isolated.executionContextId);
   const contentScript = await readFile(path.join(extensionDir, "dist", "content.js"), "utf8");
   await cdp.evaluate(contentScript, isolated.executionContextId);
   const deadline = Date.now() + 30_000;
@@ -151,6 +178,18 @@ try {
   if (!result.statusHidden || result.saveState !== "saved") throw new Error("El estado rutinario no se movio al icono del encabezado");
   if (result.themeSource !== "workspace-antd" || result.drawerWidth < 700 || result.drawerWidth > 720 || result.primaryToken !== "#1677ff") {
     throw new Error(`El tema de workspace-antd no se aplico correctamente: ${JSON.stringify(result)}`);
+  }
+
+  const bridgeDeadline = Date.now() + 15_000;
+  let bridgeResult;
+  while (Date.now() < bridgeDeadline) {
+    bridgeResult = await cdp.evaluate("globalThis.__codexBridgeTest.result", isolated.executionContextId);
+    if (bridgeResult) break;
+    await delay(100);
+  }
+  const bridgeValues = bridgeResult?.result?.rows?.flatMap((row) => row.values) || [];
+  if (!bridgeResult?.ok || !bridgeValues.includes("Alexandra")) {
+    throw new Error(`El ejecutor de Codex no leyó la hoja autenticada: ${JSON.stringify(bridgeResult)}`);
   }
 
   const isolation = await cdp.evaluate(`(() => {
@@ -206,6 +245,27 @@ try {
   if (pasted !== "Alexandra\tFemale" || pasteCount !== 1) {
     throw new Error("El puente no genero un unico pegado TSV horizontal");
   }
+
+  await cdp.evaluate(`(() => {
+    window.__probeClearCount = 0;
+    document.addEventListener("keydown", event => {
+      if (event.key === "Delete") window.__probeClearCount += 1;
+    }, { capture: true });
+  })()`);
+  await cdp.evaluate(`window.postMessage({
+    source: "sheets-row-drawer",
+    type: "write-range",
+    requestId: "automated-clear-noop",
+    operations: [{ action: "clear", reference: "A2:B2" }]
+  }, location.origin)`, isolated.executionContextId);
+  const clearDeadline = Date.now() + 5_000;
+  let clearCount = 0;
+  while (Date.now() < clearDeadline) {
+    clearCount = await cdp.evaluate("window.__probeClearCount");
+    if (clearCount) break;
+    await delay(100);
+  }
+  if (clearCount !== 1) throw new Error("El puente no generó una única limpieza de rango");
 
   await cdp.evaluate(`(() => {
     const host = document.getElementById("sheets-session-probe");

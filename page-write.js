@@ -30,6 +30,16 @@
     (document.activeElement || document.body).dispatchEvent(event);
   }
 
+  function clearSelection() {
+    const target = document.activeElement || document.body;
+    target.dispatchEvent(new KeyboardEvent("keydown", {
+      key: "Delete", code: "Delete", keyCode: 46, which: 46, bubbles: true, cancelable: true
+    }));
+    target.dispatchEvent(new KeyboardEvent("keyup", {
+      key: "Delete", code: "Delete", keyCode: 46, which: 46, bubbles: true, cancelable: true
+    }));
+  }
+
   window.addEventListener("message", async (event) => {
     const message = event.data;
     if (event.source !== window || message?.source !== SOURCE || message?.type !== "write-range") return;
@@ -41,7 +51,8 @@
       for (const operation of operations) {
         focusCell(operation.reference);
         await wait(120);
-        paste(String(operation.tsv ?? ""));
+        if (operation.action === "clear") clearSelection();
+        else paste(String(operation.tsv ?? ""));
         await wait(180);
       }
       if (message.restoreReference) {

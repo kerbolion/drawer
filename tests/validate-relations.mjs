@@ -190,6 +190,33 @@ try {
     grantUniveralAccess: true
   });
   await cdp.evaluate(await readFile(path.join(extensionDir, "page-write.js"), "utf8"));
+  await cdp.evaluate(`(() => {
+    globalThis.__codexNamedBridgeTest = { delivered: false, result: null };
+    globalThis.chrome = {
+      runtime: {
+        lastError: null,
+        sendMessage(message, callback) {
+          if (message?.source !== "sheets-row-drawer-codex") return callback(null);
+          if (message.type === "poll") {
+            if (globalThis.__codexNamedBridgeTest.delivered) return callback({ command: null });
+            globalThis.__codexNamedBridgeTest.delivered = true;
+            return callback({
+              command: {
+                id: "named-sheet-read-test",
+                action: "read",
+                params: { gid: "0", sheet: "Servicios", range: "A1:F4" }
+              }
+            });
+          }
+          if (message.type === "result") {
+            globalThis.__codexNamedBridgeTest.result = message.payload;
+            return callback({ ok: true });
+          }
+          callback(null);
+        }
+      }
+    };
+  })()`, isolated.executionContextId);
   await cdp.evaluate(await readFile(path.join(extensionDir, "dist", "content.js"), "utf8"), isolated.executionContextId);
 
   const snapshot = `(() => {
@@ -222,6 +249,20 @@ try {
       await delay(200);
     }
     throw new Error(`No aparecio la relacion ${title}: ${JSON.stringify(result)}`);
+  }
+
+  const namedBridgeDeadline = Date.now() + 8_000;
+  let namedBridgeResult;
+  while (Date.now() < namedBridgeDeadline) {
+    namedBridgeResult = await cdp.evaluate("globalThis.__codexNamedBridgeTest.result", isolated.executionContextId);
+    if (namedBridgeResult) break;
+    await delay(100);
+  }
+  if (!namedBridgeResult?.ok
+    || namedBridgeResult.result?.rows?.[0]?.values?.[0] !== "ID Servicio"
+    || namedBridgeResult.result?.rows?.[0]?.values?.[1] !== "ID Contacto"
+    || namedBridgeResult.result?.rows?.[1]?.values?.[2] !== "Limpieza") {
+    throw new Error(`La lectura por nombre perdió encabezados o datos: ${JSON.stringify(namedBridgeResult)}`);
   }
 
   async function clickPanelNode(selector) {

@@ -74,6 +74,7 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
 
   const MAX_COLUMN = "ZZ";
   const POLL_MS = 250;
+  const CODEX_BRIDGE_POLL_MS = 1_500;
   const CACHE_PREFIX = "srd:v1";
   const CACHE_INDEX_KEY = `${CACHE_PREFIX}:index`;
   const WORKSPACE_PREFIX = "srd:workspace:v1";
@@ -2723,8 +2724,11 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
         type: "write-range",
         requestId,
         operations: operations.map((operation) => ({
+          action: operation.action || "write",
           reference: operation.reference,
-          tsv: operation.values.map(tsvValue).join("\t")
+          tsv: operation.action === "clear" ? "" : operation.tsv ?? (operation.rows
+            ? operation.rows.map((row) => row.map(tsvValue).join("\t")).join("\n")
+            : operation.values.map(tsvValue).join("\t"))
         })),
         restoreReference
       }, location.origin);
@@ -3038,6 +3042,187 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
     await persistChanges(preparePrimaryWrite(), [...state.relatedDrafts.values()]);
   }
 
+  function normalizedBridgeRange(value, label = "rango") {
+    const range = String(value || "").trim().replace(/\$/g, "").toUpperCase();
+    if (!/^[A-Z]{1,2}[1-9]\d*(?::[A-Z]{1,2}[1-9]\d*)?$/.test(range)) {
+      throw new Error(`El ${label} debe usar notación A1, por ejemplo A1:D20`);
+    }
+    return range;
+  }
+
+  function bridgeColumnNumber(column) {
+    return [...column].reduce((total, letter) => total * 26 + letter.charCodeAt(0) - 64, 0);
+  }
+
+  function bridgeWriteRange(start, rows) {
+    const reference = normalizedBridgeRange(start, "inicio");
+    if (reference.includes(":")) throw new Error("El inicio de escritura debe ser una sola celda");
+    const match = reference.match(/^([A-Z]+)([1-9]\d*)$/);
+    const width = rows[0].length;
+    const firstColumn = bridgeColumnNumber(match[1]);
+    const firstRow = Number(match[2]);
+    return `${reference}:${columnName(firstColumn + width - 1)}${firstRow + rows.length - 1}`;
+  }
+
+  function bridgeRows(values) {
+    if (!Array.isArray(values) || !values.length) throw new Error("values debe contener al menos una fila");
+    const rows = Array.isArray(values[0]) ? values : [values];
+    const width = rows[0]?.length || 0;
+    if (!width || rows.some((row) => !Array.isArray(row) || row.length !== width)) {
+      throw new Error("values debe ser una matriz rectangular");
+    }
+    return rows.map((row) => row.map((value) => value === null || value === undefined ? "" : String(value)));
+  }
+
+  async function readNamedBridgeRange(sheetName, range, signal) {
+    const table = await readSheetTable(sheetName, range, signal);
+    const firstRow = Number(range.match(/[A-Z]+(\d+)/)?.[1] || 1);
+    return [
+      { number: firstRow, cells: table.headers },
+      ...table.rows.map((row, index) => ({ number: firstRow + index + 1, cells: row.cells }))
+    ].filter((row) => row.cells.length);
+  }
+
+  async function readBridgeRange(params, signal) {
+    const range = normalizedBridgeRange(params.range);
+    const requestedSheet = String(params.sheet || "").trim();
+    const activeName = activeSheetName();
+    const rows = requestedSheet && normalizedColumn(requestedSheet) !== normalizedColumn(activeName)
+      ? await readNamedBridgeRange(requestedSheet, range, signal)
+      : await readRange(range, signal, String(params.gid || currentGid()));
+    return {
+      spreadsheetId: spreadsheetId(),
+      gid: String(params.gid || currentGid()),
+      sheet: requestedSheet || activeName,
+      range,
+      rows: rows.map((row) => ({ row: row.number, values: row.cells }))
+    };
+  }
+
+  function bridgeResultValues(result, expectedRows) {
+    return expectedRows.map((row, rowIndex) => row.map((_, columnIndex) =>
+      String(result.rows[rowIndex]?.values[columnIndex] ?? "")
+    ));
+  }
+
+  async function verifyBridgeMutation(params, range, expectedRows) {
+    let lastResult = null;
+    for (const delay of [500, 1_000, 2_000]) {
+      await wait(delay);
+      lastResult = await readBridgeRange({ ...params, range }, undefined);
+      if (JSON.stringify(bridgeResultValues(lastResult, expectedRows)) === JSON.stringify(expectedRows)) {
+        return { verified: true, values: expectedRows };
+      }
+    }
+    return { verified: false, values: bridgeResultValues(lastResult || { rows: [] }, expectedRows) };
+  }
+
+  function visibleBridgeSheets() {
+    return visibleSheetNames().map((name) => ({
+      name,
+      gid: normalizedColumn(name) === normalizedColumn(activeSheetName()) ? currentGid() : null
+    }));
+  }
+
+  async function executeCodexBridgeCommand(command) {
+    const params = command?.params || {};
+    if (command.action === "info") {
+      return {
+        spreadsheetId: spreadsheetId(),
+        gid: currentGid(),
+        sheet: activeSheetName(),
+        selection: nameBoxValue(),
+        sheets: visibleBridgeSheets(),
+        capabilities: ["read", "write", "clear"]
+      };
+    }
+    if (command.action === "read") return readBridgeRange(params, undefined);
+    if (command.action !== "write" && command.action !== "clear") {
+      throw new Error(`Operación no soportada: ${command.action}`);
+    }
+
+    const targetSheet = String(params.sheet || activeSheetName()).trim();
+    const selectedReference = nameBoxValue().split("!").pop() || `A${state.row || 1}`;
+    const restoreReference = qualifiedReference(activeSheetName(), selectedReference);
+    let range;
+    let expectedRows;
+    let operation;
+
+    if (command.action === "write") {
+      expectedRows = bridgeRows(params.values);
+      range = bridgeWriteRange(params.start, expectedRows);
+      operation = {
+        reference: qualifiedReference(targetSheet, range.split(":")[0]),
+        rows: expectedRows
+      };
+    } else {
+      range = normalizedBridgeRange(params.range);
+      const [start, end = start] = range.split(":");
+      const startMatch = start.match(/^([A-Z]+)(\d+)$/);
+      const endMatch = end.match(/^([A-Z]+)(\d+)$/);
+      const width = bridgeColumnNumber(endMatch[1]) - bridgeColumnNumber(startMatch[1]) + 1;
+      const height = Number(endMatch[2]) - Number(startMatch[2]) + 1;
+      if (width <= 0 || height <= 0) throw new Error("El rango de limpieza está invertido");
+      expectedRows = Array.from({ length: height }, () => Array(width).fill(""));
+      operation = { action: "clear", reference: qualifiedReference(targetSheet, range) };
+    }
+
+    await writeRanges([operation], restoreReference);
+    state.headerCache.clear();
+    state.sheetCache.clear();
+    const verification = await verifyBridgeMutation({ ...params, sheet: targetSheet }, range, expectedRows);
+    if (normalizedColumn(targetSheet) === normalizedColumn(activeSheetName()) && state.row) {
+      void loadRow(state.row, true);
+    }
+    return {
+      spreadsheetId: spreadsheetId(),
+      gid: String(params.gid || currentGid()),
+      sheet: targetSheet,
+      range,
+      ...verification
+    };
+  }
+
+  function runtimeBridgeMessage(type, payload) {
+    const runtime = globalThis.chrome?.runtime;
+    if (!runtime?.sendMessage) return Promise.resolve(null);
+    return new Promise((resolve, reject) => {
+      try {
+        runtime.sendMessage({ source: "sheets-row-drawer-codex", type, payload }, (response) => {
+          const runtimeError = globalThis.chrome?.runtime?.lastError;
+          if (runtimeError) reject(new Error(runtimeError.message));
+          else resolve(response || null);
+        });
+      } catch (error) {
+        reject(error);
+      }
+    });
+  }
+
+  async function pollCodexBridge() {
+    try {
+      const response = await runtimeBridgeMessage("poll", {
+        spreadsheetId: spreadsheetId(),
+        gid: currentGid(),
+        sheet: activeSheetName()
+      });
+      const command = response?.command;
+      if (command) {
+        try {
+          const result = await executeCodexBridgeCommand(command);
+          await runtimeBridgeMessage("result", { id: command.id, ok: true, result });
+        } catch (error) {
+          await runtimeBridgeMessage("result", {
+            id: command.id,
+            ok: false,
+            error: error instanceof Error ? error.message : String(error)
+          });
+        }
+      }
+    } catch {}
+    setTimeout(pollCodexBridge, CODEX_BRIDGE_POLL_MS);
+  }
+
   function pollSelection() {
     if (state.saving) return;
     const reference = nameBoxValue();
@@ -3070,5 +3255,6 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
   void ensureWorkspaceLoaded().finally(() => {
     setInterval(pollSelection, POLL_MS);
     pollSelection();
+    void pollCodexBridge();
   });
 })();
