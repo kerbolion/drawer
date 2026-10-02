@@ -10,6 +10,8 @@ La interfaz usa Ant Design `5.15.4` y replica los tokens claros del drawer de `w
 - Detecta las demás hojas visibles y relaciona registros por columnas `ID ...` compartidas.
 - Muestra relaciones padre-hijo en ambos sentidos, como `Contactos -> Servicios` y `Servicios -> Contactos`.
 - Guarda filas y relacionados en caché local persistente, los muestra primero y comprueba cambios en segundo plano.
+- Conserva una configuración independiente por documento y pestaña en `chrome.storage.local`.
+- Permite configurar cada columna como texto, área de texto, número, monto, fecha, fecha y hora, hora, selección, selección múltiple, estado, casilla, URL, teléfono o correo.
 - Muestra la actividad con el indicador del encabezado: spinner azul durante la lectura o el guardado y check verde al terminar, sin mensajes rutinarios dentro del formulario.
 - Aísla el formulario para que `Ctrl+V` permanezca dentro del input.
 - Guarda el rango editado mediante un único pegado TSV horizontal de Sheets.
@@ -36,6 +38,14 @@ La clave principal se infiere usando el nombre de la hoja. Por ejemplo, `Contact
 También se reconocen variantes de escritura como `id_contacto`, `Id Contacto` o `IDContacto`. Si el nombre de la hoja no coincide con ninguna columna, se usa la primera columna cuyo nombre comienza por `ID`.
 
 La caché conserva hasta 120 entradas recientes en `chrome.storage.local`. Al volver a una fila, el formulario aparece desde la caché y luego se compara con Sheets. Los cambios remotos reemplazan los datos almacenados, mientras que los valores que estés editando en ese momento se conservan.
+
+## Tipos de campo
+
+Cada archivo de Sheets se guarda como un workspace local. Las pestañas se identifican por su `gid` y cada columna mantiene su nombre visible, tipo y opciones. Esta configuración no caduca junto con la caché de filas.
+
+Pulsa el engranaje junto al nombre de una propiedad para abrir **Editar propiedad**. Todas las columnas nuevas comienzan como **Texto** y la extensión no intenta adivinar el tipo. Los desplegables y estados reciben una opción por línea; las casillas permiten definir el valor activado y desactivado; montos, fechas y horas conservan sus ajustes de presentación.
+
+El nombre configurado se usa únicamente en el formulario. El encabezado original continúa siendo la referencia de la columna en Sheets.
 
 Al cambiar de fila, el formulario reutiliza los mismos campos y actualiza sus etiquetas y valores en el lugar. Esto evita el parpadeo causado por vaciar y reconstruir todo el formulario.
 

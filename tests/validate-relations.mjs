@@ -164,7 +164,7 @@ try {
       relatedStatus: panel?.querySelector(".related-status")?.textContent || "",
       relatedStatusHidden: panel?.querySelector(".related-status")?.hidden ?? false,
       saveState: host?.dataset.saveState || null,
-      fields: panel ? Array.from(panel.querySelectorAll(".field input"), input => input.value) : [],
+      fields: panel ? Array.from(panel.querySelectorAll(".field [data-column]"), input => input.value) : [],
       relations: panel ? Array.from(panel.querySelectorAll(".relation"), relation => ({
         title: relation.querySelector(".relation-title")?.textContent || "",
         count: relation.querySelector(".relation-count")?.textContent || "",
@@ -189,6 +189,44 @@ try {
   const services = fromContact.relations.find((relation) => relation.title === "Servicios");
   if (services.count !== "2" || !services.cells.includes("S-1") || !services.cells.includes("S-2") || services.cells.includes("S-3")) {
     throw new Error(`Relacion Contactos -> Servicios incorrecta: ${JSON.stringify(services)}`);
+  }
+
+  const configuredTypes = await cdp.evaluate(`(() => {
+    const host = document.getElementById("sheets-session-probe");
+    const panel = host.shadowRoot.querySelector(".panel-frame").contentDocument;
+    const configure = (column, type) => {
+      panel.querySelector('[data-configure-column="' + column + '"]').click();
+      const typeSelect = panel.querySelector("#srd-property-type");
+      typeSelect.value = type;
+      typeSelect.dispatchEvent(new Event("change", { bubbles: true }));
+      panel.querySelector("#srd-property-form").requestSubmit();
+    };
+    configure(2, "longText");
+    configure(3, "number");
+    const nameControl = panel.querySelector('[data-column="2"]');
+    const ageControl = panel.querySelector('[data-column="3"]');
+    return {
+      nameTag: nameControl?.tagName,
+      nameType: nameControl?.dataset.fieldType,
+      nameValue: nameControl?.value,
+      ageTag: ageControl?.tagName,
+      ageInputType: ageControl?.type,
+      ageFieldType: ageControl?.dataset.fieldType,
+      ageValue: ageControl?.value,
+      editorHidden: panel.querySelector(".property-drawer")?.hidden
+    };
+  })()`);
+  if (
+    configuredTypes.nameTag !== "TEXTAREA" ||
+    configuredTypes.nameType !== "longText" ||
+    configuredTypes.nameValue !== "Ana" ||
+    configuredTypes.ageTag !== "INPUT" ||
+    configuredTypes.ageInputType !== "number" ||
+    configuredTypes.ageFieldType !== "number" ||
+    configuredTypes.ageValue !== "30" ||
+    !configuredTypes.editorHidden
+  ) {
+    throw new Error(`La configuración de tipos no se aplicó: ${JSON.stringify(configuredTypes)}`);
   }
 
   await cdp.evaluate(`(() => {
@@ -236,7 +274,7 @@ try {
   await cdp.evaluate(`(() => {
     const host = document.getElementById("sheets-session-probe");
     const panel = host.shadowRoot.querySelector(".panel-frame").contentDocument;
-    const age = panel.querySelectorAll(".field input")[2];
+    const age = panel.querySelector('[data-column="3"]');
     age.value = "31";
     age.dispatchEvent(new Event("input", { bubbles: true }));
   })()`);
@@ -254,7 +292,18 @@ try {
     throw new Error(`La actualización en segundo plano no reemplazó la caché: ${JSON.stringify(refreshedSnapshot)}`);
   }
 
-  console.log("RELACIONES_OK: caché inmediata, verificación silenciosa e indicador animado confirmados.");
+  const persistentTypes = await cdp.evaluate(`(() => {
+    const host = document.getElementById("sheets-session-probe");
+    const panel = host.shadowRoot.querySelector(".panel-frame").contentDocument;
+    return {
+      nameType: panel.querySelector('[data-column="2"]')?.dataset.fieldType,
+      ageType: panel.querySelector('[data-column="3"]')?.dataset.fieldType
+    };
+  })()`);
+  if (persistentTypes.nameType !== "longText" || persistentTypes.ageType !== "number") {
+    throw new Error(`Los tipos no se conservaron al cambiar de hoja: ${JSON.stringify(persistentTypes)}`);
+  }
+  console.log("RELACIONES_OK: tipos persistentes, caché inmediata, verificación silenciosa e indicador animado confirmados.");
 } finally {
   cdp?.close();
   if (browser.pid) spawnSync("taskkill", ["/PID", String(browser.pid), "/T", "/F"], { stdio: "ignore", windowsHide: true });

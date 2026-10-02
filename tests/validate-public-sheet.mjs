@@ -259,7 +259,36 @@ try {
     throw new Error(`El cambio de fila reconstruyo el formulario: ${JSON.stringify(stableRender)}`);
   }
 
-  console.log("VALIDACION_OK: estado animado en encabezado, tema Ant Design, lectura, cambio sin rerender, foco y pegado TSV confirmados.");
+  const configured = await cdp.evaluate(`(() => {
+    const host = document.getElementById("sheets-session-probe");
+    const panel = host.shadowRoot.querySelector(".panel-frame").contentDocument;
+    panel.querySelector('[data-configure-column="1"]').click();
+    const type = panel.querySelector("#srd-property-type");
+    type.value = "longText";
+    type.dispatchEvent(new Event("change", { bubbles: true }));
+    panel.querySelector("#srd-property-form").requestSubmit();
+    return panel.querySelector('[data-column="1"]')?.dataset.fieldType;
+  })()`);
+  if (configured !== "longText") throw new Error("El drawer de propiedad no aplico el tipo configurado");
+
+  await delay(300);
+  await cdp.command("Page.reload", { ignoreCache: true });
+  const persistenceDeadline = Date.now() + 30_000;
+  let persistedType = null;
+  while (Date.now() < persistenceDeadline) {
+    try {
+      persistedType = await cdp.evaluate(`(() => {
+        const host = document.getElementById("sheets-session-probe");
+        const panel = host?.shadowRoot?.querySelector(".panel-frame")?.contentDocument;
+        return panel?.querySelector('[data-column="1"]')?.dataset.fieldType || null;
+      })()`);
+      if (persistedType === "longText") break;
+    } catch {}
+    await delay(250);
+  }
+  if (persistedType !== "longText") throw new Error("El tipo de columna no persistio despues de recargar Sheets");
+
+  console.log("VALIDACION_OK: tipos persistentes, estado animado, tema Ant Design, lectura, cambio sin rerender, foco y pegado TSV confirmados.");
 } finally {
   cdp?.close();
   if (browser.pid) spawnSync("taskkill", ["/PID", String(browser.pid), "/T", "/F"], { stdio: "ignore", windowsHide: true });
