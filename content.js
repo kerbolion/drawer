@@ -28,7 +28,9 @@ import { antdTokens, workspaceTokens } from "./theme.js";
     sheetCache: new Map(),
     relationRequest: null,
     persistentFallback: new Map(),
-    cacheWriteQueue: Promise.resolve()
+    cacheWriteQueue: Promise.resolve(),
+    activity: { row: false, relations: false },
+    indicatorError: false
   };
 
   const host = document.createElement("div");
@@ -110,6 +112,7 @@ import { antdTokens, workspaceTokens } from "./theme.js";
     header { padding: 16px 24px; border-bottom: 1px solid ${antdTokens.colorBorderSecondary}; }
     .eyebrow { color: ${antdTokens.colorTextTertiary}; font-size: 11px; font-weight: 600; letter-spacing: .08em; }
     .title-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    .header-actions { display: flex; align-items: center; gap: 8px; }
     h1 { margin: 6px 0 0; color: ${antdTokens.colorTextHeading}; font-size: 18px; line-height: 1.35; }
     .icon-button {
       width: ${antdTokens.controlHeight}px; height: ${antdTokens.controlHeight}px;
@@ -117,6 +120,29 @@ import { antdTokens, workspaceTokens } from "./theme.js";
       color: ${antdTokens.colorTextSecondary}; font-size: 20px; cursor: pointer;
     }
     .icon-button:hover { background: ${antdTokens.colorFillTertiary}; color: ${antdTokens.colorText}; }
+    .save-state {
+      align-items: center; display: inline-flex; width: 28px; height: 28px; justify-content: center;
+      font-size: 17px; line-height: 1; transition: color ${antdTokens.motionDurationMid};
+    }
+    .save-state.is-saving { color: ${antdTokens.colorPrimary}; }
+    .save-state.is-saved { color: #22c55e; }
+    .save-state.is-error { color: ${antdTokens.colorError}; }
+    .save-state-check, .save-state-spinner, .save-state-error { display: none; }
+    .save-state.is-saving .save-state-spinner {
+      display: block; width: 16px; height: 16px; border: 2px solid currentColor;
+      border-right-color: transparent; border-radius: 50%; animation: save-state-spin .8s linear infinite;
+    }
+    .save-state.is-saved .save-state-check {
+      display: inline-flex; animation: save-state-confirm .42s cubic-bezier(.2, .9, .25, 1.35);
+    }
+    .save-state.is-error .save-state-error { display: inline-flex; font-weight: 800; }
+    .save-state svg { display: block; width: 1em; height: 1em; fill: currentColor; }
+    @keyframes save-state-spin { to { transform: rotate(360deg); } }
+    @keyframes save-state-confirm {
+      0% { opacity: 0; transform: scale(.55); }
+      65% { opacity: 1; transform: scale(1.18); }
+      100% { transform: scale(1); }
+    }
     main { flex: 1; overflow: auto; padding: 20px 28px 32px; background: var(--workspace-bg); }
     .status {
       margin-bottom: 14px; padding: 9px 12px; border: 1px solid ${antdTokens.colorSuccessBorder};
@@ -125,6 +151,7 @@ import { antdTokens, workspaceTokens } from "./theme.js";
     }
     .status.error { border-color: ${antdTokens.colorErrorBorder}; background: ${antdTokens.colorErrorBg}; color: ${antdTokens.colorErrorText}; }
     .status.busy { border-color: ${antdTokens.colorInfoBorder}; background: ${antdTokens.colorInfoBg}; color: ${antdTokens.colorInfoText}; }
+    .status[hidden], .related-status[hidden] { display: none; }
     .fields {
       overflow: hidden; padding: 4px 14px;
       border: 1px solid var(--workspace-border); border-radius: 8px;
@@ -183,6 +210,9 @@ import { antdTokens, workspaceTokens } from "./theme.js";
       header, footer { padding-inline: 16px; }
       .field { grid-template-columns: minmax(86px, 34%) minmax(0, 1fr); gap: 10px; }
     }
+    @media (prefers-reduced-motion: reduce) {
+      .save-state.is-saving .save-state-spinner, .save-state.is-saved .save-state-check { animation: none; }
+    }
   `;
   panelDocument.head.appendChild(panelStyles);
 
@@ -199,15 +229,47 @@ import { antdTokens, workspaceTokens } from "./theme.js";
   const eyebrow = element("div", "eyebrow", "PRUEBA LOCAL · SESIÓN DE GOOGLE");
   const titleRow = element("div", "title-row");
   const title = element("h1", "", "Detalles de la fila");
+  const headerActions = element("div", "header-actions");
+  const saveState = element("span", "save-state is-saving");
+  saveState.title = "Cargando";
+  saveState.setAttribute("role", "status");
+  saveState.setAttribute("aria-label", "Cargando");
+  saveState.setAttribute("aria-live", "polite");
+  const saveStateSpinner = element("span", "save-state-spinner");
+  saveStateSpinner.setAttribute("aria-hidden", "true");
+  const saveStateCheck = element("span", "anticon anticon-check-circle save-state-check");
+  saveStateCheck.setAttribute("aria-hidden", "true");
+  const svgNamespace = "http://www.w3.org/2000/svg";
+  const checkSvg = panelDocument.createElementNS(svgNamespace, "svg");
+  checkSvg.setAttribute("viewBox", "64 64 896 896");
+  checkSvg.setAttribute("focusable", "false");
+  checkSvg.setAttribute("data-icon", "check-circle");
+  checkSvg.setAttribute("width", "1em");
+  checkSvg.setAttribute("height", "1em");
+  checkSvg.setAttribute("fill", "currentColor");
+  for (const pathData of [
+    "M699 353h-46.9c-10.2 0-19.9 4.9-25.9 13.3L469 584.3l-71.2-98.8c-6-8.3-15.6-13.3-25.9-13.3H325c-6.5 0-10.3 7.4-6.5 12.7l124.6 172.8a31.8 31.8 0 0051.7 0l210.6-292c3.9-5.3.1-12.7-6.4-12.7z",
+    "M512 64C264.6 64 64 264.6 64 512s200.6 448 448 448 448-200.6 448-448S759.4 64 512 64zm0 820c-205.4 0-372-166.6-372-372s166.6-372 372-372 372 166.6 372 372-166.6 372-372 372z"
+  ]) {
+    const path = panelDocument.createElementNS(svgNamespace, "path");
+    path.setAttribute("d", pathData);
+    checkSvg.appendChild(path);
+  }
+  saveStateCheck.appendChild(checkSvg);
+  const saveStateError = element("span", "save-state-error", "!");
+  saveStateError.setAttribute("aria-hidden", "true");
+  saveState.append(saveStateSpinner, saveStateCheck, saveStateError);
   const close = element("button", "icon-button close", "×");
   close.type = "button";
   close.title = "Cerrar";
   close.setAttribute("aria-label", "Cerrar");
-  titleRow.append(title, close);
+  headerActions.append(saveState, close);
+  titleRow.append(title, headerActions);
   panelHeader.append(eyebrow, titleRow);
 
   const main = element("main");
   const status = element("div", "status busy", "Esperando una celda…");
+  status.hidden = true;
   const fields = element("div", "fields");
   const related = element("section", "related");
   const relatedTitle = element("h2", "", "Relacionados");
@@ -230,6 +292,7 @@ import { antdTokens, workspaceTokens } from "./theme.js";
     drawer,
     close,
     reopen,
+    saveState,
     status,
     fields,
     relatedStatus,
@@ -382,10 +445,34 @@ import { antdTokens, workspaceTokens } from "./theme.js";
     return JSON.stringify(left) === JSON.stringify(right);
   }
 
+  function syncSaveState() {
+    let mode = "saved";
+    let label = "Guardado";
+    if (state.indicatorError) {
+      mode = "error";
+      label = "Error";
+    } else if (state.saving || state.activity.row || state.activity.relations) {
+      mode = "saving";
+      label = state.saving ? "Guardando" : "Actualizando";
+    }
+    ui.saveState.className = `save-state is-${mode}`;
+    ui.saveState.title = label;
+    ui.saveState.setAttribute("aria-label", label);
+    host.dataset.saveState = mode;
+  }
+
+  function setActivity(name, active) {
+    state.activity[name] = active;
+    syncSaveState();
+  }
+
   function setStatus(message, kind = "ok") {
     ui.status.textContent = message;
     ui.status.className = `status ${kind === "ok" ? "" : kind}`.trim();
+    ui.status.hidden = kind !== "error";
+    state.indicatorError = kind === "error";
     host.dataset.status = kind;
+    syncSaveState();
   }
 
   function embedUrl(range) {
@@ -512,8 +599,8 @@ import { antdTokens, workspaceTokens } from "./theme.js";
     return table;
   }
 
-  function setRelatedStatus(message) {
-    ui.relatedStatus.hidden = false;
+  function setRelatedStatus(message, transient = false) {
+    ui.relatedStatus.hidden = transient;
     ui.relatedStatus.textContent = message;
   }
 
@@ -602,9 +689,12 @@ import { antdTokens, workspaceTokens } from "./theme.js";
     state.relationRequest?.abort();
     const controller = new AbortController();
     state.relationRequest = controller;
+    setActivity("relations", true);
     if (parentSignal?.aborted) controller.abort();
     else parentSignal?.addEventListener("abort", () => controller.abort(), { once: true });
-    void loadRelationships(currentHeaders, currentValues, controller.signal);
+    void loadRelationships(currentHeaders, currentValues, controller.signal).finally(() => {
+      if (state.relationRequest === controller) setActivity("relations", false);
+    });
   }
 
   async function loadRelationships(currentHeaders, currentValues, signal) {
@@ -615,9 +705,9 @@ import { antdTokens, workspaceTokens } from "./theme.js";
     const usableCache = cached?.currentSheet === currentSheet && Array.isArray(cached.relations);
     if (usableCache) {
       showRelations(cached.relations);
-      setRelatedStatus("Mostrando relacionados guardados · comprobando cambios…");
+      setRelatedStatus("Mostrando relacionados guardados · comprobando cambios…", true);
     } else {
-      setRelatedStatus("Detectando relaciones por columnas ID…");
+      setRelatedStatus("Detectando relaciones por columnas ID…", true);
     }
 
     const otherSheets = visibleSheetNames().filter((name) => name !== currentSheet);
@@ -737,11 +827,12 @@ import { antdTokens, workspaceTokens } from "./theme.js";
     const request = new AbortController();
     state.request = request;
     state.loading = true;
+    setActivity("row", true);
     state.row = row;
     state.gid = gid;
     ui.fields.inert = true;
     ui.fields.setAttribute("aria-busy", "true");
-    setRelatedStatus("Detectando hojas y relaciones…");
+    setRelatedStatus("Detectando hojas y relaciones…", true);
     ui.meta.textContent = `${activeSheetName() || `Hoja ${gid}`} · fila ${row}`;
     const persistentKey = cacheKey("row", gid, row);
     let cached = null;
@@ -804,7 +895,10 @@ import { antdTokens, workspaceTokens } from "./theme.js";
         }
       }
     } finally {
-      if (state.request === request) state.loading = false;
+      if (state.request === request) {
+        state.loading = false;
+        setActivity("row", false);
+      }
     }
   }
 
@@ -910,6 +1004,7 @@ import { antdTokens, workspaceTokens } from "./theme.js";
     } finally {
       state.saving = false;
       ui.save.disabled = false;
+      syncSaveState();
     }
   }
 

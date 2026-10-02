@@ -10,6 +10,7 @@ La interfaz usa Ant Design `5.15.4` y replica los tokens claros del drawer de `w
 - Detecta las demás hojas visibles y relaciona registros por columnas `ID ...` compartidas.
 - Muestra relaciones padre-hijo en ambos sentidos, como `Contactos -> Servicios` y `Servicios -> Contactos`.
 - Guarda filas y relacionados en caché local persistente, los muestra primero y comprueba cambios en segundo plano.
+- Muestra la actividad con el indicador del encabezado: spinner azul durante la lectura o el guardado y check verde al terminar, sin mensajes rutinarios dentro del formulario.
 - Aísla el formulario para que `Ctrl+V` permanezca dentro del input.
 - Guarda el rango editado mediante un único pegado TSV horizontal de Sheets.
 - Verifica el guardado volviendo a leer la fila.

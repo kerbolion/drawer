@@ -160,7 +160,10 @@ try {
     return {
       row: host?.dataset.row || null,
       formStatus: panel?.querySelector(".status")?.textContent || "",
+      formStatusHidden: panel?.querySelector(".status")?.hidden ?? false,
       relatedStatus: panel?.querySelector(".related-status")?.textContent || "",
+      relatedStatusHidden: panel?.querySelector(".related-status")?.hidden ?? false,
+      saveState: host?.dataset.saveState || null,
       fields: panel ? Array.from(panel.querySelectorAll(".field input"), input => input.value) : [],
       relations: panel ? Array.from(panel.querySelectorAll(".relation"), relation => ({
         title: relation.querySelector(".relation-title")?.textContent || "",
@@ -223,11 +226,11 @@ try {
   while (Date.now() < cacheDeadline) {
     cachedSnapshot = await cdp.evaluate(snapshot);
     const cachedServices = cachedSnapshot.relations.find((relation) => relation.title === "Servicios");
-    if (cachedSnapshot.formStatus.includes("caché") && cachedSnapshot.fields.includes("Ana") && cachedServices?.count === "2") break;
+    if (cachedSnapshot.formStatus.includes("caché") && cachedSnapshot.formStatusHidden && cachedSnapshot.relatedStatusHidden && cachedSnapshot.saveState === "saving" && cachedSnapshot.fields.includes("Ana") && cachedServices?.count === "2") break;
     await delay(50);
   }
   const cachedServices = cachedSnapshot?.relations.find((relation) => relation.title === "Servicios");
-  if (!cachedSnapshot?.formStatus.includes("caché") || !cachedSnapshot.fields.includes("Ana") || cachedServices?.count !== "2") {
+  if (!cachedSnapshot?.formStatus.includes("caché") || !cachedSnapshot.formStatusHidden || !cachedSnapshot.relatedStatusHidden || cachedSnapshot.saveState !== "saving" || !cachedSnapshot.fields.includes("Ana") || cachedServices?.count !== "2") {
     throw new Error(`La caché no apareció antes de la red: ${JSON.stringify(cachedSnapshot)}`);
   }
   await cdp.evaluate(`(() => {
@@ -243,15 +246,15 @@ try {
   while (Date.now() < refreshDeadline) {
     refreshedSnapshot = await cdp.evaluate(snapshot);
     const refreshedServices = refreshedSnapshot.relations.find((relation) => relation.title === "Servicios");
-    if (refreshedSnapshot.fields.includes("Ana actualizada") && refreshedSnapshot.fields.includes("31") && refreshedServices?.count === "3") break;
+    if (refreshedSnapshot.fields.includes("Ana actualizada") && refreshedSnapshot.fields.includes("31") && refreshedServices?.count === "3" && refreshedSnapshot.saveState === "saved") break;
     await delay(100);
   }
   const refreshedServices = refreshedSnapshot?.relations.find((relation) => relation.title === "Servicios");
-  if (!refreshedSnapshot?.fields.includes("Ana actualizada") || !refreshedSnapshot?.fields.includes("31") || refreshedServices?.count !== "3") {
+  if (!refreshedSnapshot?.fields.includes("Ana actualizada") || !refreshedSnapshot?.fields.includes("31") || refreshedServices?.count !== "3" || refreshedSnapshot.saveState !== "saved") {
     throw new Error(`La actualización en segundo plano no reemplazó la caché: ${JSON.stringify(refreshedSnapshot)}`);
   }
 
-  console.log("RELACIONES_OK: detección automática, caché inmediata y actualización en segundo plano confirmadas.");
+  console.log("RELACIONES_OK: caché inmediata, verificación silenciosa e indicador animado confirmados.");
 } finally {
   cdp?.close();
   if (browser.pid) spawnSync("taskkill", ["/PID", String(browser.pid), "/T", "/F"], { stdio: "ignore", windowsHide: true });

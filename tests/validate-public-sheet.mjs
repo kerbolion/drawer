@@ -132,13 +132,15 @@ try {
         row: host?.dataset.row || null,
         fields: panel ? Array.from(panel.querySelectorAll(".field input"), input => input.value) : [] ,
         message: panel?.querySelector(".status")?.textContent || null,
+        statusHidden: panel?.querySelector(".status")?.hidden ?? false,
         nameBox: document.getElementById("t-name-box")?.value || null,
         themeSource: host?.dataset.themeSource || null,
+        saveState: host?.dataset.saveState || null,
         drawerWidth: host ? Math.round(host.shadowRoot.querySelector(".panel-frame").getBoundingClientRect().width) : 0,
         primaryToken: panel ? getComputedStyle(panel.documentElement).getPropertyValue("--workspace-primary").trim() : null
       };
     })()`);
-    if (result?.status === "ok" || result?.status === "error") break;
+    if (result?.status === "error" || (result?.status === "ok" && result?.saveState === "saved")) break;
     await delay(500);
   }
   console.log(JSON.stringify(result, null, 2));
@@ -146,6 +148,7 @@ try {
   if (result.status !== "ok") throw new Error(result.message || "La lectura no termino correctamente");
   if (result.row !== "2") throw new Error(`Se esperaba la fila 2 y se obtuvo ${result.row}`);
   if (!result.fields.includes("Alexandra")) throw new Error("La fila leida no contiene el valor esperado");
+  if (!result.statusHidden || result.saveState !== "saved") throw new Error("El estado rutinario no se movio al icono del encabezado");
   if (result.themeSource !== "workspace-antd" || result.drawerWidth < 700 || result.drawerWidth > 720 || result.primaryToken !== "#1677ff") {
     throw new Error(`El tema de workspace-antd no se aplico correctamente: ${JSON.stringify(result)}`);
   }
@@ -232,11 +235,12 @@ try {
       const panel = host?.shadowRoot?.querySelector(".panel-frame")?.contentDocument;
       return {
         status: host?.dataset.status || null,
+        saveState: host?.dataset.saveState || null,
         row: host?.dataset.row || null,
         fields: panel ? Array.from(panel.querySelectorAll(".field input"), input => input.value) : []
       };
     })()`);
-    if (result?.status === "ok" && result?.row === "3") break;
+    if (result?.status === "ok" && result?.saveState === "saved" && result?.row === "3") break;
     await delay(250);
   }
   if (result?.row !== "3" || !result.fields.includes("Andrew")) {
@@ -255,7 +259,7 @@ try {
     throw new Error(`El cambio de fila reconstruyo el formulario: ${JSON.stringify(stableRender)}`);
   }
 
-  console.log("VALIDACION_OK: tema Ant Design, lectura, cambio de fila sin rerender, foco aislado y pegado TSV unico confirmados.");
+  console.log("VALIDACION_OK: estado animado en encabezado, tema Ant Design, lectura, cambio sin rerender, foco y pegado TSV confirmados.");
 } finally {
   cdp?.close();
   if (browser.pid) spawnSync("taskkill", ["/PID", String(browser.pid), "/T", "/F"], { stdio: "ignore", windowsHide: true });
