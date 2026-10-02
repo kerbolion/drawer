@@ -29,20 +29,29 @@ const sheets = {
     rows: [["C-1", "Ana", "30"], ["C-2", "Luis", "44"]]
   },
   Servicios: {
-    headers: ["ID Servicio", "ID Contacto", "Nombre", "Nota"],
-    rows: [["S-1", "C-1", "Limpieza", "Inicial"], ["S-2", "C-1", "Entrega", ""], ["S-3", "C-2", "Reparación", ""]]
+    headers: ["ID Servicio", "ID Contacto", "Nombre", "Nota", "Dato 1", "Dato 2"],
+    rows: [
+      ["S-1", "C-1", "Limpieza", "Inicial", "A", "B"],
+      ["S-2", "C-1", "Entrega", "", "C", "D"],
+      ["S-3", "C-2", "Reparación", "", "E", "F"]
+    ]
   }
 };
 let delayContactRow = false;
 let delayServicesTable = false;
+let visualServiceCheckbox = null;
 
-function cells(values) {
-  return values.map((value) => `<td>${value}</td>`).join("");
+function cells(values, checkboxIndex = -1) {
+  return values.map((value, index) => index === checkboxIndex
+    ? `<td><div class="waffle-checkbox-container ${visualServiceCheckbox ? "checked" : "unchecked"}" role="checkbox" aria-checked="${visualServiceCheckbox}"><input type="checkbox" ${visualServiceCheckbox ? "checked" : ""}></div></td>`
+    : `<td>${value}</td>`
+  ).join("");
 }
 
 function waffle(sheet, rowNumber) {
   const values = rowNumber === 1 ? sheet.headers : (sheet.rows[rowNumber - 2] || []);
-  return `<!doctype html><table><tbody><tr><th class="row-headers-background">${rowNumber}</th>${cells(values)}</tr></tbody></table>`;
+  const checkboxIndex = sheet === sheets.Servicios && rowNumber === 2 && visualServiceCheckbox !== null ? 2 : -1;
+  return `<!doctype html><table><tbody><tr><th class="row-headers-background">${rowNumber}</th>${cells(values, checkboxIndex)}</tr></tbody></table>`;
 }
 
 function gviz(sheet) {
@@ -293,13 +302,37 @@ try {
   const relationTable = await cdp.evaluate(`(() => {
     const panel = document.getElementById("sheets-session-probe").shadowRoot.querySelector(".panel-frame").contentDocument;
     const relation = Array.from(panel.querySelectorAll(".relation")).find(item => item.querySelector(".relation-title")?.textContent === "Servicios");
+    const main = panel.querySelector(".drawer > main");
+    const tableScroll = relation?.querySelector(".related-table-scroll");
     return {
       view: relation?.dataset.relationView,
-      tableCells: Array.from(relation?.querySelectorAll("tbody td") || [], cell => cell.textContent)
+      tableCells: Array.from(relation?.querySelectorAll("tbody td") || [], cell => cell.textContent),
+      drawerHasHorizontalScroll: main ? main.scrollWidth > main.clientWidth + 1 : true,
+      tableHasHorizontalScroll: tableScroll ? tableScroll.scrollWidth > tableScroll.clientWidth + 1 : false
     };
   })()`);
-  if (relationDeck.view !== "deck" || relationDeck.cards !== 2 || !relationDeck.hasDeckOption || !relationDeck.hasTableOption || relationTable.view !== "table" || !relationTable.tableCells.includes("S-1")) {
+  if (relationDeck.view !== "deck" || relationDeck.cards !== 2 || !relationDeck.hasDeckOption || !relationDeck.hasTableOption || relationTable.view !== "table" || !relationTable.tableCells.includes("S-1") || relationTable.drawerHasHorizontalScroll || !relationTable.tableHasHorizontalScroll) {
     throw new Error(`Las vistas Deck/Tabla no funcionan: ${JSON.stringify({ relationDeck, relationTable })}`);
+  }
+
+  const pendingActions = await cdp.evaluate(`(() => {
+    const host = document.getElementById("sheets-session-probe");
+    const panel = host.shadowRoot.querySelector(".panel-frame").contentDocument;
+    const input = panel.querySelector('[data-column="2"] input');
+    const save = panel.querySelector(".save");
+    const cancel = panel.querySelector(".cancel");
+    const initial = { saveDisabled: save.disabled, cancelDisabled: cancel.disabled, value: input.value };
+    const setter = Object.getOwnPropertyDescriptor(panel.defaultView.HTMLInputElement.prototype, "value").set;
+    setter.call(input, "Cambio temporal");
+    input.dispatchEvent(new panel.defaultView.Event("input", { bubbles: true }));
+    const edited = { saveDisabled: save.disabled, cancelDisabled: cancel.disabled, pending: host.dataset.hasPendingChanges };
+    cancel.click();
+    const restoredInput = panel.querySelector('[data-column="2"] input');
+    const cancelled = { saveDisabled: save.disabled, cancelDisabled: cancel.disabled, pending: host.dataset.hasPendingChanges, value: restoredInput.value };
+    return { initial, edited, cancelled };
+  })()`);
+  if (!pendingActions.initial.saveDisabled || !pendingActions.initial.cancelDisabled || pendingActions.edited.saveDisabled || pendingActions.edited.cancelDisabled || pendingActions.edited.pending !== "true" || !pendingActions.cancelled.saveDisabled || !pendingActions.cancelled.cancelDisabled || pendingActions.cancelled.pending !== "false" || pendingActions.cancelled.value !== pendingActions.initial.value) {
+    throw new Error(`Guardar/Cancelar no reflejan los cambios pendientes: ${JSON.stringify(pendingActions)}`);
   }
 
   const configuredTypes = await cdp.evaluate(`(() => {
@@ -590,7 +623,8 @@ try {
     throw new Error(`Los tipos no se conservaron al cambiar de hoja: ${JSON.stringify(persistentTypes)}`);
   }
 
-  sheets.Servicios.rows[0][2] = "FALSO";
+  sheets.Servicios.rows[0][2] = "TRUE";
+  visualServiceCheckbox = true;
   delayServicesTable = false;
   await cdp.evaluate(`(() => {
     const tabs = Array.from(document.querySelectorAll(".docs-sheet-tab"));
@@ -610,13 +644,56 @@ try {
       return {
         gid: host?.dataset.gid,
         saveState: host?.dataset.saveState,
-        values: panel ? Array.from(panel.querySelectorAll("[data-column]"), control => control.dataset.serializedValue || "") : []
+        values: panel ? Array.from(panel.querySelectorAll("[data-column]"), control => control.dataset.serializedValue || "") : [],
+        checked: panel?.querySelector('[data-column="3"] input[type="checkbox"]')?.checked
       };
     })()`);
-    if (checkboxRow.gid === "1" && checkboxRow.saveState === "saved" && checkboxRow.values[2] === "FALSE" && checkboxRow.values[3] === "Inicial") break;
+    if (checkboxRow.gid === "1" && checkboxRow.saveState === "saved" && checkboxRow.values[2] === "TRUE" && checkboxRow.checked === true && checkboxRow.values[3] === "Inicial") break;
     await delay(100);
   }
-  if (checkboxRow?.values?.[2] !== "FALSE") throw new Error(`No se normalizó FALSO al cargar la fila: ${JSON.stringify(checkboxRow)}`);
+  if (checkboxRow?.values?.[2] !== "TRUE" || checkboxRow.checked !== true) {
+    throw new Error(`No se detectó la casilla marcada de Sheets: ${JSON.stringify(checkboxRow)}`);
+  }
+
+  await cdp.evaluate(`(() => {
+    location.hash = "gid=1&range=A3";
+    const box = document.getElementById("t-name-box");
+    box.value = "A3";
+    box.dispatchEvent(new Event("input", { bubbles: true }));
+  })()`);
+  const otherRowDeadline = Date.now() + 5_000;
+  while (Date.now() < otherRowDeadline) {
+    if (await cdp.evaluate('document.getElementById("sheets-session-probe")?.dataset.row === "3"')) break;
+    await delay(100);
+  }
+  sheets.Servicios.rows[0][2] = "FALSO";
+  visualServiceCheckbox = false;
+  await cdp.evaluate(`(() => {
+    location.hash = "gid=1&range=A2";
+    const box = document.getElementById("t-name-box");
+    box.value = "A2";
+    box.dispatchEvent(new Event("input", { bubbles: true }));
+  })()`);
+  const uncheckedDeadline = Date.now() + 8_000;
+  let uncheckedRow;
+  while (Date.now() < uncheckedDeadline) {
+    uncheckedRow = await cdp.evaluate(`(() => {
+      const host = document.getElementById("sheets-session-probe");
+      const panel = host?.shadowRoot?.querySelector(".panel-frame")?.contentDocument;
+      const control = panel?.querySelector('[data-column="3"]');
+      return {
+        row: host?.dataset.row,
+        value: control?.dataset.serializedValue,
+        checked: control?.querySelector('input[type="checkbox"]')?.checked
+      };
+    })()`);
+    if (uncheckedRow.row === "2" && uncheckedRow.value === "FALSE" && uncheckedRow.checked === false) break;
+    await delay(100);
+  }
+  visualServiceCheckbox = null;
+  if (uncheckedRow?.value !== "FALSE" || uncheckedRow.checked !== false) {
+    throw new Error(`No se detectó la casilla desmarcada de Sheets: ${JSON.stringify(uncheckedRow)}`);
+  }
 
   await cdp.evaluate(`(() => {
     window.__minimalPaste = null;

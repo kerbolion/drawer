@@ -17,9 +17,12 @@ La interfaz usa Ant Design `5.29.3`, la misma versión instalada en `workspace-a
 - Permite agregar, eliminar y colorear las opciones de selección y Estado con la paleta de Workspace.
 - Muestra calendarios y selectores de hora en español con el mismo comportamiento responsive de Workspace.
 - Normaliza `true`/`false` y `VERDADERO`/`FALSO` a `TRUE`/`FALSE`, conserva la casilla visible mientras Sheets confirma el guardado y verifica en segundo plano sin volver a renderizar el formulario.
+- Reconoce casillas visuales de Sheets aunque la celda no incluya `TRUE` o `FALSE` como texto visible.
+- Activa **Guardar cambios** y **Cancelar** únicamente cuando el formulario contiene modificaciones pendientes.
 - Muestra la actividad con el indicador del encabezado: spinner azul durante la lectura o el guardado y check verde al terminar, sin mensajes rutinarios dentro del formulario.
 - Aísla el formulario para que `Ctrl+V` permanezca dentro del input.
 - Guarda solamente el rango horizontal mínimo que contiene los campos modificados mediante un único pegado TSV de Sheets; la confirmación remota continúa en segundo plano.
+- Mantiene el desplazamiento horizontal dentro de cada tabla relacionada para que el drawer conserve su ancho.
 - Verifica el guardado volviendo a leer la fila.
 - No usa Google Sheets API, claves, OAuth propio, Apps Script ni el portapapeles del sistema.
 

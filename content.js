@@ -243,7 +243,10 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
       65% { opacity: 1; transform: scale(1.18); }
       100% { transform: scale(1); }
     }
-    .drawer > main { flex: 1; overflow: auto; padding: 20px 28px 32px; background: var(--workspace-bg); }
+    .drawer > main {
+      flex: 1; min-width: 0; min-height: 0; overflow-x: hidden; overflow-y: auto;
+      padding: 20px 28px 32px; background: var(--workspace-bg);
+    }
     .status {
       margin-bottom: 14px; padding: 9px 12px; border: 1px solid ${antdTokens.colorSuccessBorder};
       border-radius: ${antdTokens.borderRadiusLG}px; background: ${antdTokens.colorSuccessBg}; color: ${antdTokens.colorSuccessText};
@@ -253,7 +256,7 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
     .status.busy { border-color: ${antdTokens.colorInfoBorder}; background: ${antdTokens.colorInfoBg}; color: ${antdTokens.colorInfoText}; }
     .status[hidden], .related-status[hidden] { display: none; }
     .fields {
-      overflow: hidden; padding: 4px 14px;
+      min-width: 0; max-width: 100%; overflow: hidden; padding: 4px 14px;
       border: 1px solid var(--workspace-border); border-radius: 8px;
       background: var(--workspace-surface); box-shadow: 0 8px 24px var(--workspace-shadow-soft);
     }
@@ -350,12 +353,13 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
       background: ${antdTokens.colorFillQuaternary}; color: ${antdTokens.colorTextSecondary}; font-size: 12px;
     }
     @keyframes property-enter { from { opacity: 0; transform: translateX(18px); } to { opacity: 1; transform: translateX(0); } }
-    .related { margin-top: 14px; }
+    .related { min-width: 0; max-width: 100%; margin-top: 14px; }
     .related > h2 { margin: 0 0 10px; color: var(--workspace-text); font-size: 14px; line-height: 22px; }
     .related-status { padding: 3px 0 10px; color: var(--workspace-text-muted); font-size: 12px; }
-    .related-list { display: grid; gap: 14px; }
+    .related-list { display: grid; min-width: 0; max-width: 100%; gap: 14px; }
+    .relation-host { min-width: 0; max-width: 100%; overflow: hidden; }
     .relation {
-      overflow: hidden; padding-bottom: 14px; border: 1px solid var(--workspace-border);
+      min-width: 0; max-width: 100%; overflow: hidden; padding-bottom: 14px; border: 1px solid var(--workspace-border);
       border-radius: 8px; background: var(--workspace-surface); box-shadow: 0 8px 24px var(--workspace-shadow-soft);
     }
     .relation-head {
@@ -404,23 +408,31 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
       overflow: hidden; color: var(--workspace-text); font-size: 13px; font-weight: 600;
       text-overflow: ellipsis; white-space: nowrap;
     }
-    .related-table-scroll { margin: 10px 14px 0; overflow-x: auto; }
+    .related-table-scroll { min-width: 0; max-width: calc(100% - 28px); margin: 10px 14px 0; overflow-x: auto; overflow-y: hidden; }
     .relation-table { width: max-content; min-width: 100%; border-collapse: separate; border-spacing: 0; font-size: 11px; }
     .relation-table th { padding: 8px; border-bottom: 1px solid var(--workspace-border); background: var(--workspace-surface-muted); color: var(--workspace-text-secondary); font-weight: 700; text-align: left; white-space: nowrap; }
     .relation-table td { min-width: 150px; max-width: 220px; padding: 8px; border-bottom: 1px solid var(--workspace-border-subtle); overflow: hidden; text-align: left; text-overflow: ellipsis; vertical-align: top; white-space: nowrap; }
     .relation-table tr:last-child td { border-bottom: 0; }
     .relation-pagination { display: flex; justify-content: center; padding: 12px 14px 0; }
     .workspace-date-picker-popup .ant-picker-panel-container { max-width: calc(100vw - 16px); }
-    .drawer > footer { padding: 12px 24px 16px; border-top: 1px solid ${antdTokens.colorBorderSecondary}; background: ${antdTokens.colorBgContainer}; }
+    .drawer > footer { min-width: 0; padding: 12px 24px 16px; border-top: 1px solid ${antdTokens.colorBorderSecondary}; background: ${antdTokens.colorBgContainer}; }
     .meta { margin-bottom: 9px; color: ${antdTokens.colorTextTertiary}; font-size: 11px; }
+    .footer-actions { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 8px; }
+    .cancel, .save {
+      min-height: ${antdTokens.controlHeightLG}px; border-radius: ${antdTokens.borderRadius}px;
+      padding: 6px 15px; font-weight: 600; cursor: pointer; transition: color ${antdTokens.motionDurationMid}, border-color ${antdTokens.motionDurationMid}, background ${antdTokens.motionDurationMid};
+    }
+    .cancel {
+      min-width: 112px; border: 1px solid ${antdTokens.colorBorder}; background: ${antdTokens.colorBgContainer};
+      color: ${antdTokens.colorText};
+    }
+    .cancel:hover { border-color: ${antdTokens.colorPrimary}; color: ${antdTokens.colorPrimary}; }
     .save {
-      width: 100%; min-height: ${antdTokens.controlHeightLG}px; border: 1px solid ${antdTokens.colorPrimary};
-      border-radius: ${antdTokens.borderRadius}px; padding: 6px 15px; background: ${antdTokens.colorPrimary};
-      color: ${antdTokens.colorWhite}; font-weight: 600; cursor: pointer;
-      box-shadow: ${antdTokens.boxShadowTertiary}; transition: background ${antdTokens.motionDurationMid};
+      width: 100%; border: 1px solid ${antdTokens.colorPrimary};
+      background: ${antdTokens.colorPrimary}; color: ${antdTokens.colorWhite}; box-shadow: ${antdTokens.boxShadowTertiary};
     }
     .save:hover { background: ${antdTokens.colorPrimaryHover}; border-color: ${antdTokens.colorPrimaryHover}; }
-    .save:disabled { border-color: ${antdTokens.colorBgContainerDisabled}; background: ${antdTokens.colorBgContainerDisabled}; color: ${antdTokens.colorTextDisabled}; box-shadow: none; cursor: default; }
+    .cancel:disabled, .save:disabled { border-color: ${antdTokens.colorBgContainerDisabled}; background: ${antdTokens.colorBgContainerDisabled}; color: ${antdTokens.colorTextDisabled}; box-shadow: none; cursor: default; }
     @media (max-width: 640px) {
       .drawer > main { padding: 16px 14px 24px; }
       .drawer > header, .drawer > footer { padding-inline: 16px; }
@@ -627,6 +639,7 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
     host._value = serializeEditorValue(nextValue, property);
     host.dataset.serializedValue = host._value;
     refresh();
+    syncPendingActions();
   }
 
   class FieldErrorBoundary extends React.Component {
@@ -843,10 +856,15 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
 
   const footer = element("footer");
   const meta = element("div", "meta", "Sin fila seleccionada");
+  const footerActions = element("div", "footer-actions");
+  const cancel = element("button", "cancel", "Cancelar");
+  cancel.type = "button";
+  cancel.disabled = true;
   const save = element("button", "save", "Guardar cambios");
   save.type = "button";
   save.disabled = true;
-  footer.append(meta, save);
+  footerActions.append(cancel, save);
+  footer.append(meta, footerActions);
   drawer.append(panelHeader, main, footer);
 
   const propertyDrawer = element("section", "property-drawer");
@@ -902,6 +920,7 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
     relatedStatus,
     relatedList,
     meta,
+    cancel,
     save,
     propertyDrawer,
     propertyForm,
@@ -922,6 +941,7 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
     ui.frame.hidden = false;
     ui.reopen.hidden = true;
   });
+  ui.cancel.addEventListener("click", cancelChanges);
   ui.save.addEventListener("click", saveChanges);
   ui.propertyCancel.addEventListener("click", closePropertyEditor);
   ui.propertyType.addEventListener("change", () => {
@@ -1294,7 +1314,79 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
     return url;
   }
 
+  function booleanMarker(value) {
+    const normalized = String(value ?? "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .trim()
+      .toUpperCase();
+    if (!normalized) return null;
+    if (["TRUE", "VERDADERO", "YES", "SI", "CHECKED", "MARCADO", "MARCADA", "ACTIVADO", "ACTIVADA", "ON"].includes(normalized)) return true;
+    if (["FALSE", "FALSO", "NO", "UNCHECKED", "DESMARCADO", "DESMARCADA", "DESACTIVADO", "DESACTIVADA", "OFF"].includes(normalized)) return false;
+    if (/\b(UNCHECKED|DESMARCADA?|DESACTIVADA?|FALSE|FALSO|OFF)\b/.test(normalized)) return false;
+    if (/\b(CHECKED|MARCADA?|ACTIVADA?|TRUE|VERDADERO|ON)\b/.test(normalized)) return true;
+    return null;
+  }
+
+  function booleanFromStructuredValue(rawValue) {
+    const direct = booleanMarker(rawValue);
+    if (direct !== null) return direct;
+    try {
+      const parsed = JSON.parse(rawValue);
+      const pending = [parsed];
+      while (pending.length) {
+        const value = pending.shift();
+        if (typeof value === "boolean") return value;
+        if (typeof value === "string") {
+          const marker = booleanMarker(value);
+          if (marker !== null) return marker;
+        } else if (value && typeof value === "object") {
+          pending.push(...Object.values(value));
+        }
+      }
+    } catch {}
+    return null;
+  }
+
+  function checkboxStateFromCell(cell) {
+    const input = cell.querySelector('input[type="checkbox"]');
+    if (input) return input.checked || input.hasAttribute("checked");
+
+    const semanticCheckbox = cell.matches('[role="checkbox"], [aria-checked]')
+      ? cell
+      : cell.querySelector('[role="checkbox"], [aria-checked]');
+    if (semanticCheckbox) {
+      const stateValue = booleanMarker(semanticCheckbox.getAttribute("aria-checked"));
+      if (stateValue !== null) return stateValue;
+    }
+
+    for (const node of [cell, ...cell.querySelectorAll("*")]) {
+      for (const attribute of ["data-checked", "aria-label", "title"]) {
+        if (!node.hasAttribute(attribute)) continue;
+        const stateValue = booleanMarker(node.getAttribute(attribute));
+        if (stateValue !== null) return stateValue;
+      }
+    }
+
+    for (const attribute of ["data-sheets-value", "data-value", "data-raw-value"]) {
+      if (!cell.hasAttribute(attribute)) continue;
+      const stateValue = booleanFromStructuredValue(cell.getAttribute(attribute));
+      if (stateValue !== null) return stateValue;
+    }
+
+    const classNames = [cell, ...cell.querySelectorAll("*")]
+      .map((node) => String(node.getAttribute("class") || ""))
+      .join(" ")
+      .toLowerCase();
+    if (!/(checkbox|checkmark|check-box)/.test(classNames)) return null;
+    if (/(unchecked|unselected|checkbox[-_ ]?(?:off|false|empty))/.test(classNames)) return false;
+    if (/(checked|selected|checkbox[-_ ]?(?:on|true|checked))/.test(classNames)) return true;
+    return null;
+  }
+
   function readableCellText(cell) {
+    const checkboxState = checkboxStateFromCell(cell);
+    if (checkboxState !== null) return checkboxState ? "TRUE" : "FALSE";
     const clone = cell.cloneNode(true);
     for (const lineBreak of clone.querySelectorAll("br")) {
       lineBreak.replaceWith(clone.ownerDocument.createTextNode("\n"));
@@ -1366,7 +1458,7 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
     const table = doc.querySelector("table");
     if (!table) throw new Error(`Google no devolvió datos para la hoja ${sheetName}`);
     const rows = Array.from(table.querySelectorAll("tr"), (tr) =>
-      Array.from(tr.querySelectorAll("td, th"), (cell) => cell.textContent.trim())
+      Array.from(tr.querySelectorAll("td, th"), readableCellText)
     ).filter((cells) => cells.length);
     const headers = rows[0] || [];
     return {
@@ -1924,6 +2016,31 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
     });
   }
 
+  function collectPendingChanges(controls = currentControls()) {
+    return controls.flatMap((control) => {
+      const index = Number(control.dataset.column) - 1;
+      const property = propertyForColumn(index);
+      const value = controlValue(control, property);
+      return valuesEqualForProperty(value, state.values[index], property) ? [] : [{ index, value }];
+    });
+  }
+
+  function syncPendingActions() {
+    const ready = Boolean(state.row && state.viewRow === state.row && state.viewGid === state.gid);
+    const hasChanges = ready && collectPendingChanges().length > 0;
+    const disabled = state.saving || !hasChanges;
+    ui.save.disabled = disabled;
+    ui.cancel.disabled = disabled;
+    host.dataset.hasPendingChanges = hasChanges ? "true" : "false";
+  }
+
+  function cancelChanges() {
+    if (state.saving || state.viewRow !== state.row || state.viewGid !== state.gid) return;
+    renderFields();
+    setStatus(`Cambios descartados · fila ${state.row}`);
+    syncPendingActions();
+  }
+
   function applyRowData(labels, values, row, signal, drafts = []) {
     const width = Math.max(labels.length, values.length);
     state.values = Array.from({ length: width }, (_, index) => values[index] || "");
@@ -1935,7 +2052,7 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
     host.dataset.row = String(row);
     ui.fields.inert = false;
     ui.fields.removeAttribute("aria-busy");
-    ui.save.disabled = false;
+    syncPendingActions();
     startRelationships(labels, state.values, signal);
   }
 
@@ -1950,6 +2067,7 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
     setActivity("row", true);
     state.row = row;
     state.gid = gid;
+    syncPendingActions();
     ui.fields.inert = true;
     ui.fields.setAttribute("aria-busy", "true");
     setRelatedStatus("Detectando hojas y relaciones…", true);
@@ -1966,7 +2084,7 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
       applyRowData(cached.labels, cached.values, row, request.signal);
       setStatus(`Fila ${row} cargada desde caché · comprobando cambios…`);
     } else {
-      ui.save.disabled = true;
+      syncPendingActions();
       setStatus(`Leyendo la fila ${row} desde tu sesión de Google…`, "busy");
     }
 
@@ -2036,6 +2154,7 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
       if (state.request === request) {
         state.loading = false;
         setActivity("row", false);
+        syncPendingActions();
       }
     }
   }
@@ -2101,6 +2220,7 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
       if (staleConfigure?._iconRoot) flushSync(() => staleConfigure._iconRoot.unmount());
       existing[index].remove();
     }
+    syncPendingActions();
   }
 
   function propertyFormItem(name, label, value, options = {}) {
@@ -2368,6 +2488,7 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
             state.headerCache.delete(`${spreadsheetId()}:${entry.gid}`);
             state.sheetCache.clear();
             host.dataset.writeVerification = "verified";
+            syncPendingActions();
             const relationshipKeyChanged = entry.writtenCells.some(({ index }) => /^id[a-z0-9]*/.test(normalizedColumn(entry.labels[index])));
             if (relationshipKeyChanged) startRelationships(state.fields, state.values, state.request?.signal, true);
           }
@@ -2389,6 +2510,7 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
         state.values = [...entry.previousValues];
         host.dataset.writeVerification = "failed";
         setStatus(verificationError?.message || "Sheets no confirmó los valores guardados; puedes volver a intentarlo", "error");
+        syncPendingActions();
       }
     } finally {
       if (state.pendingWrites.get(entry.key) === entry && entry.controller.signal.aborted) {
@@ -2404,15 +2526,11 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
       return;
     }
     const controls = currentControls();
-    const properties = controls.map((control) => propertyForColumn(Number(control.dataset.column) - 1));
-    const changes = controls.flatMap((control) => {
-      const index = Number(control.dataset.column) - 1;
-      const property = properties[index];
-      const value = controlValue(control, property);
-      return valuesEqualForProperty(value, state.values[index], property) ? [] : [{ index, value }];
-    });
+    const properties = state.fields.map((_, index) => propertyForColumn(index));
+    const changes = collectPendingChanges(controls);
     if (!changes.length) {
       setStatus("No hay cambios pendientes");
+      syncPendingActions();
       return;
     }
 
@@ -2432,7 +2550,7 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
     });
 
     state.saving = true;
-    ui.save.disabled = true;
+    syncPendingActions();
     setStatus(`Pegando ${changes.length} campo(s) en un solo bloque…`, "busy");
     try {
       await writeRange(`${columnName(firstChanged + 1)}${row}`, blockValues);
@@ -2481,7 +2599,7 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
       setStatus(error.message, "error");
     } finally {
       state.saving = false;
-      ui.save.disabled = false;
+      syncPendingActions();
       syncSaveState();
     }
   }
@@ -2507,7 +2625,7 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
       state.viewRow = null;
       state.viewGid = null;
       setRelatedStatus("La fila de encabezados no tiene relaciones.");
-      ui.save.disabled = true;
+      syncPendingActions();
       ui.meta.textContent = "Fila de encabezados";
       setStatus("Selecciona una fila de datos debajo de los encabezados", "busy");
       return;
