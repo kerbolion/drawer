@@ -22,6 +22,7 @@ const sheet = {
     ["3", "Mia", "", "02/11/2026", "", ""]
   ]
 };
+const staleVisualizationRows = sheet.rows.map((row) => [...row]);
 
 async function freePort() {
   const server = net.createServer();
@@ -56,16 +57,22 @@ const webServer = http.createServer((request, response) => {
     return;
   }
   if (url.pathname.endsWith("/htmlembed/sheet")) {
-    const rowNumber = Number(url.searchParams.get("range")?.match(/A(\d+)/)?.[1] || 1);
-    const values = rowNumber === 1 ? sheet.headers : (sheet.rows[rowNumber - 2] || []);
-    response.end(`<!doctype html><table><tbody><tr><th class="row-headers-background">${rowNumber}</th>${cells(values)}</tr></tbody></table>`);
+    const range = url.searchParams.get("range") || "A1";
+    const firstRow = Number(range.match(/A(\d+)/)?.[1] || 1);
+    const lastRow = Number(range.match(/:[A-Z]+(\d+)/)?.[1] || firstRow);
+    const rows = Array.from({ length: lastRow - firstRow + 1 }, (_, offset) => {
+      const rowNumber = firstRow + offset;
+      const values = rowNumber === 1 ? sheet.headers : (sheet.rows[rowNumber - 2] || []);
+      return `<tr><th class="row-headers-background">${rowNumber}</th>${cells(values)}</tr>`;
+    });
+    response.end(`<!doctype html><table><tbody>${rows.join("")}</tbody></table>`);
     return;
   }
   if (url.pathname.endsWith("/gviz/tq")) {
     const range = url.searchParams.get("range") || "";
     const rowNumber = Number(range.match(/A(\d+)/)?.[1] || 1);
     const rows = /^A(\d+):ZZ\1$/.test(range)
-      ? [rowNumber === 1 ? sheet.headers : (sheet.rows[rowNumber - 2] || [])]
+      ? [rowNumber === 1 ? sheet.headers : (staleVisualizationRows[rowNumber - 2] || [])]
       : [sheet.headers, ...sheet.rows];
     response.end(`<!doctype html><table>${rows.map((row) => `<tr>${cells(row)}</tr>`).join("")}</table>`);
     return;
@@ -275,11 +282,18 @@ try {
   }
   await delay(250);
 
+  await cdp.evaluate(panelExpression('panel.querySelector(\'.kanban-card-shell[data-sheet-row="4"]\').click();'));
+  await delay(250);
+  const afterSingleClick = await cdp.evaluate(`({ box: document.getElementById("t-name-box").value, row: document.getElementById("sheets-session-probe").dataset.row })`);
+  if (afterSingleClick.box === "A4" && afterSingleClick.row === "4") {
+    throw new Error(`La tarjeta abrio su fila con un solo clic: ${JSON.stringify(afterSingleClick)}`);
+  }
+
   const dragPoint = await cdp.evaluate(`(() => {
     const frame = document.getElementById("sheets-session-probe").shadowRoot.querySelector(".panel-frame");
     const frameRect = frame.getBoundingClientRect();
     const panel = frame.contentDocument;
-    const card = panel.querySelector('.kanban-card-shell[data-sheet-row="2"]');
+    const card = panel.querySelector('.kanban-card-shell[data-sheet-row="4"]');
     const target = Array.from(panel.querySelectorAll("[data-kanban-group]")).find(group => group.dataset.kanbanGroup === "En proceso");
     const start = card.getBoundingClientRect();
     const end = target.getBoundingClientRect();
@@ -304,8 +318,8 @@ try {
   await delay(120);
   const dragVisual = await cdp.evaluate(panelExpression(`return {
     overlay: Boolean(panel.querySelector("[data-drag-overlay]")),
-    source: Array.from(panel.querySelectorAll('.kanban-card-shell[data-sheet-row="2"]')).some(card => card.classList.contains("is-dragging")),
-    classes: Array.from(panel.querySelectorAll('.kanban-card-shell[data-sheet-row="2"]'), card => card.className),
+    source: Array.from(panel.querySelectorAll('.kanban-card-shell[data-sheet-row="4"]')).some(card => card.classList.contains("is-dragging")),
+    classes: Array.from(panel.querySelectorAll('.kanban-card-shell[data-sheet-row="4"]'), card => card.className),
     drawers: panel.querySelectorAll(".sheet-view-drawer").length
   };`));
   if (!dragVisual.overlay) {
@@ -325,7 +339,7 @@ try {
   await cdp.command("Input.dispatchMouseEvent", {
     type: "mouseReleased", x: dragPoint.endX, y: dragPoint.endY, button: "left", buttons: 0, clickCount: 1
   });
-  await delay(250);
+  await delay(40);
   const secondDrag = await cdp.evaluate(`(() => {
     const frame = document.getElementById("sheets-session-probe").shadowRoot.querySelector(".panel-frame");
     const frameRect = frame.getBoundingClientRect();
@@ -355,6 +369,7 @@ try {
   await cdp.command("Input.dispatchMouseEvent", {
     type: "mouseReleased", x: secondDrag.endX, y: secondDrag.endY, button: "left", buttons: 0, clickCount: 1
   });
+  await delay(225);
   const pasteDeadline = Date.now() + 4_000;
   let paste;
   while (Date.now() < pasteDeadline) {
@@ -362,27 +377,15 @@ try {
     if (paste) break;
     await delay(50);
   }
-  if (!paste?.reference.endsWith("!C2") || paste.value !== "En proceso\nNuevo") {
+  if (!paste?.reference.endsWith("!C3") || paste.value !== "Nuevo\nEn proceso") {
     throw new Error(`Kanban no agrupo verticalmente los cambios rapidos de Estado: ${JSON.stringify(paste)}`);
   }
-  sheet.rows[0][2] = "En proceso";
-  sheet.rows[1][2] = "Nuevo";
-  const verificationDeadline = Date.now() + 6_000;
-  while (Date.now() < verificationDeadline) {
-    const verification = await cdp.evaluate('document.getElementById("sheets-session-probe").dataset.writeVerification');
-    if (verification === "verified") break;
-    if (verification === "failed") throw new Error("La escritura de Kanban no se verifico");
-    await delay(100);
-  }
-
-  await cdp.evaluate(panelExpression('panel.querySelector(\'.kanban-card-shell[data-sheet-row="3"]\').click();'));
-  await delay(250);
-  const afterSingleClick = await cdp.evaluate(`({ box: document.getElementById("t-name-box").value, row: document.getElementById("sheets-session-probe").dataset.row })`);
-  if (afterSingleClick.box === "A3" && afterSingleClick.row === "3") {
-    throw new Error(`La tarjeta abrio su fila con un solo clic: ${JSON.stringify(afterSingleClick)}`);
+  const editedSelection = await cdp.evaluate('document.getElementById("t-name-box").value');
+  if (!editedSelection.endsWith("!C3")) {
+    throw new Error(`Kanban restauro la seleccion anterior en lugar de conservar la ultima celda editada: ${editedSelection}`);
   }
   await cdp.evaluate(panelExpression(`
-    panel.querySelector('.kanban-card-shell[data-sheet-row="3"]').dispatchEvent(new MouseEvent("dblclick", {
+    panel.querySelector('.kanban-card-shell[data-sheet-row="4"]').dispatchEvent(new MouseEvent("dblclick", {
       bubbles: true,
       cancelable: true,
       composed: true,
@@ -390,15 +393,41 @@ try {
       button: 0
     }));
   `));
+  sheet.rows[1][2] = "Nuevo";
+  const verificationDeadline = Date.now() + 10_000;
+  let verification;
+  while (Date.now() < verificationDeadline) {
+    verification = await cdp.evaluate('document.getElementById("sheets-session-probe").dataset.writeVerification');
+    if (verification === "unconfirmed") break;
+    if (verification === "failed") throw new Error("La escritura de Kanban no se verifico");
+    await delay(100);
+  }
+  if (verification !== "unconfirmed") {
+    throw new Error(`Kanban no distinguio una lectura atrasada de un error real: ${verification}`);
+  }
+  const falseError = await cdp.evaluate(`(() => {
+    const host = document.getElementById("sheets-session-probe");
+    const panel = host.shadowRoot.querySelector(".panel-frame").contentDocument;
+    return {
+      status: host.dataset.status,
+      hidden: panel.querySelector(".status").hidden,
+      pending: host.dataset.hasPendingChanges
+    };
+  })()`);
+  if (falseError.status === "error" || !falseError.hidden || falseError.pending !== "false") {
+    throw new Error(`Una confirmacion atrasada mostro un error falso: ${JSON.stringify(falseError)}`);
+  }
+  sheet.rows[2][2] = "En proceso";
+
   const rowDeadline = Date.now() + 5_000;
   let selected;
   while (Date.now() < rowDeadline) {
     selected = await cdp.evaluate(`({ box: document.getElementById("t-name-box").value, row: document.getElementById("sheets-session-probe").dataset.row })`);
-    if (selected.box === "A3" && selected.row === "3") break;
+    if (selected.box === "A4" && selected.row === "4") break;
     await delay(100);
   }
-  if (selected?.box !== "A3" || selected.row !== "3") {
-    throw new Error(`La tarjeta no abrio su fila: ${JSON.stringify(selected)}`);
+  if (selected?.box !== "A4" || selected.row !== "4") {
+    throw new Error(`La tarjeta no espero el guardado pendiente antes de abrir su fila: ${JSON.stringify(selected)}`);
   }
 
   await delay(250);
@@ -433,7 +462,7 @@ try {
     throw new Error(`El evento no abrio su fila: ${JSON.stringify(selected)}`);
   }
 
-  console.log("VISTAS_OK: columnas terminales, Kanban, lote vertical, arrastre, Calendario y apertura de filas confirmados.");
+  console.log("VISTAS_OK: Kanban por lotes conserva la ultima celda editada, lectura atrasada sin falso error, doble clic y Calendario confirmados.");
 } finally {
   cdp?.close();
   if (browser.pid) spawnSync("taskkill", ["/PID", String(browser.pid), "/T", "/F"], { stdio: "ignore", windowsHide: true });

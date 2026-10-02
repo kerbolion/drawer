@@ -142,6 +142,8 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
     fields: [],
     loading: false,
     saving: false,
+    primaryDrafts: new Map(),
+    writeInteractionDepth: 0,
     request: null,
     writeRequest: 0,
     lastSelection: "",
@@ -159,6 +161,7 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
     sheetViewMutationQueue: [],
     sheetViewMutationTimer: null,
     sheetViewMutationRunning: false,
+    sheetViewMutationPromise: null,
     relations: [],
     relatedDrafts: new Map(),
     relatedDraftListeners: new Set(),
@@ -1366,8 +1369,6 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
     const [movingRows, setMovingRows] = React.useState([]);
     const movingRowsRef = React.useRef(new Set());
     const [kanbanExpanded, setKanbanExpanded] = React.useState(() => settings.kanbanExpanded === true);
-    const activeSheetKey = React.useRef(sheetKey);
-    activeSheetKey.current = sheetKey;
     const statusColumns = columns.filter((column) => column.type === "status");
     const dateColumns = columns.filter((column) => column.type === "date");
 
@@ -1423,11 +1424,12 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
     };
 
     const openRow = async (rowNumber) => {
-      if (collectPendingChanges().length || state.relatedDrafts.size) {
+      if (state.primaryDrafts.size || state.relatedDrafts.size) {
         setError("Guarda o cancela los cambios pendientes antes de abrir otra fila.");
         return;
       }
       try {
+        await drainSheetViewMutations();
         await focusSheetRange(`A${rowNumber}`);
         setView("");
       } catch (focusError) {
@@ -1437,35 +1439,23 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
 
     const moveRow = async (row, property, nextValue) => {
       if (movingRowsRef.current.has(row.number)) return;
-      if (collectPendingChanges().length || state.relatedDrafts.size) {
+      if (state.primaryDrafts.size || state.relatedDrafts.size) {
         setError("Guarda o cancela los cambios pendientes antes de mover una ficha.");
         return;
       }
       const previousValue = String(row.cells[property.index] || "");
+      const optimisticCells = row.cells.map((value, index) => index === property.index ? nextValue : value);
       movingRowsRef.current.add(row.number);
       setMovingRows([...movingRowsRef.current]);
       setError("");
       setTable((current) => ({
         ...current,
         rows: current.rows.map((item) => item.number === row.number
-          ? { ...item, cells: item.cells.map((value, index) => index === property.index ? nextValue : value) }
+          ? { ...item, cells: optimisticCells }
           : item)
       }));
       try {
-        await writeSheetViewValue(row.number, property, nextValue, previousValue, {
-          onRevert: () => {
-            if (activeSheetKey.current !== sheetKey) return;
-            setTable((current) => ({
-              ...current,
-              rows: current.rows.map((item) => item.number === row.number
-                ? { ...item, cells: item.cells.map((value, index) => index === property.index ? previousValue : value) }
-                : item)
-            }));
-          },
-          onError: (message) => {
-            if (activeSheetKey.current === sheetKey) setError(message);
-          }
-        });
+        await writeSheetViewValue(row.number, property, nextValue, optimisticCells);
       } catch (writeError) {
         setTable((current) => ({
           ...current,
@@ -1575,6 +1565,12 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
     host._editorValue = nextValue;
     host._value = serializeEditorValue(nextValue, property);
     host.dataset.serializedValue = host._value;
+    const index = Number(host.dataset.column) - 1;
+    if (valuesEqualForProperty(host._value, state.values[index], property)) {
+      state.primaryDrafts.delete(index);
+    } else {
+      state.primaryDrafts.set(index, { index, value: host._value });
+    }
     refresh();
     syncPendingActions();
   }
@@ -2504,7 +2500,16 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
     return parseVisualizationResponse(source);
   }
 
-  async function readNamedSheetRow(sheetName, rowNumber, signal) {
+  async function readNamedSheetRow(sheetName, rowNumber, signal, gid = null) {
+    if (gid !== null && gid !== undefined) {
+      const rows = await readRange(
+        `A${rowNumber}:${MAX_COLUMN}${rowNumber}`,
+        signal,
+        String(gid),
+        { allowEmpty: true }
+      );
+      return rows.find((row) => row.number === rowNumber)?.cells || [];
+    }
     const table = await readSheetTable(sheetName, `A${rowNumber}:${MAX_COLUMN}${rowNumber}`, signal);
     return table.headers;
   }
@@ -3262,18 +3267,13 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
     });
   }
 
-  function collectPendingChanges(controls = currentControls()) {
-    return controls.flatMap((control) => {
-      const index = Number(control.dataset.column) - 1;
-      const property = propertyForColumn(index);
-      const value = controlValue(control, property);
-      return valuesEqualForProperty(value, state.values[index], property) ? [] : [{ index, value }];
-    });
+  function collectPendingChanges() {
+    return [...state.primaryDrafts.values()].sort((left, right) => left.index - right.index);
   }
 
   function syncPendingActions() {
     const ready = Boolean(state.row && state.viewRow === state.row && state.viewGid === state.gid);
-    const hasChanges = ready && (collectPendingChanges().length > 0 || state.relatedDrafts.size > 0);
+    const hasChanges = ready && (state.primaryDrafts.size > 0 || state.relatedDrafts.size > 0);
     const disabled = state.saving || !hasChanges;
     ui.save.disabled = disabled;
     ui.cancel.disabled = disabled;
@@ -3282,13 +3282,14 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
 
   function cancelChanges() {
     if (state.saving || state.viewRow !== state.row || state.viewGid !== state.gid) return;
+    state.primaryDrafts.clear();
     renderFields();
     discardRelatedDrafts();
     setStatus(`Cambios descartados · fila ${state.row}`);
     syncPendingActions();
   }
 
-  function applyRowData(labels, values, row, signal, drafts = []) {
+  function applyRowData(labels, values, row, signal) {
     const width = usedCellWidth(labels, values);
     const sourceLabels = fitCells(labels, width);
     state.values = fitCells(values, width);
@@ -3296,7 +3297,7 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
     reconcileSheetConfiguration(currentGid(), activeSheetName() || `Hoja ${currentGid()}`, sourceLabels);
     renderSheetViewActions();
     setEmptyState(false);
-    renderFields(new Map(drafts.map((draft) => [draft.index, draft.value])));
+    renderFields(new Map([...state.primaryDrafts.values()].map((draft) => [draft.index, draft.value])));
     state.viewRow = row;
     state.viewGid = currentGid();
     host.dataset.row = String(row);
@@ -3331,6 +3332,7 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
     const sourceLabels = fitCells(labels, width);
     state.fields = sourceLabels.map((label, index) => label || `Columna ${columnName(index + 1)}`);
     state.values = Array.from({ length: width }, () => "");
+    state.primaryDrafts.clear();
     reconcileSheetConfiguration(currentGid(), activeSheetName() || `Hoja ${currentGid()}`, sourceLabels);
     renderSheetViewActions();
     state.viewRow = row;
@@ -3348,6 +3350,7 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
   async function loadRow(row, force = false) {
     const gid = currentGid();
     if (!force && state.loading && row === state.row && gid === state.gid) return;
+    if (state.row !== row || state.gid !== gid) state.primaryDrafts.clear();
     if (state.gid !== null && gid !== state.gid) state.sheetCache.clear();
     state.request?.abort();
     const request = new AbortController();
@@ -3435,13 +3438,10 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
           : `Fila ${row} actualizada · sin cambios nuevos`
         );
       } else {
-        const draftValues = currentInputValues();
-        const dirty = draftValues.flatMap((value, index) =>
-          valuesEqualForProperty(value, state.values[index], propertyForColumn(index)) ? [] : [{ index, value }]
-        );
-        applyRowData(freshLabels, effectiveValues, row, request.signal, dirty);
-        setStatus(dirty.length
-          ? `Datos actualizados en segundo plano · ${dirty.length} cambio(s) tuyos conservados`
+        const draftCount = state.primaryDrafts.size;
+        applyRowData(freshLabels, effectiveValues, row, request.signal);
+        setStatus(draftCount
+          ? `Datos actualizados en segundo plano · ${draftCount} cambio(s) tuyos conservados`
           : `Datos actualizados en segundo plano · fila ${row}`
         );
       }
@@ -3768,10 +3768,19 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
     });
   }
 
-  function writeRanges(operations, restoreReference = "") {
+  function writeRanges(operations, selectionReference = "") {
+    state.writeInteractionDepth += 1;
     return new Promise((resolve, reject) => {
       const requestId = `${Date.now()}-${++state.writeRequest}`;
+      let settled = false;
+      const finish = () => {
+        if (settled) return false;
+        settled = true;
+        state.writeInteractionDepth = Math.max(0, state.writeInteractionDepth - 1);
+        return true;
+      };
       const timeout = setTimeout(() => {
+        if (!finish()) return;
         window.removeEventListener("message", receive);
         reject(new Error("Sheets no respondió al intento de escritura"));
       }, Math.max(8_000, operations.length * 700 + 5_000));
@@ -3779,6 +3788,7 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
       function receive(event) {
         const message = event.data;
         if (event.source !== window || message?.source !== "sheets-row-drawer" || message?.type !== "write-result" || message.requestId !== requestId) return;
+        if (!finish()) return;
         clearTimeout(timeout);
         window.removeEventListener("message", receive);
         if (message.ok) resolve();
@@ -3797,7 +3807,7 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
             ? operation.rows.map((row) => row.map(tsvValue).join("\t")).join("\n")
             : operation.values.map(tsvValue).join("\t"))
         })),
-        restoreReference
+        selectionReference
       }, location.origin);
     });
   }
@@ -3817,98 +3827,124 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
     if (active) host.dataset.writeVerification = "pending";
   }
 
-  async function verifySheetViewWrite(entry) {
-    let verificationError = null;
-    try {
-      for (const delay of [500, 1_000, 2_000, 4_000, 8_000]) {
-        await wait(delay);
-        if (entry.controller.signal.aborted || state.sheetViewWrites.get(entry.key) !== entry) return;
-        try {
-          const values = await readNamedSheetRow(entry.sheetName, entry.row, entry.controller.signal);
-          if (!valuesEqualForProperty(values[entry.property.index], entry.value, entry.property)) continue;
-          state.sheetViewWrites.delete(entry.key);
-          state.sheetCache.clear();
-          if (state.gid === entry.gid && state.row === entry.row) {
-            const confirmedValues = Array.from(
-              { length: Math.max(state.fields.length, usedCellWidth(values)) },
-              (_, index) => index === entry.property.index ? entry.value : String(values[index] ?? state.values[index] ?? "")
-            );
-            state.values = confirmedValues;
-            void writePersistentCache(cacheKey("row", entry.gid, entry.row), {
-              labels: currentSourceLabels(),
-              values: confirmedValues,
-              updatedAt: Date.now()
-            });
-          }
-          host.dataset.writeVerification = hasPendingWriteVerification() ? "pending" : "verified";
-          syncSheetViewMutationState();
-          return;
-        } catch (error) {
-          if (error.name === "AbortError") return;
-          verificationError = error;
-        }
-      }
-
-      if (state.sheetViewWrites.get(entry.key) !== entry) return;
-      state.sheetViewWrites.delete(entry.key);
-      state.sheetCache.clear();
-      if (state.gid === entry.gid && state.row === entry.row) {
-        const drafts = currentInputValues().flatMap((value, index) => (
-          index !== entry.property.index && !valuesEqualForProperty(value, state.values[index], propertyForColumn(index))
-            ? [{ index, value }]
-            : []
-        ));
-        state.values[entry.property.index] = entry.previousValue;
-        void writePersistentCache(cacheKey("row", entry.gid, entry.row), {
-          labels: currentSourceLabels(),
-          values: [...state.values],
-          updatedAt: Date.now()
-        });
-        renderFields(new Map(drafts.map((draft) => [draft.index, draft.value])));
-      }
-      const message = verificationError?.message || `Sheets no confirmó el cambio en la fila ${entry.row}`;
-      host.dataset.writeVerification = "failed";
-      setStatus(message, "error");
-      entry.onRevert?.();
-      entry.onError?.(message);
-      syncSheetViewMutationState();
-    } finally {
-      if (state.sheetViewWrites.get(entry.key) === entry && entry.controller.signal.aborted) {
-        state.sheetViewWrites.delete(entry.key);
-        syncSheetViewMutationState();
-      }
-    }
+  function activeSheetViewWrite(entry) {
+    return !entry.controller.signal.aborted && state.sheetViewWrites.get(entry.key) === entry;
   }
 
-  function registerSheetViewWrite(task) {
-    const key = `sheet-view:${task.gid}:${task.row}:${task.property.index}`;
-    state.sheetViewWrites.get(key)?.controller.abort();
-    const entry = {
-      key,
-      gid: task.gid,
-      sheetName: task.sheetName,
-      row: task.row,
-      property: task.property,
-      value: task.value,
-      previousValue: task.previousValue,
-      controller: new AbortController(),
-      onRevert: task.callbacks.onRevert,
-      onError: task.callbacks.onError
-    };
-    state.sheetViewWrites.set(key, entry);
+  function confirmSheetViewWrite(entry, values) {
+    if (!activeSheetViewWrite(entry)) return;
+    state.sheetViewWrites.delete(entry.key);
+    if (state.gid !== entry.gid || state.row !== entry.row) return;
+    const confirmedValues = Array.from(
+      { length: Math.max(state.fields.length, usedCellWidth(values)) },
+      (_, index) => index === entry.property.index ? entry.value : String(values[index] ?? state.values[index] ?? "")
+    );
+    state.values = confirmedValues;
+    void writePersistentCache(cacheKey("row", entry.gid, entry.row), {
+      labels: currentSourceLabels(),
+      values: confirmedValues,
+      updatedAt: Date.now()
+    });
+  }
+
+  function settleUnconfirmedSheetViewWrite(entry) {
+    if (!activeSheetViewWrite(entry)) return false;
+    state.sheetViewWrites.delete(entry.key);
+    return true;
+  }
+
+  async function verifySheetViewWrites(entries) {
+    let remaining = entries.filter(activeSheetViewWrite);
+    for (const delay of [500, 1_000, 2_000, 4_000]) {
+      if (!remaining.length) break;
+      await wait(delay);
+      remaining = remaining.filter(activeSheetViewWrite);
+      const groups = new Map();
+      for (const entry of remaining) {
+        const key = `${entry.gid}:${encodeURIComponent(entry.sheetName)}`;
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(entry);
+      }
+      for (const group of groups.values()) {
+        const firstRow = Math.min(...group.map((entry) => entry.row));
+        const lastRow = Math.max(...group.map((entry) => entry.row));
+        try {
+          const rows = await readRange(
+            `A${firstRow}:${MAX_COLUMN}${lastRow}`,
+            undefined,
+            String(group[0].gid),
+            { allowEmpty: true }
+          );
+          const valuesByRow = new Map(rows.map((row) => [row.number, row.cells]));
+          for (const entry of group) {
+            if (!activeSheetViewWrite(entry)) continue;
+            const values = valuesByRow.get(entry.row) || [];
+            if (valuesEqualForProperty(values[entry.property.index], entry.value, entry.property)) {
+              confirmSheetViewWrite(entry, values);
+            }
+          }
+        } catch {
+          // La vista HTML de Sheets puede tardar en reflejar un pegado ya aceptado.
+        }
+      }
+      remaining = remaining.filter(activeSheetViewWrite);
+    }
+
+    const unconfirmed = remaining.filter(settleUnconfirmedSheetViewWrite);
     state.sheetCache.clear();
-    if (state.gid === entry.gid && state.row === entry.row) {
-      state.values[entry.property.index] = entry.value;
-      void writePersistentCache(cacheKey("row", entry.gid, entry.row), {
-        labels: currentSourceLabels(),
-        values: [...state.values],
-        updatedAt: Date.now(),
-        pendingChanges: [{ index: entry.property.index, value: entry.value }],
-        pendingSince: Date.now()
-      });
+    host.dataset.writeVerification = hasPendingWriteVerification()
+      ? "pending"
+      : unconfirmed.length
+        ? "unconfirmed"
+        : "verified";
+    syncSheetViewMutationState();
+  }
+
+  function registerSheetViewWrites(tasks) {
+    const entries = [];
+    let renderCurrentRow = false;
+    for (const task of tasks) {
+      const key = `sheet-view:${task.gid}:${task.row}:${task.property.index}`;
+      state.sheetViewWrites.get(key)?.controller.abort();
+      const entry = {
+        key,
+        gid: task.gid,
+        sheetName: task.sheetName,
+        row: task.row,
+        property: task.property,
+        value: task.value,
+        controller: new AbortController()
+      };
+      state.sheetViewWrites.set(key, entry);
+      entries.push(entry);
+      const optimisticValues = task.rowValues.length
+        ? [...task.rowValues]
+        : state.gid === entry.gid && state.row === entry.row
+          ? [...state.values]
+          : [];
+      if (optimisticValues.length) {
+        optimisticValues[entry.property.index] = entry.value;
+        void writePersistentCache(cacheKey("row", entry.gid, entry.row), {
+          labels: currentSourceLabels(),
+          values: optimisticValues,
+          updatedAt: Date.now(),
+          pendingChanges: [{ index: entry.property.index, value: entry.value }],
+          pendingSince: Date.now()
+        });
+      }
+      if (state.gid === entry.gid && state.row === entry.row) {
+        state.values = optimisticValues.length ? optimisticValues : [...state.values];
+        state.values[entry.property.index] = entry.value;
+        renderCurrentRow = true;
+      }
+    }
+    state.sheetCache.clear();
+    if (renderCurrentRow) {
+      state.primaryDrafts.clear();
       renderFields();
     }
-    void verifySheetViewWrite(entry);
+    syncSheetViewMutationState();
+    void verifySheetViewWrites(entries);
   }
 
   function sheetViewBatchOperations(tasks) {
@@ -3944,7 +3980,7 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
     return operations;
   }
 
-  function scheduleSheetViewMutationFlush(delay = 500) {
+  function scheduleSheetViewMutationFlush(delay = 180) {
     if (state.sheetViewMutationRunning || state.sheetViewMutationTimer) return;
     state.sheetViewMutationTimer = setTimeout(() => {
       state.sheetViewMutationTimer = null;
@@ -3953,30 +3989,54 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
   }
 
   async function flushSheetViewMutations() {
-    if (state.sheetViewMutationRunning || !state.sheetViewMutationQueue.length) return;
+    if (state.sheetViewMutationRunning) return state.sheetViewMutationPromise;
+    if (!state.sheetViewMutationQueue.length) return;
     state.sheetViewMutationRunning = true;
     const tasks = state.sheetViewMutationQueue.splice(0);
+    const lastTask = tasks[tasks.length - 1];
+    const selectionReference = qualifiedReference(
+      lastTask.sheetName,
+      `${columnName(lastTask.property.index + 1)}${lastTask.row}`
+    );
+    let completeMutation;
+    state.sheetViewMutationPromise = new Promise((resolve) => {
+      completeMutation = resolve;
+    });
     syncSheetViewMutationState();
     try {
-      await writeRanges(sheetViewBatchOperations(tasks), tasks[0].restoreReference);
-      for (const task of tasks) {
-        registerSheetViewWrite(task);
-        task.resolve();
-      }
+      await writeRanges(sheetViewBatchOperations(tasks), selectionReference);
+      registerSheetViewWrites(tasks);
+      for (const task of tasks) task.resolve();
     } catch (error) {
       for (const task of tasks) task.reject(error);
     } finally {
       state.sheetViewMutationRunning = false;
+      completeMutation();
+      state.sheetViewMutationPromise = null;
       syncSheetViewMutationState();
       syncPendingActions();
       if (state.sheetViewMutationQueue.length) scheduleSheetViewMutationFlush(0);
     }
   }
 
-  function writeSheetViewValue(row, property, value, previousValue, callbacks = {}) {
+  async function drainSheetViewMutations() {
+    if (state.sheetViewMutationTimer) {
+      clearTimeout(state.sheetViewMutationTimer);
+      state.sheetViewMutationTimer = null;
+    }
+    while (state.sheetViewMutationRunning || state.sheetViewMutationQueue.length) {
+      if (state.sheetViewMutationRunning) await state.sheetViewMutationPromise;
+      else await flushSheetViewMutations();
+      if (state.sheetViewMutationTimer) {
+        clearTimeout(state.sheetViewMutationTimer);
+        state.sheetViewMutationTimer = null;
+      }
+    }
+  }
+
+  function writeSheetViewValue(row, property, value, rowValues = []) {
     const gid = currentGid();
     const sheetName = activeSheetName() || state.sheetName || `Hoja ${gid}`;
-    const selectedReference = nameBoxValue().split("!").pop() || `A${state.row || row}`;
     return new Promise((resolve, reject) => {
       state.sheetViewMutationQueue.push({
         gid,
@@ -3984,9 +4044,7 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
         row,
         property,
         value: String(value ?? ""),
-        previousValue: String(previousValue ?? ""),
-        callbacks,
-        restoreReference: qualifiedReference(sheetName, selectedReference),
+        rowValues: rowValues.map((cell) => String(cell ?? "")),
         resolve,
         reject
       });
@@ -4047,6 +4105,7 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
       });
       if (state.gid === entry.gid && state.row === entry.row) {
         state.values = [...entry.previousValues];
+        state.primaryDrafts = new Map(entry.writtenCells.map(({ index, value }) => [index, { index, value }]));
         host.dataset.writeVerification = "failed";
         setStatus(verificationError?.message || "Sheets no confirmó los valores guardados; puedes volver a intentarlo", "error");
         syncPendingActions();
@@ -4085,15 +4144,22 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
       let run = [];
       const flushRun = () => {
         if (!run.length) return;
-        operations.push({
-          reference: qualifiedReference(run[0].sheetName, `${columnName(run[0].columnIndex + 1)}${run[0].rowNumber}`),
-          values: run.map((draft) => draft.value)
-        });
+        const first = run[0];
+        const last = run[run.length - 1];
+        const firstCell = `${columnName(first.columnIndex + 1)}${first.rowNumber}`;
+        const lastCell = `${columnName(last.columnIndex + 1)}${last.rowNumber}`;
+        operations.push(first.value === ""
+          ? { action: "clear", reference: qualifiedReference(first.sheetName, firstCell === lastCell ? firstCell : `${firstCell}:${lastCell}`) }
+          : { reference: qualifiedReference(first.sheetName, firstCell), values: run.map((draft) => draft.value) }
+        );
         run = [];
       };
       for (const draft of rowDrafts) {
         const previous = run[run.length - 1];
-        if (previous && draft.columnIndex !== previous.columnIndex + 1) flushRun();
+        if (previous && (
+          draft.columnIndex !== previous.columnIndex + 1
+          || (draft.value === "") !== (previous.value === "")
+        )) flushRun();
         run.push(draft);
       }
       flushRun();
@@ -4103,17 +4169,16 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
 
   function registerPrimaryWrite(plan) {
     if (!plan) return;
-    const { gid, row, labels, properties, blockValues, firstChanged } = plan;
+    const { gid, row, labels, properties, changes } = plan;
     const key = `${gid}:${row}`;
     const previousPending = state.pendingWrites.get(key);
     previousPending?.controller.abort();
     const optimisticValues = [...state.values];
-    blockValues.forEach((value, offset) => {
-      optimisticValues[firstChanged + offset] = String(value ?? "");
+    changes.forEach(({ index, value }) => {
+      optimisticValues[index] = String(value ?? "");
     });
     const writtenByIndex = new Map((previousPending?.writtenCells || []).map((cell) => [cell.index, cell]));
-    blockValues.forEach((value, offset) => {
-      const index = firstChanged + offset;
+    changes.forEach(({ index, value }) => {
       writtenByIndex.set(index, { index, value: String(value ?? "") });
     });
     const writtenCells = [...writtenByIndex.values()].sort((left, right) => left.index - right.index);
@@ -4133,6 +4198,7 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
     };
     state.pendingWrites.set(key, entry);
     state.values = optimisticValues;
+    state.primaryDrafts.clear();
     void writePersistentCache(entry.cacheKey, {
       labels,
       values: optimisticValues,
@@ -4223,39 +4289,67 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
   }
 
   function preparePrimaryWrite() {
-    const controls = currentControls();
     const properties = state.fields.map((_, index) => propertyForColumn(index));
-    const changes = collectPendingChanges(controls);
+    const changes = collectPendingChanges();
     if (!changes.length) return null;
-    const firstChanged = changes[0].index;
-    const lastChanged = changes[changes.length - 1].index;
-    const changedValues = new Map(changes.map((change) => [change.index, change.value]));
-    const blockValues = controls.slice(firstChanged, lastChanged + 1).map((control) => {
-      const index = Number(control.dataset.column) - 1;
-      if (changedValues.has(index)) return changedValues.get(index);
-      const property = properties[index];
-      return property.type === "checkbox"
-        ? serializeEditorValue(checkboxEditorValue(state.values[index], property), property)
-        : state.values[index];
-    });
+    const operations = [];
+    let writeRun = [];
+    let clearRun = [];
+    const flushWrites = () => {
+      if (!writeRun.length) return;
+      const firstIndex = writeRun[0].index;
+      const lastIndex = writeRun[writeRun.length - 1].index;
+      const changedValues = new Map(writeRun.map((change) => [change.index, change.value]));
+      const values = Array.from({ length: lastIndex - firstIndex + 1 }, (_, offset) => {
+        const index = firstIndex + offset;
+        if (changedValues.has(index)) return changedValues.get(index);
+        const property = properties[index];
+        return property.type === "checkbox"
+          ? serializeEditorValue(checkboxEditorValue(state.values[index], property), property)
+          : state.values[index];
+      });
+      operations.push({
+        reference: qualifiedReference(state.sheetName, `${columnName(firstIndex + 1)}${state.row}`),
+        values
+      });
+      writeRun = [];
+    };
+    const flushClears = () => {
+      if (!clearRun.length) return;
+      const firstCell = `${columnName(clearRun[0].index + 1)}${state.row}`;
+      const lastCell = `${columnName(clearRun[clearRun.length - 1].index + 1)}${state.row}`;
+      operations.push({
+        action: "clear",
+        reference: qualifiedReference(state.sheetName, firstCell === lastCell ? firstCell : `${firstCell}:${lastCell}`)
+      });
+      clearRun = [];
+    };
+    for (const change of changes) {
+      if (change.value === "") {
+        flushWrites();
+        const previous = clearRun[clearRun.length - 1];
+        if (previous && change.index !== previous.index + 1) flushClears();
+        clearRun.push(change);
+      } else {
+        flushClears();
+        writeRun.push(change);
+      }
+    }
+    flushWrites();
+    flushClears();
     return {
       gid: state.gid,
       row: state.row,
       labels: currentSourceLabels(),
       properties,
       changes,
-      firstChanged,
-      blockValues,
-      operation: {
-        reference: qualifiedReference(state.sheetName, `${columnName(firstChanged + 1)}${state.row}`),
-        values: blockValues
-      }
+      operations
     };
   }
 
   async function persistChanges(primaryPlan, requestedRelatedDrafts) {
     const relatedPlan = buildRelatedWritePlans(requestedRelatedDrafts);
-    const operations = [primaryPlan?.operation, ...relatedPlan.operations].filter(Boolean);
+    const operations = [...(primaryPlan?.operations || []), ...relatedPlan.operations];
     if (!operations.length) {
       setStatus("No hay cambios pendientes");
       syncPendingActions();
@@ -4583,7 +4677,7 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
   }
 
   function pollSelection() {
-    if (state.saving) return;
+    if (state.saving || state.writeInteractionDepth > 0) return;
     const reference = nameBoxValue();
     const gid = currentGid();
     const normalizedReference = reference.split("!").pop().replace(/\$/g, "");

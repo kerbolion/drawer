@@ -946,6 +946,47 @@ try {
   await waitForWriteVerification(4_000);
 
   await cdp.evaluate(`(() => {
+    window.__primaryClears = [];
+    document.addEventListener("keydown", event => {
+      if (event.key === "Delete") {
+        window.__primaryClears.push(document.getElementById("t-name-box")?.value || "");
+      }
+    }, { capture: true });
+    const panel = document.getElementById("sheets-session-probe").shadowRoot.querySelector(".panel-frame").contentDocument;
+    const input = panel.querySelector('[data-column="4"] input');
+    const setter = Object.getOwnPropertyDescriptor(panel.defaultView.HTMLInputElement.prototype, "value").set;
+    setter.call(input, "");
+    input.dispatchEvent(new panel.defaultView.Event("input", { bubbles: true }));
+    panel.querySelector(".save").click();
+  })()`);
+  setTimeout(() => {
+    sheets.Servicios.rows[0][3] = "";
+  }, 650);
+  const primaryClearDeadline = Date.now() + 3_000;
+  let primaryClears = [];
+  while (Date.now() < primaryClearDeadline) {
+    primaryClears = await cdp.evaluate("window.__primaryClears || []");
+    if (primaryClears.length) break;
+    await delay(50);
+  }
+  if (JSON.stringify(primaryClears) !== JSON.stringify(["'Servicios'!D2"])) {
+    throw new Error(`Vaciar un campo no genero una limpieza real en Sheets: ${JSON.stringify(primaryClears)}`);
+  }
+  await waitForWriteVerification(4_000);
+  const clearedPrimary = await cdp.evaluate(`(() => {
+    const host = document.getElementById("sheets-session-probe");
+    const panel = host.shadowRoot.querySelector(".panel-frame").contentDocument;
+    return {
+      value: panel.querySelector('[data-column="4"]').dataset.serializedValue,
+      pending: host.dataset.hasPendingChanges,
+      saveDisabled: panel.querySelector(".save").disabled
+    };
+  })()`);
+  if (clearedPrimary.value !== "" || clearedPrimary.pending !== "false" || !clearedPrimary.saveDisabled) {
+    throw new Error(`El campo vacio no quedo sincronizado: ${JSON.stringify(clearedPrimary)}`);
+  }
+
+  await cdp.evaluate(`(() => {
     window.__checkboxBlockPaste = null;
     document.addEventListener("paste", event => {
       window.__checkboxBlockPaste = event.clipboardData?.getData("text/plain") || "";

@@ -47,6 +47,10 @@
     }));
   }
 
+  function normalizedReference(reference) {
+    return String(reference || "").trim().replace(/\$/g, "");
+  }
+
   window.addEventListener("message", async (event) => {
     const message = event.data;
     if (event.source !== window || message?.source !== SOURCE) return;
@@ -84,8 +88,10 @@
           else paste(String(operation.tsv ?? ""));
           await wait(180);
         }
-        if (message.restoreReference) {
-          focusCell(message.restoreReference);
+        const selectionReference = message.selectionReference || message.restoreReference || "";
+        const lastOperationReference = operations[operations.length - 1]?.reference || "";
+        if (selectionReference && normalizedReference(selectionReference) !== normalizedReference(lastOperationReference)) {
+          focusCell(selectionReference);
           await wait(180);
         }
       });
