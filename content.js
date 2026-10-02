@@ -16,7 +16,8 @@
     request: null,
     writeRequest: 0,
     lastSelection: "",
-    headerCache: new Map()
+    headerCache: new Map(),
+    sheetCache: new Map()
   };
 
   const host = document.createElement("div");
@@ -77,6 +78,21 @@
       padding: 10px 11px; background: #fff; color: #172033; font: inherit;
     }
     .field input:focus { border-color: #1a73e8; outline: 2px solid rgba(26, 115, 232, .15); }
+    .related { margin-top: 24px; padding-top: 18px; border-top: 1px solid #e8ebef; }
+    .related h2 { margin: 0 0 10px; font-size: 15px; }
+    .related-status { color: #687386; font-size: 12px; }
+    .relation { margin-top: 12px; border: 1px solid #dfe3e8; border-radius: 9px; overflow: hidden; }
+    .relation-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; padding: 10px 12px; background: #f7f9fb; }
+    .relation-title { font-weight: 700; }
+    .relation-kind { margin-top: 2px; color: #687386; font-size: 10px; }
+    .relation-count { min-width: 24px; border-radius: 999px; padding: 2px 7px; background: #e6f4ea; color: #137333; text-align: center; font-size: 11px; font-weight: 700; }
+    .relation-empty { padding: 12px; color: #687386; font-size: 12px; }
+    .relation-table { width: 100%; overflow-x: auto; }
+    table { width: max-content; min-width: 100%; border-collapse: collapse; font-size: 11px; }
+    th, td { max-width: 180px; padding: 7px 9px; border-top: 1px solid #edf0f3; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    th { color: #556070; background: #fff; font-weight: 700; }
+    tbody tr:nth-child(even) { background: #fafbfc; }
+    .relation-more { padding: 8px 10px; border-top: 1px solid #edf0f3; color: #687386; font-size: 11px; }
     footer { padding: 12px 18px 16px; border-top: 1px solid #e8ebef; background: #fff; }
     .meta { margin-bottom: 9px; color: #687386; font-size: 11px; }
     .save { width: 100%; border: 0; border-radius: 7px; padding: 11px 14px; background: #0b8043; color: #fff; font-weight: 700; cursor: pointer; }
@@ -107,7 +123,12 @@
   const main = element("main");
   const status = element("div", "status busy", "Esperando una celda…");
   const fields = element("div", "fields");
-  main.append(status, fields);
+  const related = element("section", "related");
+  const relatedTitle = element("h2", "", "Relacionados");
+  const relatedStatus = element("div", "related-status", "Selecciona una fila para buscar relaciones.");
+  const relatedList = element("div", "related-list");
+  related.append(relatedTitle, relatedStatus, relatedList);
+  main.append(status, fields, related);
 
   const footer = element("footer");
   const meta = element("div", "meta", "Sin fila seleccionada");
@@ -118,7 +139,18 @@
   drawer.append(panelHeader, main, footer);
   panelDocument.body.appendChild(drawer);
 
-  const ui = { frame: panelFrame, drawer, close, reopen, status, fields, meta, save };
+  const ui = {
+    frame: panelFrame,
+    drawer,
+    close,
+    reopen,
+    status,
+    fields,
+    relatedStatus,
+    relatedList,
+    meta,
+    save
+  };
 
   ui.close.addEventListener("click", () => {
     ui.frame.hidden = true;
@@ -138,6 +170,15 @@
     const searchGid = new URLSearchParams(location.search).get("gid");
     const hashGid = new URLSearchParams(location.hash.slice(1)).get("gid");
     return hashGid || searchGid || "0";
+  }
+
+  function activeSheetName() {
+    return document.querySelector(".docs-sheet-active-tab .docs-sheet-tab-name")?.textContent.trim() || "";
+  }
+
+  function visibleSheetNames() {
+    return Array.from(document.querySelectorAll(".docs-sheet-tab-name"), (tab) => tab.textContent.trim())
+      .filter((name, index, names) => name && names.indexOf(name) === index);
   }
 
   function selectedRow(reference) {
@@ -162,6 +203,51 @@
       value = Math.floor(value / 26);
     }
     return result;
+  }
+
+  function normalizedWords(value) {
+    return String(value || "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .filter(Boolean);
+  }
+
+  function normalizedColumn(value) {
+    return normalizedWords(value).join("");
+  }
+
+  function entityNames(sheetName) {
+    const words = normalizedWords(sheetName);
+    const candidates = [];
+    for (const word of [...words, words.join("")]) {
+      if (!word) continue;
+      candidates.push(word);
+      if (word.endsWith("s") && word.length > 2) candidates.push(word.slice(0, -1));
+      if (word.endsWith("es") && word.length > 3) candidates.push(word.slice(0, -2));
+    }
+    return [...new Set(candidates)];
+  }
+
+  function primaryKeyIndex(sheetName, headers) {
+    const normalized = headers.map(normalizedColumn);
+    for (const entity of entityNames(sheetName)) {
+      const index = normalized.findIndex((header) => header === `id${entity}` || header === `${entity}id`);
+      if (index >= 0) return index;
+    }
+    const plainId = normalized.indexOf("id");
+    if (plainId >= 0) return plainId;
+    return normalized.findIndex((header) => /^id[a-z0-9]+$/.test(header));
+  }
+
+  function matchingColumn(headers, targetHeader) {
+    const target = normalizedColumn(targetHeader);
+    return headers.findIndex((header) => normalizedColumn(header) === target);
+  }
+
+  function comparable(value) {
+    return String(value ?? "").trim();
   }
 
   function setStatus(message, kind = "ok") {
@@ -227,6 +313,205 @@
     });
   }
 
+  function sheetQueryUrl(sheetName, range) {
+    const url = new URL(`/spreadsheets/d/${spreadsheetId()}/gviz/tq`, location.origin);
+    url.searchParams.set("tqx", "out:html");
+    url.searchParams.set("sheet", sheetName);
+    url.searchParams.set("range", range);
+    url.searchParams.set("headers", "1");
+    url.searchParams.set("_", Date.now().toString());
+    return url;
+  }
+
+  function readSheetTable(sheetName, range, signal) {
+    return new Promise((resolve, reject) => {
+      const frame = document.createElement("iframe");
+      frame.hidden = true;
+      frame.setAttribute("aria-hidden", "true");
+      frame.src = sheetQueryUrl(sheetName, range).href;
+      let finished = false;
+
+      const timeout = setTimeout(() => finish(new Error(`La hoja ${sheetName} tardó demasiado en responder`)), 15_000);
+      const abort = () => finish(new DOMException("Lectura cancelada", "AbortError"));
+
+      function finish(error, table) {
+        if (finished) return;
+        finished = true;
+        clearTimeout(timeout);
+        signal?.removeEventListener("abort", abort);
+        frame.remove();
+        if (error) reject(error);
+        else resolve(table);
+      }
+
+      frame.addEventListener("load", () => {
+        try {
+          const table = frame.contentDocument?.querySelector("table");
+          if (!table) throw new Error(`Google no devolvió datos para la hoja ${sheetName}`);
+          const rows = Array.from(table.querySelectorAll("tr"), (tr) =>
+            Array.from(tr.querySelectorAll("td, th"), (cell) => cell.textContent.trim())
+          ).filter((cells) => cells.length);
+          const headers = rows[0] || [];
+          finish(null, {
+            name: sheetName,
+            headers,
+            rows: rows.slice(1).map((cells, index) => ({ number: index + 2, cells }))
+          });
+        } catch (error) {
+          finish(new Error(error instanceof Error ? error.message : String(error)));
+        }
+      }, { once: true });
+
+      if (signal?.aborted) abort();
+      else {
+        signal?.addEventListener("abort", abort, { once: true });
+        (document.body || document.documentElement).appendChild(frame);
+      }
+    });
+  }
+
+  async function cachedSheetTable(sheetName, full, signal) {
+    const range = full ? `A1:${MAX_COLUMN}` : `A1:${MAX_COLUMN}2`;
+    const key = `${spreadsheetId()}:${sheetName}:${full ? "full" : "header"}`;
+    const cached = state.sheetCache.get(key);
+    if (cached && Date.now() - cached.loadedAt < 30_000) return cached.table;
+    const table = await readSheetTable(sheetName, range, signal);
+    if (!signal?.aborted) state.sheetCache.set(key, { loadedAt: Date.now(), table });
+    return table;
+  }
+
+  function setRelatedStatus(message) {
+    ui.relatedStatus.hidden = false;
+    ui.relatedStatus.textContent = message;
+  }
+
+  function relationColumns(headers) {
+    return headers
+      .map((header, index) => ({ header, index }))
+      .filter(({ header }) => header.trim())
+      .slice(0, 6);
+  }
+
+  function renderRelation(relation) {
+    const article = element("article", "relation");
+    const heading = element("div", "relation-head");
+    const headingText = element("div");
+    const title = element("div", "relation-title", relation.sheetName);
+    const kind = element("div", "relation-kind", relation.description);
+    const count = element("div", "relation-count", String(relation.rows.length));
+    headingText.append(title, kind);
+    heading.append(headingText, count);
+    article.appendChild(heading);
+
+    if (!relation.rows.length) {
+      article.appendChild(element("div", "relation-empty", "No hay registros relacionados."));
+      ui.relatedList.appendChild(article);
+      return;
+    }
+
+    const columns = relationColumns(relation.headers);
+    const wrapper = element("div", "relation-table");
+    const table = element("table");
+    const thead = element("thead");
+    const headerRow = element("tr");
+    for (const column of columns) headerRow.appendChild(element("th", "", column.header));
+    thead.appendChild(headerRow);
+    const tbody = element("tbody");
+    for (const row of relation.rows.slice(0, 20)) {
+      const tr = element("tr");
+      for (const column of columns) {
+        const value = row.cells[column.index] || "";
+        const td = element("td", "", value);
+        td.title = value;
+        tr.appendChild(td);
+      }
+      tbody.appendChild(tr);
+    }
+    table.append(thead, tbody);
+    wrapper.appendChild(table);
+    article.appendChild(wrapper);
+    if (relation.rows.length > 20) {
+      article.appendChild(element("div", "relation-more", `Y ${relation.rows.length - 20} registro(s) más.`));
+    }
+    ui.relatedList.appendChild(article);
+  }
+
+  async function loadRelationships(currentHeaders, currentValues, signal) {
+    ui.relatedList.replaceChildren();
+    setRelatedStatus("Detectando relaciones por columnas ID…");
+    const currentSheet = activeSheetName();
+    const otherSheets = visibleSheetNames().filter((name) => name !== currentSheet);
+    if (!otherSheets.length) {
+      setRelatedStatus("No hay otras hojas visibles en este documento.");
+      return;
+    }
+
+    try {
+      const metadataResults = await Promise.allSettled(
+        otherSheets.map((name) => cachedSheetTable(name, false, signal))
+      );
+      if (signal?.aborted) return;
+      const metadata = metadataResults.flatMap((result) => result.status === "fulfilled" ? [result.value] : []);
+      const currentPrimary = primaryKeyIndex(currentSheet, currentHeaders);
+      const descriptors = [];
+
+      for (const table of metadata) {
+        const otherPrimary = primaryKeyIndex(table.name, table.headers);
+
+        if (currentPrimary >= 0) {
+          const foreignIndex = matchingColumn(table.headers, currentHeaders[currentPrimary]);
+          const keyValue = comparable(currentValues[currentPrimary]);
+          if (foreignIndex >= 0 && keyValue) {
+            descriptors.push({
+              sheetName: table.name,
+              matchIndex: foreignIndex,
+              matchValue: keyValue,
+              description: `Lista relacionada por ${currentHeaders[currentPrimary]}`
+            });
+          }
+        }
+
+        if (otherPrimary >= 0) {
+          const localForeignIndex = matchingColumn(currentHeaders, table.headers[otherPrimary]);
+          const keyValue = comparable(currentValues[localForeignIndex]);
+          const duplicatesExisting = descriptors.some((item) =>
+            item.sheetName === table.name &&
+            normalizedColumn(table.headers[item.matchIndex]) === normalizedColumn(table.headers[otherPrimary])
+          );
+          if (localForeignIndex >= 0 && keyValue && !duplicatesExisting) {
+            descriptors.push({
+              sheetName: table.name,
+              matchIndex: otherPrimary,
+              matchValue: keyValue,
+              description: `Registro referenciado por ${table.headers[otherPrimary]}`
+            });
+          }
+        }
+      }
+
+      if (!descriptors.length) {
+        setRelatedStatus("No encontré columnas ID compartidas con las otras hojas.");
+        return;
+      }
+
+      const relationResults = await Promise.allSettled(descriptors.map(async (descriptor) => {
+        const table = await cachedSheetTable(descriptor.sheetName, true, signal);
+        const rows = table.rows.filter((row) => comparable(row.cells[descriptor.matchIndex]) === descriptor.matchValue);
+        return { ...descriptor, headers: table.headers, rows };
+      }));
+      if (signal?.aborted) return;
+
+      const relations = relationResults.flatMap((result) => result.status === "fulfilled" ? [result.value] : []);
+      ui.relatedStatus.hidden = relations.length > 0;
+      for (const relation of relations) renderRelation(relation);
+      const failures = relationResults.length - relations.length;
+      if (!relations.length) setRelatedStatus("No pude leer las hojas relacionadas con la sesión actual.");
+      else if (failures) setRelatedStatus(`Se cargaron relaciones, pero ${failures} hoja(s) no respondieron.`);
+    } catch (error) {
+      if (error.name !== "AbortError") setRelatedStatus(error.message);
+    }
+  }
+
   async function headers(signal) {
     const key = `${spreadsheetId()}:${currentGid()}`;
     if (state.headerCache.has(key)) return state.headerCache.get(key);
@@ -239,6 +524,7 @@
   async function loadRow(row, force = false) {
     const gid = currentGid();
     if (!force && state.loading && row === state.row && gid === state.gid) return;
+    if (state.gid !== null && gid !== state.gid) state.sheetCache.clear();
     state.request?.abort();
     const request = new AbortController();
     state.request = request;
@@ -246,7 +532,9 @@
     state.row = row;
     state.gid = gid;
     ui.save.disabled = true;
-    ui.meta.textContent = `Hoja ${gid} · fila ${row}`;
+    ui.relatedList.replaceChildren();
+    setRelatedStatus("Detectando hojas y relaciones…");
+    ui.meta.textContent = `${activeSheetName() || `Hoja ${gid}`} · fila ${row}`;
     setStatus(`Leyendo la fila ${row} desde tu sesión de Google…`, "busy");
 
     try {
@@ -262,9 +550,12 @@
       setStatus(`Lectura automática confirmada · fila ${row}`);
       host.dataset.row = String(row);
       ui.save.disabled = false;
+      void loadRelationships(labels, state.values, request.signal);
     } catch (error) {
       if (error.name !== "AbortError") {
         ui.fields.replaceChildren();
+        ui.relatedList.replaceChildren();
+        setRelatedStatus("No se pudieron buscar relaciones para esta fila.");
         setStatus(error.message, "error");
       }
     } finally {
@@ -346,6 +637,7 @@
       for (let attempt = 0; attempt < 4 && !verified; attempt += 1) {
         await wait(attempt === 0 ? 450 : 600);
         state.headerCache.delete(`${spreadsheetId()}:${currentGid()}`);
+        state.sheetCache.clear();
         await loadRow(state.row, true);
         verified = changes.every((change) => state.values[change.index] === change.value);
       }
@@ -368,11 +660,15 @@
     state.lastSelection = signature;
     const row = selectedRow(reference);
     if (!row) {
+      ui.relatedList.replaceChildren();
+      setRelatedStatus("Selecciona una fila para buscar relaciones.");
       setStatus("Selecciona una celda de la fila que quieres abrir", "busy");
       return;
     }
     if (row === 1) {
       ui.fields.replaceChildren();
+      ui.relatedList.replaceChildren();
+      setRelatedStatus("La fila de encabezados no tiene relaciones.");
       ui.save.disabled = true;
       ui.meta.textContent = "Fila de encabezados";
       setStatus("Selecciona una fila de datos debajo de los encabezados", "busy");
