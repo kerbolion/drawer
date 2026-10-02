@@ -1934,9 +1934,41 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
     return document.querySelector(".docs-sheet-active-tab .docs-sheet-tab-name")?.textContent.trim() || "";
   }
 
+  function sheetTabGid(nameNode) {
+    const tab = nameNode.closest(".docs-sheet-tab");
+    if (!tab) return "";
+    const candidates = [
+      tab.id,
+      tab.getAttribute("data-gid"),
+      tab.getAttribute("data-sheet-id"),
+      tab.getAttribute("aria-controls"),
+      tab.querySelector("[href*='gid=']")?.getAttribute("href")
+    ];
+    for (const candidate of candidates) {
+      const text = String(candidate || "");
+      const match = text.match(/sheet-button-(\d+)/i)
+        || text.match(/(?:^|[?&#])gid=(\d+)/i)
+        || text.match(/^(\d+)$/);
+      if (match) return match[1];
+    }
+    return "";
+  }
+
+  function visibleSheets() {
+    const sheets = [];
+    const usedNames = new Set();
+    for (const nameNode of document.querySelectorAll(".docs-sheet-tab-name")) {
+      const name = nameNode.textContent.trim();
+      const key = normalizedColumn(name);
+      if (!name || usedNames.has(key)) continue;
+      usedNames.add(key);
+      sheets.push({ name, gid: sheetTabGid(nameNode) });
+    }
+    return sheets;
+  }
+
   function visibleSheetNames() {
-    return Array.from(document.querySelectorAll(".docs-sheet-tab-name"), (tab) => tab.textContent.trim())
-      .filter((name, index, names) => name && names.indexOf(name) === index);
+    return visibleSheets().map((sheet) => sheet.name);
   }
 
   function selectedRow(reference) {
@@ -2244,11 +2276,6 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
       [name]: typeof value === "boolean" ? value : String(value || "")
     };
     void writeWorkspace();
-  }
-
-  function sheetConfigurationByName(sheetName) {
-    const target = normalizedColumn(sheetName);
-    return Object.values(state.workspace?.sheets || {}).find((sheet) => normalizedColumn(sheet.name) === target) || null;
   }
 
   function relationViewKey(sheetName) {
@@ -2578,8 +2605,44 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
     }));
   }
 
-  function relatedProperty(sheetName, column) {
-    return sheetConfigurationByName(sheetName)?.columns?.[column.propertyIndex]
+  function relationSheetConfiguration(relation) {
+    const configuredSheets = state.workspace?.sheets || {};
+    const targetName = normalizedColumn(relation.sheetName);
+    const columns = displayRelationColumns(relation);
+    const headerMatchCount = (sheet) => columns.reduce((count, column) => {
+      const sourceHeader = sheet.columns?.[column.propertyIndex]?.sourceHeader;
+      return count + (normalizedColumn(sourceHeader) === normalizedColumn(column.header) ? 1 : 0);
+    }, 0);
+    const minimumHeaderMatches = Math.max(1, Math.ceil(columns.length * 0.6));
+    const direct = relation.sheetGid ? configuredSheets[String(relation.sheetGid)] : null;
+    if (
+      direct
+      && (
+        normalizedColumn(direct.name) === targetName
+        || headerMatchCount(direct) >= minimumHeaderMatches
+      )
+    ) return direct;
+
+    const candidates = Object.entries(configuredSheets)
+      .filter(([gid]) => gid !== String(currentGid()))
+      .map(([, sheet]) => ({
+        sheet,
+        nameMatches: normalizedColumn(sheet.name) === targetName,
+        headerMatches: headerMatchCount(sheet)
+      }));
+    const namedCandidates = candidates.filter((candidate) => candidate.nameMatches);
+    const matchingCandidates = namedCandidates.length
+      ? namedCandidates
+      : candidates.filter((candidate) => candidate.headerMatches >= minimumHeaderMatches);
+    matchingCandidates.sort((left, right) =>
+      right.headerMatches - left.headerMatches
+      || Number(right.sheet.updatedAt || 0) - Number(left.sheet.updatedAt || 0)
+    );
+    return matchingCandidates[0]?.sheet || null;
+  }
+
+  function relatedProperty(relation, column) {
+    return relationSheetConfiguration(relation)?.columns?.[column.propertyIndex]
       || defaultProperty(column.propertyIndex, column.header);
   }
 
@@ -2612,7 +2675,7 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
   }
 
   function setRelatedDraft(relation, row, column, editorValue) {
-    const property = relatedProperty(relation.sheetName, column);
+    const property = relatedProperty(relation, column);
     const key = relatedDraftKey(relation.sheetName, row.number, column.propertyIndex);
     const existing = state.relatedDrafts.get(key);
     const previousValue = existing?.previousValue ?? String(row.cells[column.index] ?? "");
@@ -2654,7 +2717,7 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
 
   function RelatedCellEditor({ relation, row, column }) {
     useRelatedDraftVersion();
-    const property = relatedProperty(relation.sheetName, column);
+    const property = relatedProperty(relation, column);
     const rawValue = relatedDraftValue(relation, row, column);
     return React.createElement(
       "div",
@@ -2662,7 +2725,8 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
         className: "related-cell-editor",
         "data-related-sheet": relation.sheetName,
         "data-related-row": String(row.number),
-        "data-related-column": String(column.propertyIndex + 1)
+        "data-related-column": String(column.propertyIndex + 1),
+        "data-field-type": property.type
       },
       React.createElement(PropertyEditorControl, {
         property,
@@ -2702,7 +2766,7 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
         "div",
         { className: "related-record-fields" },
         ...previewColumns.map((column) => {
-          const property = relatedProperty(relation.sheetName, column);
+          const property = relatedProperty(relation, column);
           const value = String(relatedDraftValue(relation, row, column) || "");
           return React.createElement(
             "div",
@@ -2796,7 +2860,7 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
           "div",
           { className: "fields related-drawer-fields" },
           ...columns.map((column) => {
-            const property = relatedProperty(relation.sheetName, column);
+            const property = relatedProperty(relation, column);
             return React.createElement(
               "div",
               { className: "field", key: `${column.propertyIndex}:${column.header}` },
@@ -2939,6 +3003,7 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
       const columns = relationColumns(relation.headers);
       return {
         sheetName: relation.sheetName,
+        sheetGid: String(relation.sheetGid || ""),
         description: relation.description,
         headers: columns.map((column) => column.header),
         columnIndexes: columns.map((column, position) => Number(relation.columnIndexes?.[position] ?? column.index)),
@@ -2953,7 +3018,14 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
 
   function showRelations(relations) {
     state.relations = relations;
-    const signature = JSON.stringify(storedRelations(relations));
+    const signature = JSON.stringify({
+      relations: storedRelations(relations),
+      configurations: relations.map((relation) => ({
+        sheetName: relation.sheetName,
+        sheetGid: String(relation.sheetGid || ""),
+        updatedAt: Number(relationSheetConfiguration(relation)?.updatedAt || 0)
+      }))
+    });
     if (ui.relatedList.dataset.signature === signature) return;
     unmountRelations();
     ui.relatedList.replaceChildren();
@@ -2987,7 +3059,7 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
   }
 
   async function loadRelationships(currentHeaders, currentValues, signal) {
-    const currentSheet = activeSheetName();
+    const currentSheet = state.sheetName || activeSheetName();
     const persistentKey = cacheKey("relations", currentGid(), state.row);
     const cached = await readPersistentCache(persistentKey);
     if (signal?.aborted) return;
@@ -2999,7 +3071,7 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
       setRelatedStatus("Detectando relaciones por columnas ID…", true);
     }
 
-    const otherSheets = visibleSheetNames().filter((name) => name !== currentSheet);
+    const otherSheets = visibleSheets().filter((sheet) => sheet.name !== currentSheet);
     if (!otherSheets.length) {
       showRelations([]);
       setRelatedStatus("No hay otras hojas visibles en este documento.");
@@ -3009,7 +3081,10 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
 
     try {
       const metadataResults = await Promise.allSettled(
-        otherSheets.map((name) => cachedSheetTable(name, false, signal))
+        otherSheets.map(async (sheet) => ({
+          ...await cachedSheetTable(sheet.name, false, signal),
+          gid: sheet.gid
+        }))
       );
       if (signal?.aborted) return;
       const metadata = metadataResults.flatMap((result) => result.status === "fulfilled" ? [result.value] : []);
@@ -3025,6 +3100,7 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
           if (foreignIndex >= 0 && keyValue) {
             descriptors.push({
               sheetName: table.name,
+              sheetGid: table.gid,
               matchIndex: foreignIndex,
               matchValue: keyValue,
               description: `Lista relacionada por ${currentHeaders[currentPrimary]}`
@@ -3042,6 +3118,7 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
           if (localForeignIndex >= 0 && keyValue && !duplicatesExisting) {
             descriptors.push({
               sheetName: table.name,
+              sheetGid: table.gid,
               matchIndex: otherPrimary,
               matchValue: keyValue,
               description: `Registro referenciado por ${table.headers[otherPrimary]}`
@@ -3310,7 +3387,7 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
     const sourceLabels = fitCells(labels, width);
     state.values = fitCells(values, width);
     state.fields = sourceLabels.map((label, index) => label || `Columna ${columnName(index + 1)}`);
-    reconcileSheetConfiguration(currentGid(), activeSheetName() || `Hoja ${currentGid()}`, sourceLabels);
+    reconcileSheetConfiguration(currentGid(), state.sheetName || activeSheetName() || `Hoja ${currentGid()}`, sourceLabels);
     renderSheetViewActions();
     setEmptyState(false);
     renderFields(new Map([...state.primaryDrafts.values()].map((draft) => [draft.index, draft.value])));
@@ -3349,7 +3426,7 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
     state.fields = sourceLabels.map((label, index) => label || `Columna ${columnName(index + 1)}`);
     state.values = Array.from({ length: width }, () => "");
     state.primaryDrafts.clear();
-    reconcileSheetConfiguration(currentGid(), activeSheetName() || `Hoja ${currentGid()}`, sourceLabels);
+    reconcileSheetConfiguration(currentGid(), state.sheetName || activeSheetName() || `Hoja ${currentGid()}`, sourceLabels);
     renderSheetViewActions();
     state.viewRow = row;
     state.viewGid = currentGid();
@@ -3365,7 +3442,14 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
 
   async function loadRow(row, force = false) {
     const gid = currentGid();
-    if (!force && state.loading && row === state.row && gid === state.gid) return;
+    const sheetName = activeSheetName() || `Hoja ${gid}`;
+    if (
+      !force
+      && state.loading
+      && row === state.row
+      && gid === state.gid
+      && normalizedColumn(sheetName) === normalizedColumn(state.sheetName)
+    ) return;
     if (state.row !== row || state.gid !== gid) state.primaryDrafts.clear();
     if (state.gid !== null && gid !== state.gid) state.sheetCache.clear();
     state.request?.abort();
@@ -3375,13 +3459,13 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
     setActivity("row", true);
     state.row = row;
     state.gid = gid;
-    state.sheetName = activeSheetName() || `Hoja ${gid}`;
+    state.sheetName = sheetName;
     renderSheetViewActions();
     syncPendingActions();
     ui.fields.inert = true;
     ui.fields.setAttribute("aria-busy", "true");
     setRelatedStatus("Detectando hojas y relaciones…", true);
-    ui.meta.textContent = `${activeSheetName() || `Hoja ${gid}`} · fila ${row}`;
+    ui.meta.textContent = `${sheetName} · fila ${row}`;
     const persistentKey = cacheKey("row", gid, row);
     let cached = null;
 
@@ -4701,9 +4785,13 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
     const reference = nameBoxValue();
     if (!reference) return;
     const gid = currentGid();
+    const sheetName = activeSheetName();
     const normalizedReference = reference.split("!").pop().replace(/\$/g, "");
     const row = selectedRow(reference);
-    const signature = row ? `${gid}:row:${row}` : `${gid}:reference:${normalizedReference}`;
+    const sheetSignature = normalizedColumn(sheetName);
+    const signature = row
+      ? `${gid}:${sheetSignature}:row:${row}`
+      : `${gid}:${sheetSignature}:reference:${normalizedReference}`;
     if (signature === state.lastSelection) return;
     state.lastSelection = signature;
     if (state.propertyColumn !== null) closePropertyEditor();

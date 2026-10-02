@@ -86,8 +86,8 @@ const webServer = http.createServer((request, response) => {
   if (url.pathname.endsWith("/edit")) {
     response.end(`<!doctype html><html><body>
       <input id="t-name-box" value="A2">
-      <div class="docs-sheet-tab docs-sheet-active-tab"><span class="docs-sheet-tab-name">Contactos</span></div>
-      <div class="docs-sheet-tab"><span class="docs-sheet-tab-name">Servicios</span></div>
+      <div class="docs-sheet-tab docs-sheet-active-tab" id="sheet-button-0"><span class="docs-sheet-tab-name">Contactos</span></div>
+      <div class="docs-sheet-tab" id="sheet-button-1"><span class="docs-sheet-tab-name">Servicios</span></div>
     </body></html>`);
     return;
   }
@@ -608,13 +608,16 @@ try {
   }
 
   await cdp.evaluate(`(() => {
-    const tabs = Array.from(document.querySelectorAll(".docs-sheet-tab"));
-    tabs.forEach(tab => tab.classList.remove("docs-sheet-active-tab"));
-    tabs.find(tab => tab.textContent.includes("Servicios")).classList.add("docs-sheet-active-tab");
     location.hash = "gid=1&range=A2";
     const box = document.getElementById("t-name-box");
     box.value = "A2";
     box.dispatchEvent(new Event("input", { bubbles: true }));
+  })()`);
+  await delay(350);
+  await cdp.evaluate(`(() => {
+    const tabs = Array.from(document.querySelectorAll(".docs-sheet-tab"));
+    tabs.forEach(tab => tab.classList.remove("docs-sheet-active-tab"));
+    tabs.find(tab => tab.textContent.includes("Servicios")).classList.add("docs-sheet-active-tab");
   })()`);
 
   const fromService = await waitForRelation("Contactos");
@@ -845,6 +848,19 @@ try {
   })()`);
   if (persistentTypes.nameType !== "longText" || persistentTypes.ageType !== "number") {
     throw new Error(`Los tipos no se conservaron al cambiar de hoja: ${JSON.stringify(persistentTypes)}`);
+  }
+
+  const relatedSheetTypes = await cdp.evaluate(`(() => {
+    const panel = document.getElementById("sheets-session-probe").shadowRoot.querySelector(".panel-frame").contentDocument;
+    const serviceCheckbox = panel.querySelector('[data-related-sheet="Servicios"][data-related-column="3"] input[type="checkbox"]');
+    return {
+      hasCheckbox: Boolean(serviceCheckbox),
+      fieldType: serviceCheckbox?.closest("[data-field-type]")?.dataset.fieldType || "",
+      textInputs: panel.querySelectorAll('[data-related-sheet="Servicios"][data-related-column="3"] input[type="text"]').length
+    };
+  })()`);
+  if (!relatedSheetTypes.hasCheckbox || relatedSheetTypes.fieldType !== "checkbox" || relatedSheetTypes.textInputs) {
+    throw new Error(`Los relacionados no usaron los tipos configurados en su propia hoja: ${JSON.stringify(relatedSheetTypes)}`);
   }
 
   sheets.Servicios.rows[0][2] = "TRUE";
