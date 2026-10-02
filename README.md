@@ -9,6 +9,7 @@ La interfaz usa Ant Design `5.29.3`, la misma versión instalada en `workspace-a
 - Abre el formulario a la derecha.
 - Detecta las demás hojas visibles y relaciona registros por columnas `ID ...` compartidas.
 - Muestra relaciones padre-hijo en ambos sentidos, como `Contactos -> Servicios` y `Servicios -> Contactos`.
+- Presenta los relacionados en vista **Deck** o **Tabla**, con paginación y una preferencia persistente por relación.
 - Guarda filas y relacionados en caché local persistente, los muestra primero y comprueba cambios en segundo plano.
 - Conserva una configuración independiente por documento y pestaña en `chrome.storage.local`.
 - Permite configurar cada columna como texto, área de texto, número, monto, fecha, fecha y hora, hora, selección, selección múltiple, estado, casilla, URL, teléfono o correo.
@@ -49,7 +50,7 @@ Cada archivo de Sheets se guarda como un workspace local. Las pestañas se ident
 
 Pulsa el icono de tipo junto al nombre de una propiedad para abrir **Editar propiedad**. Todas las columnas nuevas comienzan como **Texto** y la extensión no intenta adivinar el tipo. Los desplegables y estados tienen un editor de opciones con colores; las casillas permiten definir el valor activado y desactivado; montos, fechas y horas conservan sus ajustes de presentación.
 
-El icono junto a cada propiedad indica su tipo y abre su configuración. Fechas y horas usan los selectores de Ant Design; números y montos usan `InputNumber`; opciones simples y múltiples usan `Select`; las casillas usan `Checkbox`.
+El icono, el nombre y el identificador del tipo siguen el patrón visual de propiedades de Workspace. Tanto el icono como el nombre abren la configuración. Fechas y horas usan los selectores de Ant Design; números y montos usan `InputNumber`; opciones simples y múltiples usan `Select`; las casillas usan `Checkbox`.
 
 El nombre configurado se usa únicamente en el formulario. El encabezado original continúa siendo la referencia de la columna en Sheets.
 

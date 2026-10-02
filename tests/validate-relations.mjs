@@ -177,7 +177,8 @@ try {
         title: relation.querySelector(".relation-title")?.textContent || "",
         count: relation.querySelector(".relation-count")?.textContent || "",
         description: relation.querySelector(".relation-kind")?.textContent || "",
-        cells: Array.from(relation.querySelectorAll("tbody td"), cell => cell.textContent)
+        view: relation.dataset.relationView || "",
+        cells: Array.from(relation.querySelectorAll("[data-relation-cell]"), cell => cell.textContent)
       })) : []
     };
   })()`;
@@ -275,6 +276,32 @@ try {
     throw new Error(`Relacion Contactos -> Servicios incorrecta: ${JSON.stringify(services)}`);
   }
 
+  const relationDeck = await cdp.evaluate(`(() => {
+    const panel = document.getElementById("sheets-session-probe").shadowRoot.querySelector(".panel-frame").contentDocument;
+    const relation = Array.from(panel.querySelectorAll(".relation")).find(item => item.querySelector(".relation-title")?.textContent === "Servicios");
+    const tableOption = Array.from(relation?.querySelectorAll(".ant-segmented-item") || []).find(item => item.textContent.includes("Tabla"));
+    const result = {
+      view: relation?.dataset.relationView,
+      cards: relation?.querySelectorAll(".related-record-card").length || 0,
+      hasDeckOption: Boolean(Array.from(relation?.querySelectorAll(".ant-segmented-item") || []).find(item => item.textContent.includes("Deck"))),
+      hasTableOption: Boolean(tableOption)
+    };
+    tableOption?.click();
+    return result;
+  })()`);
+  await delay(100);
+  const relationTable = await cdp.evaluate(`(() => {
+    const panel = document.getElementById("sheets-session-probe").shadowRoot.querySelector(".panel-frame").contentDocument;
+    const relation = Array.from(panel.querySelectorAll(".relation")).find(item => item.querySelector(".relation-title")?.textContent === "Servicios");
+    return {
+      view: relation?.dataset.relationView,
+      tableCells: Array.from(relation?.querySelectorAll("tbody td") || [], cell => cell.textContent)
+    };
+  })()`);
+  if (relationDeck.view !== "deck" || relationDeck.cards !== 2 || !relationDeck.hasDeckOption || !relationDeck.hasTableOption || relationTable.view !== "table" || !relationTable.tableCells.includes("S-1")) {
+    throw new Error(`Las vistas Deck/Tabla no funcionan: ${JSON.stringify({ relationDeck, relationTable })}`);
+  }
+
   const configuredTypes = await cdp.evaluate(`(() => {
     const host = document.getElementById("sheets-session-probe");
     const panel = host.shadowRoot.querySelector(".panel-frame").contentDocument;
@@ -300,6 +327,8 @@ try {
       nameUsesAntd: nameControl?.querySelector("textarea")?.classList.contains("ant-input"),
       ageUsesAntd: Boolean(ageControl?.querySelector(".ant-input-number")),
       typeIconCount: panel.querySelectorAll(".field-configure svg").length,
+      fieldNames: Array.from(panel.querySelectorAll(".field-label-text"), node => node.textContent),
+      fieldTypes: Array.from(panel.querySelectorAll(".field-type-name"), node => node.textContent),
       editorHidden: panel.querySelector(".property-drawer")?.hidden
     };
   })()`);
@@ -314,6 +343,8 @@ try {
     !configuredTypes.nameUsesAntd ||
     !configuredTypes.ageUsesAntd ||
     configuredTypes.typeIconCount !== 3 ||
+    configuredTypes.fieldNames.join("|") !== "ID Contacto|Nombre|Edad" ||
+    configuredTypes.fieldTypes.join("|") !== "text|longText|number" ||
     !configuredTypes.editorHidden
   ) {
     throw new Error(`La configuración de tipos no se aplicó: ${JSON.stringify(configuredTypes)}`);
@@ -519,11 +550,11 @@ try {
   while (Date.now() < cacheDeadline) {
     cachedSnapshot = await cdp.evaluate(snapshot);
     const cachedServices = cachedSnapshot.relations.find((relation) => relation.title === "Servicios");
-    if (cachedSnapshot.formStatus.includes("caché") && cachedSnapshot.formStatusHidden && cachedSnapshot.relatedStatusHidden && cachedSnapshot.saveState === "saving" && cachedSnapshot.fields.includes("Ana") && cachedServices?.count === "2") break;
+    if (cachedSnapshot.formStatus.includes("caché") && cachedSnapshot.formStatusHidden && cachedSnapshot.relatedStatusHidden && cachedSnapshot.saveState === "saving" && cachedSnapshot.fields.includes("Ana") && cachedServices?.count === "2" && cachedServices?.view === "table") break;
     await delay(50);
   }
   const cachedServices = cachedSnapshot?.relations.find((relation) => relation.title === "Servicios");
-  if (!cachedSnapshot?.formStatus.includes("caché") || !cachedSnapshot.formStatusHidden || !cachedSnapshot.relatedStatusHidden || cachedSnapshot.saveState !== "saving" || !cachedSnapshot.fields.includes("Ana") || cachedServices?.count !== "2") {
+  if (!cachedSnapshot?.formStatus.includes("caché") || !cachedSnapshot.formStatusHidden || !cachedSnapshot.relatedStatusHidden || cachedSnapshot.saveState !== "saving" || !cachedSnapshot.fields.includes("Ana") || cachedServices?.count !== "2" || cachedServices?.view !== "table") {
     throw new Error(`La caché no apareció antes de la red: ${JSON.stringify(cachedSnapshot)}`);
   }
   await cdp.evaluate(`(() => {

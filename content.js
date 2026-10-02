@@ -8,19 +8,25 @@ import ConfigProvider from "antd/es/config-provider/index.js";
 import DatePicker from "antd/es/date-picker/index.js";
 import Input from "antd/es/input/index.js";
 import InputNumber from "antd/es/input-number/index.js";
+import Pagination from "antd/es/pagination/index.js";
+import Segmented from "antd/es/segmented/index.js";
 import Select from "antd/es/select/index.js";
 import Space from "antd/es/space/index.js";
 import Tag from "antd/es/tag/index.js";
 import TimePicker from "antd/es/time-picker/index.js";
 import {
   CalculatorOutlined,
+  AppstoreOutlined,
   CalendarOutlined,
   CheckSquareOutlined,
   DeleteOutlined,
+  DownOutlined,
   LinkOutlined,
   MailOutlined,
   PhoneOutlined,
   PlusOutlined,
+  RightOutlined,
+  TableOutlined,
   UnorderedListOutlined
 } from "@ant-design/icons";
 import esES from "antd/es/locale/es_ES.js";
@@ -252,24 +258,33 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
       background: var(--workspace-surface); box-shadow: 0 8px 24px var(--workspace-shadow-soft);
     }
     .field {
-      display: grid; grid-template-columns: 190px minmax(0, 1fr); align-items: center; gap: 18px;
+      display: grid; grid-template-columns: 190px minmax(0, 1fr); align-items: flex-start; gap: 18px;
       min-height: 57px; padding: 12px 0; border-bottom: 1px solid var(--workspace-border-subtle);
     }
     .field:last-child { border-bottom: 0; }
-    .field-label { display: flex; align-items: center; gap: 6px; min-width: 0; }
-    .field-label-text {
-      min-width: 0; overflow: hidden; color: var(--workspace-text-secondary); font-size: 13px;
-      font-weight: 700; text-overflow: ellipsis; white-space: nowrap;
+    .field-label {
+      display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: flex-start; gap: 8px;
+      min-width: 0; min-height: 32px; padding: 4px 0; color: var(--workspace-text-secondary);
     }
+    .field-label-copy { display: grid; gap: 3px; min-width: 0; }
+    .field-label-text {
+      display: inline-flex; justify-self: start; max-width: 100%; min-width: 0; overflow: hidden;
+      border: 0; padding: 0; background: transparent; color: var(--workspace-text-secondary);
+      font: inherit; font-size: 13px; font-weight: 700; text-align: left; text-overflow: ellipsis;
+      white-space: nowrap; cursor: pointer;
+    }
+    .field-label-text:hover, .field-label-text:focus-visible { color: var(--workspace-primary); outline: 0; }
+    .field-type-name { color: var(--workspace-text-muted); font-size: 11px; line-height: 1.2; }
     .field-configure {
       display: inline-flex; flex: 0 0 auto; align-items: center; justify-content: center;
-      width: 28px; height: 28px; border: 0; border-radius: 50%;
+      width: 30px; height: 30px; border: 0; border-radius: 999px;
       background: ${antdTokens.colorPrimaryBg}; color: ${antdTokens.colorPrimary}; cursor: pointer;
       line-height: 1; opacity: 1; transition: color ${antdTokens.motionDurationMid}, background ${antdTokens.motionDurationMid};
     }
     .field-configure svg { display: block; width: 14px; height: 14px; }
     .field-configure:hover, .field-configure:focus-visible { background: ${antdTokens.colorPrimaryBgHover}; color: ${antdTokens.colorPrimaryHover}; }
-    .field-editor { min-width: 0; }
+    .header-type { display: inline-flex; align-items: center; justify-content: center; }
+    .field-editor { min-width: 0; padding-top: 0; }
     .antd-field-control { width: 100%; min-width: 0; }
     .antd-field-control > .ant-input-number,
     .antd-field-control > .ant-picker,
@@ -335,29 +350,66 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
       background: ${antdTokens.colorFillQuaternary}; color: ${antdTokens.colorTextSecondary}; font-size: 12px;
     }
     @keyframes property-enter { from { opacity: 0; transform: translateX(18px); } to { opacity: 1; transform: translateX(0); } }
-    .related {
-      margin-top: 14px; padding: 0 14px 14px; overflow: hidden;
-      border: 1px solid var(--workspace-border); border-radius: 8px;
-      background: var(--workspace-surface); box-shadow: 0 8px 24px var(--workspace-shadow-soft);
+    .related { margin-top: 14px; }
+    .related > h2 { margin: 0 0 10px; color: var(--workspace-text); font-size: 14px; line-height: 22px; }
+    .related-status { padding: 3px 0 10px; color: var(--workspace-text-muted); font-size: 12px; }
+    .related-list { display: grid; gap: 14px; }
+    .relation {
+      overflow: hidden; padding-bottom: 14px; border: 1px solid var(--workspace-border);
+      border-radius: 8px; background: var(--workspace-surface); box-shadow: 0 8px 24px var(--workspace-shadow-soft);
     }
-    .related h2 {
-      margin: 0 -14px 10px; min-height: 46px; padding: 12px 14px;
-      border-bottom: 1px solid var(--workspace-border-soft); background: var(--workspace-surface-raised);
-      color: var(--workspace-text); font-size: 14px; line-height: 22px;
+    .relation-head {
+      display: flex; align-items: center; justify-content: flex-start; gap: 8px; min-height: 46px;
+      padding: 10px 14px; border-bottom: 1px solid var(--workspace-border-soft);
+      background: var(--workspace-surface-raised);
     }
-    .related-status { padding: 3px 0; color: var(--workspace-text-muted); font-size: 12px; }
-    .relation { margin-top: 12px; border: 1px solid var(--workspace-border); border-radius: 8px; overflow: hidden; }
-    .relation-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; padding: 10px 12px; background: var(--workspace-surface-muted); }
-    .relation-title { font-weight: 700; }
-    .relation-kind { margin-top: 2px; color: var(--workspace-text-muted); font-size: 11px; }
-    .relation-count { min-width: 24px; border-radius: ${antdTokens.borderRadiusSM}px; padding: 1px 7px; border: 1px solid ${antdTokens.colorBorder}; background: ${antdTokens.colorBgContainer}; color: ${antdTokens.colorTextSecondary}; text-align: center; font-size: 11px; }
-    .relation-empty { padding: 12px; color: var(--workspace-text-muted); font-size: 12px; }
-    .relation-table { width: 100%; overflow-x: auto; }
-    .relation-table table { width: max-content; min-width: 100%; border-collapse: collapse; font-size: 11px; }
-    .relation-table th, .relation-table td { max-width: 180px; padding: 8px 10px; border-top: 1px solid var(--workspace-border-soft); text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .relation-table th { color: ${antdTokens.colorTextSecondary}; background: ${workspaceTokens.surfaceMuted}; font-weight: 600; }
-    .relation-table tbody tr:nth-child(even) { background: var(--workspace-surface-subtle); }
-    .relation-more { padding: 8px 10px; border-top: 1px solid var(--workspace-border-soft); color: var(--workspace-text-muted); font-size: 11px; }
+    .relation-toggle {
+      display: inline-flex; flex: 0 0 auto; align-items: center; justify-content: center;
+      width: 28px; height: 28px; border: 0; padding: 0; background: transparent;
+      color: var(--workspace-text-muted); cursor: pointer;
+    }
+    .relation-toggle:hover, .relation-toggle:focus-visible { color: var(--workspace-primary); outline: 0; }
+    .relation-heading-copy { display: grid; flex: 1 1 auto; min-width: 0; gap: 2px; }
+    .relation-title { overflow: hidden; color: var(--workspace-text); font-size: 14px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+    .relation-kind { overflow: hidden; color: var(--workspace-text-muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+    .relation-actions { display: flex; flex: 0 0 auto; align-items: center; justify-content: flex-end; gap: 8px; }
+    .relation-actions .ant-segmented { max-width: 100%; }
+    .relation-count.ant-tag { min-width: 24px; margin-inline-end: 0; text-align: center; }
+    .relation-empty { padding: 18px 14px 4px; color: var(--workspace-text-muted); font-size: 12px; text-align: center; }
+    .related-record-grid {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+      gap: 10px; padding: 10px 14px 0;
+    }
+    .related-record-card {
+      min-width: 0; border: 1px solid var(--workspace-border); border-radius: 8px; padding: 12px;
+      background: var(--workspace-surface); box-shadow: 0 6px 18px var(--workspace-shadow-soft);
+    }
+    .related-record-title {
+      overflow: hidden; color: var(--workspace-text); font-size: 14px; font-weight: 700;
+      text-overflow: ellipsis; white-space: nowrap;
+    }
+    .related-record-fields { display: grid; gap: 7px; margin-top: 10px; }
+    .related-record-field {
+      display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center;
+      gap: 2px 10px; min-width: 0;
+    }
+    .property-type-icon {
+      display: inline-flex; align-items: center; justify-content: center; border-radius: 999px;
+      background: ${antdTokens.colorPrimaryBg}; color: ${antdTokens.colorPrimary};
+    }
+    .related-record-field-icon { grid-row: 1 / span 2; width: 34px; min-height: 34px; }
+    .related-record-field-icon svg { width: 12px; height: 12px; }
+    .related-record-field > span:not(.property-type-icon) { color: var(--workspace-text-muted); font-size: 11px; }
+    .related-record-field strong {
+      overflow: hidden; color: var(--workspace-text); font-size: 13px; font-weight: 600;
+      text-overflow: ellipsis; white-space: nowrap;
+    }
+    .related-table-scroll { margin: 10px 14px 0; overflow-x: auto; }
+    .relation-table { width: max-content; min-width: 100%; border-collapse: separate; border-spacing: 0; font-size: 11px; }
+    .relation-table th { padding: 8px; border-bottom: 1px solid var(--workspace-border); background: var(--workspace-surface-muted); color: var(--workspace-text-secondary); font-weight: 700; text-align: left; white-space: nowrap; }
+    .relation-table td { min-width: 150px; max-width: 220px; padding: 8px; border-bottom: 1px solid var(--workspace-border-subtle); overflow: hidden; text-align: left; text-overflow: ellipsis; vertical-align: top; white-space: nowrap; }
+    .relation-table tr:last-child td { border-bottom: 0; }
+    .relation-pagination { display: flex; justify-content: center; padding: 12px 14px 0; }
     .workspace-date-picker-popup .ant-picker-panel-container { max-width: calc(100vw - 16px); }
     .drawer > footer { padding: 12px 24px 16px; border-top: 1px solid ${antdTokens.colorBorderSecondary}; background: ${antdTokens.colorBgContainer}; }
     .meta { margin-bottom: 9px; color: ${antdTokens.colorTextTertiary}; font-size: 11px; }
@@ -373,6 +425,10 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
       .drawer > main { padding: 16px 14px 24px; }
       .drawer > header, .drawer > footer { padding-inline: 16px; }
       .field { grid-template-columns: minmax(86px, 34%) minmax(0, 1fr); gap: 10px; }
+      .related-record-grid { grid-template-columns: minmax(0, 1fr); padding-inline: 12px; }
+      .relation-head { flex-wrap: wrap; padding-inline: 12px; }
+      .relation-heading-copy { min-width: calc(100% - 36px); }
+      .relation-actions { width: 100%; padding-left: 36px; justify-content: space-between; }
       .property-header, .property-body { padding-inline: 16px; }
       .property-grid { grid-template-columns: 1fr; gap: 0; }
       .workspace-date-picker-popup {
@@ -533,6 +589,18 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
     return (icons[type] || icons.text)();
   }
 
+  function typeLabel(type) {
+    return FIELD_TYPES.find((fieldType) => fieldType.value === type)?.label || "Texto";
+  }
+
+  function typeBadge(type, size = 14) {
+    return React.createElement(
+      "span",
+      { className: "header-type", "aria-label": typeLabel(type), title: typeLabel(type) },
+      typeIcon(type, size)
+    );
+  }
+
   function antdTree(child) {
     return React.createElement(
       StyleProvider,
@@ -551,7 +619,7 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
 
   function renderTypeIcon(button, type) {
     if (!button._iconRoot) button._iconRoot = createRoot(button);
-    flushSync(() => button._iconRoot.render(typeIcon(type)));
+    flushSync(() => button._iconRoot.render(typeBadge(type)));
   }
 
   function updateAntdControl(host, property, nextValue, refresh) {
@@ -1010,6 +1078,7 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
       version: 1,
       spreadsheetId: spreadsheetId(),
       sheets: {},
+      relationViews: {},
       updatedAt: Date.now()
     };
   }
@@ -1073,6 +1142,9 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
     const clean = createWorkspace();
     if (!workspace || typeof workspace !== "object") return clean;
     clean.updatedAt = Number(workspace.updatedAt || Date.now());
+    for (const [key, view] of Object.entries(workspace.relationViews || {})) {
+      if (view === "deck" || view === "table") clean.relationViews[String(key)] = view;
+    }
     for (const [gid, sheet] of Object.entries(workspace.sheets || {})) {
       if (!sheet || typeof sheet !== "object") continue;
       const columns = Array.isArray(sheet.columns)
@@ -1151,6 +1223,29 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
 
   function currentSheetConfiguration() {
     return state.workspace?.sheets?.[String(currentGid())] || null;
+  }
+
+  function sheetConfigurationByName(sheetName) {
+    const target = normalizedColumn(sheetName);
+    return Object.values(state.workspace?.sheets || {}).find((sheet) => normalizedColumn(sheet.name) === target) || null;
+  }
+
+  function relationViewKey(sheetName) {
+    return `${currentGid()}:${normalizedColumn(sheetName)}`;
+  }
+
+  function relationView(sheetName) {
+    return state.workspace?.relationViews?.[relationViewKey(sheetName)] === "table" ? "table" : "deck";
+  }
+
+  function setRelationView(sheetName, view) {
+    if (view !== "deck" && view !== "table") return;
+    if (!state.workspace) state.workspace = createWorkspace();
+    if (!state.workspace.relationViews) state.workspace.relationViews = {};
+    const key = relationViewKey(sheetName);
+    if (state.workspace.relationViews[key] === view) return;
+    state.workspace.relationViews[key] = view;
+    void writeWorkspace();
   }
 
   function propertyForColumn(index) {
@@ -1299,53 +1394,188 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
   function relationColumns(headers) {
     return headers
       .map((header, index) => ({ header, index }))
-      .filter(({ header }) => header.trim())
+      .filter(({ header }) => String(header || "").trim())
       .slice(0, 6);
   }
 
-  function renderRelation(relation) {
+  function displayRelationColumns(relation) {
+    return relationColumns(relation.headers).map((column, position) => ({
+      ...column,
+      propertyIndex: Number(relation.columnIndexes?.[position] ?? column.index)
+    }));
+  }
+
+  function relatedProperty(sheetName, column) {
+    return sheetConfigurationByName(sheetName)?.columns?.[column.propertyIndex]
+      || defaultProperty(column.propertyIndex, column.header);
+  }
+
+  function RelatedRecordCard({ relation, columns, row }) {
+    const titleColumn = columns[0];
+    const title = titleColumn ? String(row.cells[titleColumn.index] || "").trim() : "";
+    const previewColumns = columns.slice(1, 4).filter((column) => String(row.cells[column.index] || "").trim());
+    return React.createElement(
+      "div",
+      { className: "related-record-card" },
+      React.createElement(
+        "div",
+        { className: "related-record-title", title: title || `Fila ${row.number}`, "data-relation-cell": "" },
+        title || `Fila ${row.number}`
+      ),
+      previewColumns.length ? React.createElement(
+        "div",
+        { className: "related-record-fields" },
+        ...previewColumns.map((column) => {
+          const property = relatedProperty(relation.sheetName, column);
+          const value = String(row.cells[column.index] || "");
+          return React.createElement(
+            "div",
+            { className: "related-record-field", key: `${column.index}:${column.header}` },
+            React.createElement(
+              "span",
+              { className: "property-type-icon related-record-field-icon" },
+              typeBadge(property.type, 12)
+            ),
+            React.createElement("span", null, property.name || column.header),
+            React.createElement("strong", { title: value, "data-relation-cell": "" }, value)
+          );
+        })
+      ) : null
+    );
+  }
+
+  function RelatedRecordsTable({ relation, columns, rows }) {
+    return React.createElement(
+      "div",
+      { className: "related-table-scroll" },
+      React.createElement(
+        "table",
+        { className: "relation-table", "aria-label": `Registros relacionados de ${relation.sheetName}` },
+        React.createElement(
+          "thead",
+          null,
+          React.createElement(
+            "tr",
+            null,
+            ...columns.map((column) => React.createElement("th", { key: `${column.index}:${column.header}` }, column.header))
+          )
+        ),
+        React.createElement(
+          "tbody",
+          null,
+          ...rows.map((row, rowIndex) => React.createElement(
+            "tr",
+            { key: row.number || rowIndex },
+            ...columns.map((column) => {
+              const value = String(row.cells[column.index] || "");
+              return React.createElement(
+                "td",
+                { key: `${column.index}:${column.header}`, title: value, "data-relation-cell": "" },
+                value
+              );
+            })
+          ))
+        )
+      )
+    );
+  }
+
+  function RelationSection({ relation, initialView }) {
+    const [expanded, setExpanded] = React.useState(true);
+    const [view, setView] = React.useState(initialView);
+    const [page, setPage] = React.useState(1);
+    const columns = displayRelationColumns(relation);
+    const pageSize = view === "table" ? 10 : 4;
     const totalCount = relation.totalCount ?? relation.rows.length;
-    const article = element("article", "relation");
-    const heading = element("div", "relation-head");
-    const headingText = element("div");
-    const title = element("div", "relation-title", relation.sheetName);
-    const kind = element("div", "relation-kind", relation.description);
-    const count = element("div", "relation-count", String(totalCount));
-    headingText.append(title, kind);
-    heading.append(headingText, count);
-    article.appendChild(heading);
+    const availableCount = relation.rows.length;
+    const maxPage = Math.max(1, Math.ceil(availableCount / pageSize));
+    const currentPage = Math.min(page, maxPage);
+    const visibleRows = relation.rows.slice((currentPage - 1) * pageSize, currentPage * pageSize);
 
-    if (!totalCount) {
-      article.appendChild(element("div", "relation-empty", "No hay registros relacionados."));
-      ui.relatedList.appendChild(article);
-      return;
-    }
+    const changeView = (nextView) => {
+      setView(nextView);
+      setPage(1);
+      setRelationView(relation.sheetName, nextView);
+    };
 
-    const columns = relationColumns(relation.headers);
-    const wrapper = element("div", "relation-table");
-    const table = element("table");
-    const thead = element("thead");
-    const headerRow = element("tr");
-    for (const column of columns) headerRow.appendChild(element("th", "", column.header));
-    thead.appendChild(headerRow);
-    const tbody = element("tbody");
-    for (const row of relation.rows.slice(0, 20)) {
-      const tr = element("tr");
-      for (const column of columns) {
-        const value = row.cells[column.index] || "";
-        const td = element("td", "", value);
-        td.title = value;
-        tr.appendChild(td);
-      }
-      tbody.appendChild(tr);
-    }
-    table.append(thead, tbody);
-    wrapper.appendChild(table);
-    article.appendChild(wrapper);
-    if (totalCount > 20) {
-      article.appendChild(element("div", "relation-more", `Y ${totalCount - 20} registro(s) más.`));
-    }
-    ui.relatedList.appendChild(article);
+    return React.createElement(
+      "section",
+      { className: "relation record-section-card relation-section-card", "data-relation-view": view },
+      React.createElement(
+        "div",
+        { className: "relation-head record-section-header" },
+        React.createElement(
+          "button",
+          {
+            className: "relation-toggle record-section-toggle",
+            type: "button",
+            "aria-label": expanded ? "Colapsar relacionados" : "Expandir relacionados",
+            "aria-expanded": expanded,
+            onClick: () => setExpanded((current) => !current)
+          },
+          React.createElement(expanded ? DownOutlined : RightOutlined)
+        ),
+        React.createElement(
+          "div",
+          { className: "relation-heading-copy record-section-title" },
+          React.createElement("div", { className: "relation-title" }, relation.sheetName),
+          React.createElement("div", { className: "relation-kind", title: relation.description }, relation.description)
+        ),
+        React.createElement(
+          "div",
+          { className: "relation-actions relation-section-actions" },
+          React.createElement(Segmented, {
+            size: "small",
+            value: view,
+            onChange: changeView,
+            options: [
+              { value: "deck", icon: React.createElement(AppstoreOutlined), label: "Deck" },
+              { value: "table", icon: React.createElement(TableOutlined), label: "Tabla" }
+            ]
+          }),
+          React.createElement(Tag, { className: "relation-count" }, String(totalCount))
+        )
+      ),
+      expanded && !totalCount
+        ? React.createElement("div", { className: "relation-empty" }, "No hay registros relacionados.")
+        : null,
+      expanded && totalCount && view === "table"
+        ? React.createElement(RelatedRecordsTable, { relation, columns, rows: visibleRows })
+        : null,
+      expanded && totalCount && view === "deck"
+        ? React.createElement(
+          "div",
+          { className: "related-record-grid" },
+          ...visibleRows.map((row, rowIndex) => React.createElement(RelatedRecordCard, {
+            relation,
+            columns,
+            row,
+            key: row.number || rowIndex
+          }))
+        )
+        : null,
+      expanded && availableCount > pageSize
+        ? React.createElement(Pagination, {
+          className: "relation-pagination record-section-pagination",
+          current: currentPage,
+          pageSize,
+          total: availableCount,
+          showSizeChanger: false,
+          size: "small",
+          onChange: setPage
+        })
+        : null
+    );
+  }
+
+  function renderRelation(relation) {
+    const relationHost = element("div", "relation-host");
+    relationHost._reactRoot = createRoot(relationHost);
+    ui.relatedList.appendChild(relationHost);
+    flushSync(() => relationHost._reactRoot.render(antdTree(React.createElement(RelationSection, {
+      relation,
+      initialView: relationView(relation.sheetName)
+    }))));
   }
 
   function storedRelations(relations) {
@@ -1355,6 +1585,7 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
         sheetName: relation.sheetName,
         description: relation.description,
         headers: columns.map((column) => column.header),
+        columnIndexes: columns.map((column, position) => Number(relation.columnIndexes?.[position] ?? column.index)),
         totalCount: relation.totalCount ?? relation.rows.length,
         rows: relation.rows.slice(0, 50).map((row) => ({
           number: row.number,
@@ -1367,12 +1598,20 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
   function showRelations(relations) {
     const signature = JSON.stringify(storedRelations(relations));
     if (ui.relatedList.dataset.signature === signature) return;
+    unmountRelations();
     ui.relatedList.replaceChildren();
     for (const relation of relations) renderRelation(relation);
     ui.relatedList.dataset.signature = signature;
   }
 
+  function unmountRelations() {
+    for (const relationHost of ui.relatedList.querySelectorAll(":scope > .relation-host")) {
+      relationHost._reactRoot?.unmount();
+    }
+  }
+
   function clearRelations() {
+    unmountRelations();
     ui.relatedList.replaceChildren();
     delete ui.relatedList.dataset.signature;
   }
@@ -1809,18 +2048,28 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
       let heading = wrapper?.querySelector(":scope > .field-label");
       let title = heading?.querySelector(".field-label-text");
       let configure = heading?.querySelector(".field-configure");
+      let labelCopy = heading?.querySelector(".field-label-copy");
+      let typeName = heading?.querySelector(".field-type-name");
       let editor = wrapper?.querySelector(":scope > .field-editor");
 
-      if (!wrapper?.classList.contains("field") || !heading || !title || !configure || !editor) {
+      if (!wrapper?.classList.contains("field") || !heading || !title || !configure || !labelCopy || !typeName || !editor) {
+        const previousControl = editor?.querySelector("[data-column]");
+        if (previousControl?._reactRoot) flushSync(() => previousControl._reactRoot.unmount());
+        if (configure?._iconRoot) flushSync(() => configure._iconRoot.unmount());
         wrapper = wrapper || element("div");
         wrapper.className = "field";
         wrapper.replaceChildren();
         heading = element("div", "field-label");
-        title = element("span", "field-label-text");
-        configure = element("button", "field-configure");
+        configure = element("button", "field-configure property-type-icon");
         configure.type = "button";
         configure.addEventListener("click", () => openPropertyEditor(Number(configure.dataset.configureColumn) - 1));
-        heading.append(title, configure);
+        labelCopy = element("div", "field-label-copy");
+        title = element("button", "field-label-text");
+        title.type = "button";
+        title.addEventListener("click", () => openPropertyEditor(Number(configure.dataset.configureColumn) - 1));
+        typeName = element("small", "field-type-name");
+        labelCopy.append(title, typeName);
+        heading.append(configure, labelCopy);
         editor = element("div", "field-editor");
         wrapper.append(heading, editor);
         if (!existing[index]) ui.fields.appendChild(wrapper);
@@ -1828,6 +2077,7 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
 
       title.textContent = property.name || sourceLabel;
       title.title = property.name || sourceLabel;
+      typeName.textContent = property.type;
       configure.dataset.configureColumn = String(index + 1);
       configure.title = `Configurar ${property.name || sourceLabel}`;
       configure.setAttribute("aria-label", `Configurar ${property.name || sourceLabel}`);
