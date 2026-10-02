@@ -100,7 +100,7 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
   const MAX_COLUMN = "ZZ";
   const POLL_MS = 250;
   const CODEX_BRIDGE_POLL_MS = 1_500;
-  const CACHE_PREFIX = "srd:v1";
+  const CACHE_PREFIX = "srd:v2";
   const CACHE_INDEX_KEY = `${CACHE_PREFIX}:index`;
   const WORKSPACE_PREFIX = "srd:workspace:v1";
   const MAX_PERSISTENT_ENTRIES = 120;
@@ -156,6 +156,9 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
     propertyColumn: null,
     pendingWrites: new Map(),
     sheetViewWrites: new Map(),
+    sheetViewMutationQueue: [],
+    sheetViewMutationTimer: null,
+    sheetViewMutationRunning: false,
     relations: [],
     relatedDrafts: new Map(),
     relatedDraftListeners: new Set(),
@@ -1010,7 +1013,7 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
     );
   }
 
-  function KanbanColumn({ activeRowNumber, columns, dragOverGroup, group, groupRows, movingRow, onOpenRow, statusColumn, suppressOpenRef, titleColumn, visibleRows }) {
+  function KanbanColumn({ activeRowNumber, columns, dragOverGroup, group, groupRows, movingRows, onOpenRow, statusColumn, suppressOpenRef, titleColumn, visibleRows }) {
     const { setNodeRef, isOver } = useDroppable({
       id: kanbanGroupDropId(group.id),
       data: { type: "group", groupId: group.id }
@@ -1044,7 +1047,7 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
             columns,
             groupId: group.id,
             key: row.number,
-            moving: movingRow === row.number,
+            moving: movingRows.includes(row.number),
             onOpenRow,
             row,
             statusColumn,
@@ -1056,7 +1059,7 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
     );
   }
 
-  function SheetKanban({ table, columns, initialColumnId, movingRow, onColumnChange, onMoveRow, onOpenRow }) {
+  function SheetKanban({ table, columns, initialColumnId, movingRows, onColumnChange, onMoveRow, onOpenRow }) {
     const statusColumns = columns.filter((column) => column.type === "status");
     const [columnId, setColumnId] = React.useState(() => (
       statusColumns.some((column) => column.id === initialColumnId) ? initialColumnId : statusColumns[0]?.id || ""
@@ -1201,7 +1204,7 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
               group,
               groupRows,
               key: group.id,
-              movingRow,
+              movingRows,
               onOpenRow,
               statusColumn,
               suppressOpenRef,
@@ -1360,7 +1363,8 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
     const [table, setTable] = React.useState(null);
     const [loading, setLoading] = React.useState(false);
     const [error, setError] = React.useState("");
-    const [movingRow, setMovingRow] = React.useState(null);
+    const [movingRows, setMovingRows] = React.useState([]);
+    const movingRowsRef = React.useRef(new Set());
     const [kanbanExpanded, setKanbanExpanded] = React.useState(() => settings.kanbanExpanded === true);
     const activeSheetKey = React.useRef(sheetKey);
     activeSheetKey.current = sheetKey;
@@ -1371,7 +1375,8 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
       setView("");
       setTable(null);
       setError("");
-      setMovingRow(null);
+      movingRowsRef.current.clear();
+      setMovingRows([]);
       setKanbanExpanded(settings.kanbanExpanded === true);
     }, [sheetKey]);
 
@@ -1431,13 +1436,14 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
     };
 
     const moveRow = async (row, property, nextValue) => {
-      if (movingRow !== null) return;
+      if (movingRowsRef.current.has(row.number)) return;
       if (collectPendingChanges().length || state.relatedDrafts.size) {
         setError("Guarda o cancela los cambios pendientes antes de mover una ficha.");
         return;
       }
       const previousValue = String(row.cells[property.index] || "");
-      setMovingRow(row.number);
+      movingRowsRef.current.add(row.number);
+      setMovingRows([...movingRowsRef.current]);
       setError("");
       setTable((current) => ({
         ...current,
@@ -1469,7 +1475,8 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
         }));
         setError(writeError.message);
       } finally {
-        setMovingRow(null);
+        movingRowsRef.current.delete(row.number);
+        setMovingRows([...movingRowsRef.current]);
       }
     };
 
@@ -1482,7 +1489,7 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
             table,
             columns,
             initialColumnId: settings.kanbanColumnId,
-            movingRow,
+            movingRows,
             onColumnChange: (columnId) => setCurrentSheetViewSetting("kanbanColumnId", columnId),
             onMoveRow: moveRow,
             onOpenRow: openRow
@@ -2254,8 +2261,27 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
     return currentSheetConfiguration()?.columns?.[index] || defaultProperty(index, state.fields[index] || "");
   }
 
+  function currentSourceLabels() {
+    const columns = currentSheetConfiguration()?.columns || [];
+    return state.fields.map((label, index) => String(columns[index]?.sourceHeader ?? label));
+  }
+
   function sameValues(left, right) {
     return JSON.stringify(left) === JSON.stringify(right);
+  }
+
+  function usedCellWidth(...rows) {
+    let width = 0;
+    for (const cells of rows) {
+      for (let index = 0; index < (cells?.length || 0); index += 1) {
+        if (String(cells[index] ?? "").trim()) width = Math.max(width, index + 1);
+      }
+    }
+    return width;
+  }
+
+  function fitCells(cells, width) {
+    return Array.from({ length: width }, (_, index) => String(cells?.[index] ?? ""));
   }
 
   function syncSaveState() {
@@ -3038,7 +3064,8 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
     const key = `${spreadsheetId()}:${currentGid()}`;
     if (!force && state.headerCache.has(key)) return state.headerCache.get(key);
     const rows = await readRange(`A1:${MAX_COLUMN}1`, signal);
-    const labels = rows.find((row) => row.number === 1)?.cells || [];
+    const rawLabels = rows.find((row) => row.number === 1)?.cells || [];
+    const labels = fitCells(rawLabels, usedCellWidth(rawLabels));
     state.headerCache.set(key, labels);
     return labels;
   }
@@ -3262,10 +3289,11 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
   }
 
   function applyRowData(labels, values, row, signal, drafts = []) {
-    const width = Math.max(labels.length, values.length);
-    state.values = Array.from({ length: width }, (_, index) => values[index] || "");
-    state.fields = Array.from({ length: width }, (_, index) => labels[index] || `Columna ${columnName(index + 1)}`);
-    reconcileSheetConfiguration(currentGid(), activeSheetName() || `Hoja ${currentGid()}`, state.fields);
+    const width = usedCellWidth(labels, values);
+    const sourceLabels = fitCells(labels, width);
+    state.values = fitCells(values, width);
+    state.fields = sourceLabels.map((label, index) => label || `Columna ${columnName(index + 1)}`);
+    reconcileSheetConfiguration(currentGid(), activeSheetName() || `Hoja ${currentGid()}`, sourceLabels);
     renderSheetViewActions();
     setEmptyState(false);
     renderFields(new Map(drafts.map((draft) => [draft.index, draft.value])));
@@ -3275,7 +3303,7 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
     ui.fields.inert = false;
     ui.fields.removeAttribute("aria-busy");
     syncPendingActions();
-    startRelationships(labels, state.values, signal);
+    startRelationships(sourceLabels, state.values, signal);
   }
 
   function clearRenderedFields() {
@@ -3299,9 +3327,11 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
     state.relationRequest?.abort();
     state.relationRequest = null;
     setActivity("relations", false);
-    state.fields = [...labels];
-    state.values = Array.from({ length: labels.length }, () => "");
-    reconcileSheetConfiguration(currentGid(), activeSheetName() || `Hoja ${currentGid()}`, state.fields);
+    const width = usedCellWidth(labels);
+    const sourceLabels = fitCells(labels, width);
+    state.fields = sourceLabels.map((label, index) => label || `Columna ${columnName(index + 1)}`);
+    state.values = Array.from({ length: width }, () => "");
+    reconcileSheetConfiguration(currentGid(), activeSheetName() || `Hoja ${currentGid()}`, sourceLabels);
     renderSheetViewActions();
     state.viewRow = row;
     state.viewGid = currentGid();
@@ -3370,12 +3400,13 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
         setStatus(`Fila ${row} vacía`, "empty");
         return;
       }
-      const width = Math.max(labels.length, values.length, cached?.values?.length || 0);
-      const freshValues = Array.from({ length: width }, (_, index) => values[index] || "");
-      const freshLabels = Array.from({ length: width }, (_, index) => labels[index] || "");
       const cachedPendingChanges = Array.isArray(cached?.pendingChanges) ? cached.pendingChanges : [];
       const pendingSince = Number(cached?.pendingSince || cached?.updatedAt || 0);
       const pendingChanges = Date.now() - pendingSince < 20_000 ? cachedPendingChanges : [];
+      const pendingWidth = pendingChanges.reduce((width, change) => Math.max(width, Number(change.index) + 1 || 0), 0);
+      const width = Math.max(usedCellWidth(labels, values), pendingWidth);
+      const freshValues = fitCells(values, width);
+      const freshLabels = fitCells(labels, width);
       const pendingByIndex = new Map(pendingChanges.map((change) => [change.index, change]));
       const pendingConfirmed = pendingChanges.length > 0 && pendingChanges.every(({ index, value }) =>
         valuesEqualForProperty(freshValues[index], value, propertyForColumn(index))
@@ -3716,7 +3747,7 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
       const timeout = setTimeout(() => {
         window.removeEventListener("message", receive);
         reject(new Error("Sheets no respondió al intentar abrir la fila"));
-      }, 4_000);
+      }, 12_000);
 
       function receive(event) {
         const message = event.data;
@@ -3743,7 +3774,7 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
       const timeout = setTimeout(() => {
         window.removeEventListener("message", receive);
         reject(new Error("Sheets no respondió al intento de escritura"));
-      }, Math.max(4_000, operations.length * 700 + 2_000));
+      }, Math.max(8_000, operations.length * 700 + 5_000));
 
       function receive(event) {
         const message = event.data;
@@ -3772,34 +3803,45 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
   }
 
   function hasPendingWriteVerification() {
-    return state.pendingWrites.size > 0 || state.sheetViewWrites.size > 0;
+    return state.pendingWrites.size > 0
+      || state.sheetViewWrites.size > 0
+      || state.sheetViewMutationRunning
+      || state.sheetViewMutationQueue.length > 0;
+  }
+
+  function syncSheetViewMutationState() {
+    const active = state.sheetViewMutationRunning
+      || state.sheetViewMutationQueue.length > 0
+      || state.sheetViewWrites.size > 0;
+    setActivity("viewWrites", active);
+    if (active) host.dataset.writeVerification = "pending";
   }
 
   async function verifySheetViewWrite(entry) {
     let verificationError = null;
     try {
-      for (const delay of [600, 1_200, 2_200, 4_000]) {
+      for (const delay of [500, 1_000, 2_000, 4_000, 8_000]) {
         await wait(delay);
         if (entry.controller.signal.aborted || state.sheetViewWrites.get(entry.key) !== entry) return;
         try {
-          const rows = await readRange(`A${entry.row}:${MAX_COLUMN}${entry.row}`, entry.controller.signal, entry.gid);
-          const values = rows.find((row) => row.number === entry.row)?.cells || [];
+          const values = await readNamedSheetRow(entry.sheetName, entry.row, entry.controller.signal);
           if (!valuesEqualForProperty(values[entry.property.index], entry.value, entry.property)) continue;
           state.sheetViewWrites.delete(entry.key);
           state.sheetCache.clear();
           if (state.gid === entry.gid && state.row === entry.row) {
             const confirmedValues = Array.from(
-              { length: Math.max(state.fields.length, values.length) },
+              { length: Math.max(state.fields.length, usedCellWidth(values)) },
               (_, index) => index === entry.property.index ? entry.value : String(values[index] ?? state.values[index] ?? "")
             );
             state.values = confirmedValues;
             void writePersistentCache(cacheKey("row", entry.gid, entry.row), {
-              labels: [...state.fields],
+              labels: currentSourceLabels(),
               values: confirmedValues,
               updatedAt: Date.now()
             });
           }
           host.dataset.writeVerification = hasPendingWriteVerification() ? "pending" : "verified";
+          syncSheetViewMutationState();
           return;
         } catch (error) {
           if (error.name === "AbortError") return;
@@ -3818,7 +3860,7 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
         ));
         state.values[entry.property.index] = entry.previousValue;
         void writePersistentCache(cacheKey("row", entry.gid, entry.row), {
-          labels: [...state.fields],
+          labels: currentSourceLabels(),
           values: [...state.values],
           updatedAt: Date.now()
         });
@@ -3829,60 +3871,128 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
       setStatus(message, "error");
       entry.onRevert?.();
       entry.onError?.(message);
+      syncSheetViewMutationState();
     } finally {
       if (state.sheetViewWrites.get(entry.key) === entry && entry.controller.signal.aborted) {
         state.sheetViewWrites.delete(entry.key);
+        syncSheetViewMutationState();
       }
     }
   }
 
-  async function writeSheetViewValue(row, property, value, previousValue, callbacks = {}) {
-    if (state.saving) throw new Error("Espera a que termine el guardado actual");
+  function registerSheetViewWrite(task) {
+    const key = `sheet-view:${task.gid}:${task.row}:${task.property.index}`;
+    state.sheetViewWrites.get(key)?.controller.abort();
+    const entry = {
+      key,
+      gid: task.gid,
+      sheetName: task.sheetName,
+      row: task.row,
+      property: task.property,
+      value: task.value,
+      previousValue: task.previousValue,
+      controller: new AbortController(),
+      onRevert: task.callbacks.onRevert,
+      onError: task.callbacks.onError
+    };
+    state.sheetViewWrites.set(key, entry);
+    state.sheetCache.clear();
+    if (state.gid === entry.gid && state.row === entry.row) {
+      state.values[entry.property.index] = entry.value;
+      void writePersistentCache(cacheKey("row", entry.gid, entry.row), {
+        labels: currentSourceLabels(),
+        values: [...state.values],
+        updatedAt: Date.now(),
+        pendingChanges: [{ index: entry.property.index, value: entry.value }],
+        pendingSince: Date.now()
+      });
+      renderFields();
+    }
+    void verifySheetViewWrite(entry);
+  }
+
+  function sheetViewBatchOperations(tasks) {
+    const groups = new Map();
+    for (const task of tasks) {
+      const key = `${task.gid}:${encodeURIComponent(task.sheetName)}:${task.property.index}`;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(task);
+    }
+
+    const operations = [];
+    for (const group of groups.values()) {
+      group.sort((left, right) => left.row - right.row);
+      let run = [];
+      const flushRun = () => {
+        if (!run.length) return;
+        operations.push({
+          reference: qualifiedReference(
+            run[0].sheetName,
+            `${columnName(run[0].property.index + 1)}${run[0].row}`
+          ),
+          rows: run.map((task) => [task.value])
+        });
+        run = [];
+      };
+      for (const task of group) {
+        const previous = run[run.length - 1];
+        if (previous && task.row !== previous.row + 1) flushRun();
+        run.push(task);
+      }
+      flushRun();
+    }
+    return operations;
+  }
+
+  function scheduleSheetViewMutationFlush(delay = 500) {
+    if (state.sheetViewMutationRunning || state.sheetViewMutationTimer) return;
+    state.sheetViewMutationTimer = setTimeout(() => {
+      state.sheetViewMutationTimer = null;
+      void flushSheetViewMutations();
+    }, delay);
+  }
+
+  async function flushSheetViewMutations() {
+    if (state.sheetViewMutationRunning || !state.sheetViewMutationQueue.length) return;
+    state.sheetViewMutationRunning = true;
+    const tasks = state.sheetViewMutationQueue.splice(0);
+    syncSheetViewMutationState();
+    try {
+      await writeRanges(sheetViewBatchOperations(tasks), tasks[0].restoreReference);
+      for (const task of tasks) {
+        registerSheetViewWrite(task);
+        task.resolve();
+      }
+    } catch (error) {
+      for (const task of tasks) task.reject(error);
+    } finally {
+      state.sheetViewMutationRunning = false;
+      syncSheetViewMutationState();
+      syncPendingActions();
+      if (state.sheetViewMutationQueue.length) scheduleSheetViewMutationFlush(0);
+    }
+  }
+
+  function writeSheetViewValue(row, property, value, previousValue, callbacks = {}) {
     const gid = currentGid();
     const sheetName = activeSheetName() || state.sheetName || `Hoja ${gid}`;
     const selectedReference = nameBoxValue().split("!").pop() || `A${state.row || row}`;
-    const restoreReference = qualifiedReference(sheetName, selectedReference);
-    state.saving = true;
-    syncSaveState();
-    try {
-      await writeRanges([{
-        reference: qualifiedReference(sheetName, `${columnName(property.index + 1)}${row}`),
-        values: [value]
-      }], restoreReference);
-      const key = `sheet-view:${gid}:${row}:${property.index}`;
-      state.sheetViewWrites.get(key)?.controller.abort();
-      const entry = {
-        key,
+    return new Promise((resolve, reject) => {
+      state.sheetViewMutationQueue.push({
         gid,
+        sheetName,
         row,
         property,
         value: String(value ?? ""),
         previousValue: String(previousValue ?? ""),
-        controller: new AbortController(),
-        onRevert: callbacks.onRevert,
-        onError: callbacks.onError
-      };
-      state.sheetViewWrites.set(key, entry);
-      state.sheetCache.clear();
-      host.dataset.writeVerification = "pending";
-      if (state.gid === gid && state.row === row) {
-        state.values[property.index] = entry.value;
-        const writtenCells = [{ index: property.index, value: entry.value }];
-        void writePersistentCache(cacheKey("row", gid, row), {
-          labels: [...state.fields],
-          values: [...state.values],
-          updatedAt: Date.now(),
-          pendingChanges: writtenCells,
-          pendingSince: Date.now()
-        });
-        renderFields();
-      }
-      void verifySheetViewWrite(entry);
-    } finally {
-      state.saving = false;
-      syncSaveState();
-      syncPendingActions();
-    }
+        callbacks,
+        restoreReference: qualifiedReference(sheetName, selectedReference),
+        resolve,
+        reject
+      });
+      syncSheetViewMutationState();
+      scheduleSheetViewMutationFlush();
+    });
   }
 
   async function verifyPendingWrite(entry) {
@@ -3895,7 +4005,7 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
         try {
           const rows = await readRange(`A${entry.row}:${MAX_COLUMN}${entry.row}`, entry.controller.signal, entry.gid);
           const values = rows.find((item) => item.number === entry.row)?.cells || [];
-          const width = Math.max(entry.labels.length, values.length);
+          const width = Math.max(entry.labels.length, usedCellWidth(values));
           const freshValues = Array.from({ length: width }, (_, index) => values[index] || "");
           const verified = entry.writtenCells.every(({ index, value }) =>
             valuesEqualForProperty(freshValues[index], value, entry.properties[index])
@@ -4131,7 +4241,7 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
     return {
       gid: state.gid,
       row: state.row,
-      labels: [...state.fields],
+      labels: currentSourceLabels(),
       properties,
       changes,
       firstChanged,

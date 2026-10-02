@@ -7,6 +7,13 @@
 
   const SOURCE = "sheets-row-drawer";
   const wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+  let interactionQueue = Promise.resolve();
+
+  function enqueueInteraction(task) {
+    const queued = interactionQueue.then(task, task);
+    interactionQueue = queued.catch(() => {});
+    return queued;
+  }
 
   function focusCell(reference) {
     const box = document.getElementById("t-name-box");
@@ -46,8 +53,10 @@
 
     if (message?.type === "focus-range") {
       try {
-        focusCell(String(message.reference || ""));
-        await wait(180);
+        await enqueueInteraction(async () => {
+          focusCell(String(message.reference || ""));
+          await wait(180);
+        });
         window.postMessage({ source: SOURCE, type: "focus-result", requestId: message.requestId, ok: true }, location.origin);
       } catch (error) {
         window.postMessage({
@@ -64,20 +73,22 @@
     if (message?.type !== "write-range") return;
 
     try {
-      const operations = Array.isArray(message.operations) && message.operations.length
-        ? message.operations
-        : [{ reference: message.reference, tsv: message.tsv }];
-      for (const operation of operations) {
-        focusCell(operation.reference);
-        await wait(120);
-        if (operation.action === "clear") clearSelection();
-        else paste(String(operation.tsv ?? ""));
-        await wait(180);
-      }
-      if (message.restoreReference) {
-        focusCell(message.restoreReference);
-        await wait(180);
-      }
+      await enqueueInteraction(async () => {
+        const operations = Array.isArray(message.operations) && message.operations.length
+          ? message.operations
+          : [{ reference: message.reference, tsv: message.tsv }];
+        for (const operation of operations) {
+          focusCell(operation.reference);
+          await wait(120);
+          if (operation.action === "clear") clearSelection();
+          else paste(String(operation.tsv ?? ""));
+          await wait(180);
+        }
+        if (message.restoreReference) {
+          focusCell(message.restoreReference);
+          await wait(180);
+        }
+      });
       window.postMessage({ source: SOURCE, type: "write-result", requestId: message.requestId, ok: true }, location.origin);
     } catch (error) {
       window.postMessage({

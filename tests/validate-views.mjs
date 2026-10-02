@@ -15,11 +15,11 @@ if (!chrome) throw new Error("No se encontro Google Chrome");
 const extensionDir = path.resolve(import.meta.dirname, "..");
 const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 const sheet = {
-  headers: ["ID Contacto", "Nombre", "Estado", "Fecha"],
+  headers: ["ID Contacto", "Nombre", "Estado", "Fecha", "", ""],
   rows: [
-    ["1", "Ana", "Nuevo", "02/10/2026"],
-    ["2", "Luis", "En proceso", "15/10/2026"],
-    ["3", "Mia", "", "02/11/2026"]
+    ["1", "Ana", "Nuevo", "02/10/2026", "", ""],
+    ["2", "Luis", "En proceso", "15/10/2026", "", ""],
+    ["3", "Mia", "", "02/11/2026", "", ""]
   ]
 };
 
@@ -286,7 +286,7 @@ try {
     return {
       startX: frameRect.left + start.left + start.width / 2,
       startY: frameRect.top + start.top + start.height / 2,
-      endX: frameRect.left + end.left + end.width / 2,
+      endX: frameRect.left + end.left + Math.min(44, end.width / 2),
       endY: frameRect.top + end.top + Math.min(120, end.height / 2),
       frameLeft: frameRect.left,
       frameWidth: frameRect.width,
@@ -325,6 +325,36 @@ try {
   await cdp.command("Input.dispatchMouseEvent", {
     type: "mouseReleased", x: dragPoint.endX, y: dragPoint.endY, button: "left", buttons: 0, clickCount: 1
   });
+  await delay(250);
+  const secondDrag = await cdp.evaluate(`(() => {
+    const frame = document.getElementById("sheets-session-probe").shadowRoot.querySelector(".panel-frame");
+    const frameRect = frame.getBoundingClientRect();
+    const panel = frame.contentDocument;
+    const card = panel.querySelector('.kanban-card-shell[data-sheet-row="3"]');
+    const target = Array.from(panel.querySelectorAll("[data-kanban-group]")).find(group => group.dataset.kanbanGroup === "Nuevo");
+    const start = card.getBoundingClientRect();
+    const end = target.getBoundingClientRect();
+    return {
+      startX: frameRect.left + start.left + Math.min(34, start.width / 2),
+      startY: frameRect.top + start.top + start.height / 2,
+      endX: frameRect.left + end.left + Math.min(44, end.width / 2),
+      endY: frameRect.top + end.top + Math.min(120, end.height / 2)
+    };
+  })()`);
+  await cdp.command("Input.dispatchMouseEvent", {
+    type: "mousePressed", x: secondDrag.startX, y: secondDrag.startY, button: "left", buttons: 1, clickCount: 1
+  });
+  await cdp.command("Input.dispatchMouseEvent", {
+    type: "mouseMoved", x: secondDrag.startX - 12, y: secondDrag.startY + 4, button: "left", buttons: 1
+  });
+  await delay(35);
+  await cdp.command("Input.dispatchMouseEvent", {
+    type: "mouseMoved", x: secondDrag.endX, y: secondDrag.endY, button: "left", buttons: 1
+  });
+  await delay(35);
+  await cdp.command("Input.dispatchMouseEvent", {
+    type: "mouseReleased", x: secondDrag.endX, y: secondDrag.endY, button: "left", buttons: 0, clickCount: 1
+  });
   const pasteDeadline = Date.now() + 4_000;
   let paste;
   while (Date.now() < pasteDeadline) {
@@ -332,10 +362,11 @@ try {
     if (paste) break;
     await delay(50);
   }
-  if (!paste?.reference.endsWith("!C2") || paste.value !== "En proceso") {
-    throw new Error(`Kanban no escribio solo el Estado: ${JSON.stringify(paste)}`);
+  if (!paste?.reference.endsWith("!C2") || paste.value !== "En proceso\nNuevo") {
+    throw new Error(`Kanban no agrupo verticalmente los cambios rapidos de Estado: ${JSON.stringify(paste)}`);
   }
   sheet.rows[0][2] = "En proceso";
+  sheet.rows[1][2] = "Nuevo";
   const verificationDeadline = Date.now() + 6_000;
   while (Date.now() < verificationDeadline) {
     const verification = await cdp.evaluate('document.getElementById("sheets-session-probe").dataset.writeVerification');
@@ -356,6 +387,7 @@ try {
     throw new Error(`La tarjeta no abrio su fila: ${JSON.stringify(selected)}`);
   }
 
+  await delay(250);
   await cdp.evaluate(panelExpression('panel.querySelector("[data-sheet-view=calendar]").click();'));
   const calendarDeadline = Date.now() + 5_000;
   let calendar;
@@ -387,7 +419,7 @@ try {
     throw new Error(`El evento no abrio su fila: ${JSON.stringify(selected)}`);
   }
 
-  console.log("VISTAS_OK: condiciones, Kanban, arrastre, Calendario y apertura de filas confirmados.");
+  console.log("VISTAS_OK: columnas terminales, Kanban, lote vertical, arrastre, Calendario y apertura de filas confirmados.");
 } finally {
   cdp?.close();
   if (browser.pid) spawnSync("taskkill", ["/PID", String(browser.pid), "/T", "/F"], { stdio: "ignore", windowsHide: true });

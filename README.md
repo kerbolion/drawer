@@ -13,6 +13,7 @@ La interfaz usa Ant Design `5.29.3`, la misma versión instalada en `workspace-a
 - Muestra accesos de **Kanban** y **Calendario** en el encabezado cuando la hoja tiene columnas configuradas como Estado y Fecha.
 - Kanban coloca primero los registros sin Estado, permite buscar y arrastrar la ficha completa entre columnas con una previsualización animada; cada movimiento escribe únicamente la celda de Estado y se verifica en segundo plano.
 - El drawer de Kanban puede ampliarse a todo el ancho de la hoja y recuerda esa preferencia para el documento.
+- Los cambios rápidos de Estado se agrupan por columna y por filas consecutivas para pegarlos como un bloque vertical, mientras las demás interacciones con Sheets esperan en una sola cola.
 - Calendario permite elegir la columna de Fecha, navegar por mes y abrir la fila asociada desde cada evento.
 - Abre cada tarjeta Deck en un segundo drawer de Ant Design, igual que Workspace; en equipos de escritorio se abre con doble clic y en dispositivos táctiles con un toque.
 - Permite editar los relacionados directamente en las celdas de la vista Tabla o desde su drawer usando los mismos controles tipados del formulario principal.
@@ -31,6 +32,7 @@ La interfaz usa Ant Design `5.29.3`, la misma versión instalada en `workspace-a
 - Guarda solamente el rango horizontal mínimo que contiene los campos modificados mediante un único pegado TSV de Sheets; la confirmación remota continúa en segundo plano.
 - Mantiene el desplazamiento horizontal dentro de cada tabla relacionada para que el drawer conserve su ancho.
 - Verifica el guardado volviendo a leer la fila.
+- Descarta las celdas vacías terminales que devuelve `A:ZZ`, evitando propiedades fantasma después de borrar una columna.
 - No usa Google Sheets API, claves, OAuth propio, Apps Script ni el portapapeles del sistema.
 
 ## Probar
