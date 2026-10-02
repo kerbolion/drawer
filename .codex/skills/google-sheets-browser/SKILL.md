@@ -34,6 +34,20 @@ Use `inspect` only for a small range in the active sheet when a displayed value 
 
 `write` uses one synthetic TSV paste and verifies the resulting range through the authenticated HTML view. `clear` removes cell contents while preserving the rows, columns, and formatting. Inspect the returned `verified` field and report a verification failure instead of assuming success.
 
+## Limitations
+
+- The spreadsheet must remain open and responsive in a Chromium browser with the unpacked extension loaded. The active Google session must already have access to the document and edit permission for mutations.
+- The bridge is local to the computer at `127.0.0.1:17373`. It accepts one command at a time; a second command fails while the port is occupied. The default command timeout is 30 seconds and can be changed with `--timeout`.
+- Supported operations are `info`, `read`, `inspect`, `write`, and `clear`. There are no dedicated operations for formatting, validation rules, comments, protected ranges, charts, filters, or creating, deleting, renaming, or moving sheets, rows, and columns.
+- Ranges must use A1 notation with one or two column letters (`A` through `ZZ`) and positive row numbers. Whole-column ranges, named ranges, disjoint ranges, and R1C1 notation are not accepted.
+- `write` requires a non-empty rectangular JSON matrix and a single starting cell. `clear` removes cell contents but preserves formatting and data validation.
+- `read` returns displayed values rather than guaranteed underlying formulas. A completely empty range can produce no rows, so do not infer that a blank result contains records.
+- `inspect` works only on the active sheet and accepts at most 100 cells. It exposes sanitized cell HTML and available Visualization metadata, which may still omit internal Sheets state.
+- Bridge request and result bodies are limited to 1 MiB. Prefer bounded reads and split large data operations into sequential ranges.
+- Writes depend on Sheets UI events and are verified after the paste or clear. They are not transactional and have no automatic rollback; treat `verified: false`, a timeout, or a changed selection as an uncertain result and read the target range before retrying.
+- `info` discovers the sheet tabs visible in the current document UI. Hidden sheets or tabs that Google has not rendered may not be listed.
+- The bridge does not use Google APIs, service accounts, additional OAuth, or browser-cookie extraction. It cannot operate when the browser session is signed out, offline, blocked by a permission dialog, or unable to load the sheet.
+
 An explicit request to edit or clear specified data authorizes that operation. If the target sheet, range, or replacement values are ambiguous, resolve the ambiguity before mutating the document. Do not treat a read request as authorization to write.
 
 If the matching spreadsheet is not open, open the exact URL in the user's default browser and retry the command. If the bridge still times out, verify that the unpacked extension was reloaded after its latest build, then retry once. Do not fall back to Google APIs or attempt to read browser cookies.
