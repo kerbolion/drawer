@@ -159,6 +159,9 @@ import { createCloudAccountUi } from "./cloud-account.js";
     propertyColumn: null,
     pendingWrites: new Map(),
     sheetViewWrites: new Map(),
+    sheetDataRevision: 0,
+    sheetChangeTimer: null,
+    sheetChangeFollowupTimer: null,
     sheetViewMutationQueue: [],
     sheetViewMutationTimer: null,
     sheetViewMutationRunning: false,
@@ -365,14 +368,21 @@ import { createCloudAccountUi } from "./cloud-account.js";
       border-left: 1px solid ${antdTokens.colorBorder};
       display: flex; flex-direction: column;
     }
-    .drawer > header { padding: 16px 24px; border-bottom: 1px solid ${antdTokens.colorBorderSecondary}; }
-    .eyebrow { color: ${antdTokens.colorTextTertiary}; font-size: 11px; font-weight: 600; letter-spacing: .08em; }
-    .title-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-    .header-actions { display: flex; align-items: center; gap: 8px; }
+    .drawer > header {
+      display: flex; align-items: center; justify-content: space-between; gap: 12px;
+      padding: 16px 24px; border-bottom: 1px solid ${antdTokens.colorBorderSecondary};
+    }
+    .drawer-title { min-width: 0; }
+    .drawer-title h1 { margin: 0; color: ${antdTokens.colorTextHeading}; font-size: 18px; line-height: 1.25; }
+    .drawer-title p { margin: 3px 0 0; color: ${antdTokens.colorTextTertiary}; font-size: 12px; line-height: 1.35; }
+    .drawer-title a { color: ${antdTokens.colorText}; font-weight: 700; text-decoration: none; }
+    .drawer-title a:hover { text-decoration: underline; text-underline-offset: 3px; }
+    .header-actions {
+      display: flex; flex: 0 0 auto; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px;
+    }
     .sheet-view-actions { display: inline-flex; align-items: center; gap: 2px; }
     .sheet-view-actions .ant-btn { color: var(--workspace-text-muted); }
     .sheet-view-actions .ant-btn:hover { color: var(--workspace-primary); }
-    .drawer h1 { margin: 6px 0 0; color: ${antdTokens.colorTextHeading}; font-size: 18px; line-height: 1.35; }
     .icon-button {
       width: ${antdTokens.controlHeight}px; height: ${antdTokens.controlHeight}px;
       border: 0; border-radius: ${antdTokens.borderRadius}px; background: transparent;
@@ -1532,7 +1542,7 @@ import { createCloudAccountUi } from "./cloud-account.js";
     );
   }
 
-  function SheetViewActions({ sheetKey, sheetName, columns, settings }) {
+  function SheetViewActions({ sheetKey, sheetName, columns, settings, refreshKey }) {
     const [view, setView] = React.useState("");
     const [table, setTable] = React.useState(null);
     const [loading, setLoading] = React.useState(false);
@@ -1585,7 +1595,7 @@ import { createCloudAccountUi } from "./cloud-account.js";
         controller.abort();
         setActivity("views", false);
       };
-    }, [view, sheetKey]);
+    }, [view, sheetKey, refreshKey]);
 
     React.useEffect(() => {
       if (view === "kanban" && !statusColumns.length) setView("");
@@ -1740,7 +1750,8 @@ import { createCloudAccountUi } from "./cloud-account.js";
       sheetKey: `${currentGid()}:${sheet?.updatedAt || 0}`,
       sheetName: sheet?.name || activeSheetName() || `Hoja ${currentGid()}`,
       columns,
-      settings: { ...currentSheetViewSettings() }
+      settings: { ...currentSheetViewSettings() },
+      refreshKey: state.sheetDataRevision
     }))));
   }
 
@@ -1925,9 +1936,15 @@ import { createCloudAccountUi } from "./cloud-account.js";
   const drawer = element("aside", "drawer");
   drawer.setAttribute("aria-label", "Detalles de la fila");
   const panelHeader = element("header");
-  const eyebrow = element("div", "eyebrow", "SHEETS CRM · SESIÓN DE GOOGLE");
-  const titleRow = element("div", "title-row");
-  const title = element("h1", "", "Detalles de la fila");
+  const drawerTitle = element("div", "drawer-title");
+  const title = element("h1", "", "Abrir CRM");
+  const byline = element("p", "", "By ");
+  const brandLink = element("a", "", "Kodelr");
+  brandLink.href = "https://kodelr.com";
+  brandLink.target = "_blank";
+  brandLink.rel = "noopener noreferrer";
+  byline.appendChild(brandLink);
+  drawerTitle.append(title, byline);
   const headerActions = element("div", "header-actions");
   const sheetViewActions = element("div", "sheet-view-actions");
   const accountButton = element("button", "icon-button account-button");
@@ -1986,8 +2003,7 @@ import { createCloudAccountUi } from "./cloud-account.js";
   close.title = "Cerrar";
   close.setAttribute("aria-label", "Cerrar");
   headerActions.append(sheetViewActions, saveState, accountButton, close);
-  titleRow.append(title, headerActions);
-  panelHeader.append(eyebrow, titleRow);
+  panelHeader.append(drawerTitle, headerActions);
 
   const main = element("main");
   const status = element("div", "status busy", "Esperando una celda…");
@@ -5151,6 +5167,51 @@ import { createCloudAccountUi } from "./cloud-account.js";
     } catch {}
     setTimeout(pollCodexBridge, CODEX_BRIDGE_POLL_MS);
   }
+
+  function refreshOpenSheetData() {
+    if (panelFrame.hidden || state.saving || state.writeInteractionDepth > 0 || !cloudAccessAllowed()) return;
+    state.sheetCache.clear();
+    state.sheetDataRevision += 1;
+    renderSheetViewActions();
+
+    const reference = nameBoxValue();
+    const row = selectedRow(reference);
+    const gid = currentGid();
+    const sheetName = activeSheetName();
+    if (
+      row > 1
+      && row === state.row
+      && gid === state.gid
+      && normalizedColumn(sheetName) === normalizedColumn(state.sheetName)
+    ) {
+      void loadRow(row, true);
+    }
+  }
+
+  function scheduleOpenSheetRefresh() {
+    clearTimeout(state.sheetChangeTimer);
+    clearTimeout(state.sheetChangeFollowupTimer);
+    state.sheetChangeTimer = setTimeout(() => {
+      state.sheetChangeTimer = null;
+      refreshOpenSheetData();
+    }, 200);
+    state.sheetChangeFollowupTimer = setTimeout(() => {
+      state.sheetChangeFollowupTimer = null;
+      refreshOpenSheetData();
+    }, 2_000);
+  }
+
+  window.addEventListener("message", (event) => {
+    const message = event.data;
+    if (
+      event.source === window
+      && event.origin === location.origin
+      && message?.source === "sheets-row-drawer"
+      && message?.type === "sheet-change"
+    ) {
+      scheduleOpenSheetRefresh();
+    }
+  });
 
   function pollSelection() {
     if (state.saving || state.writeInteractionDepth > 0) return;

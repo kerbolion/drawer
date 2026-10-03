@@ -241,6 +241,20 @@ try {
     throw new Error(`El drawer no respetó el inicio cerrado: ${JSON.stringify(drawerStartup)}`);
   }
 
+  const headerLayout = await cdp.evaluate(`(() => {
+    const panel = document.getElementById("sheets-session-probe").shadowRoot.querySelector(".panel-frame").contentDocument;
+    const header = panel.querySelector(".drawer > header");
+    return {
+      alignItems: panel.defaultView.getComputedStyle(header).alignItems,
+      title: header.querySelector(".drawer-title h1")?.textContent || "",
+      byline: header.querySelector(".drawer-title p")?.textContent || "",
+      href: header.querySelector(".drawer-title a")?.href || ""
+    };
+  })()`);
+  if (headerLayout.alignItems !== "center" || headerLayout.title !== "Abrir CRM" || headerLayout.byline !== "By Kodelr" || headerLayout.href !== "https://kodelr.com/") {
+    throw new Error(`El encabezado no siguió el patrón centrado de MinimalBuilder: ${JSON.stringify(headerLayout)}`);
+  }
+
   const snapshot = `(() => {
     const host = document.getElementById("sheets-session-probe");
     const panel = host?.shadowRoot?.querySelector(".panel-frame")?.contentDocument;
@@ -367,6 +381,31 @@ try {
   const services = fromContact.relations.find((relation) => relation.title === "Servicios");
   if (services.count !== "2" || !services.cells.includes("S-1") || !services.cells.includes("S-2") || services.cells.includes("S-3")) {
     throw new Error(`Relacion Contactos -> Servicios incorrecta: ${JSON.stringify(services)}`);
+  }
+
+  sheets.Contactos.rows[0][1] = "Ana en vivo";
+  await cdp.evaluate(`document.body.dispatchEvent(new Event("input", { bubbles: true }))`);
+  const liveUpdateDeadline = Date.now() + 6_000;
+  let liveUpdate;
+  while (Date.now() < liveUpdateDeadline) {
+    liveUpdate = await cdp.evaluate(snapshot);
+    if (liveUpdate.fields.includes("Ana en vivo")) break;
+    await delay(100);
+  }
+  if (!liveUpdate?.fields.includes("Ana en vivo")) {
+    throw new Error(`El drawer abierto no reflejó una edición de la misma fila: ${JSON.stringify(liveUpdate)}`);
+  }
+
+  sheets.Contactos.rows[0][1] = "Ana";
+  await cdp.evaluate(`document.body.dispatchEvent(new Event("input", { bubbles: true }))`);
+  const liveRestoreDeadline = Date.now() + 6_000;
+  while (Date.now() < liveRestoreDeadline) {
+    liveUpdate = await cdp.evaluate(snapshot);
+    if (liveUpdate.fields.includes("Ana")) break;
+    await delay(100);
+  }
+  if (!liveUpdate?.fields.includes("Ana")) {
+    throw new Error(`El drawer no confirmó la segunda edición de la misma fila: ${JSON.stringify(liveUpdate)}`);
   }
 
   const relationDeck = await cdp.evaluate(`(() => {
