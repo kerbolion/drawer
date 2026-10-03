@@ -185,6 +185,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     workspacePromise: null,
     workspaceWriteQueue: Promise.resolve(),
     propertyColumn: null,
+    propertyTarget: null,
     primaryCreation: null,
     pendingWrites: new Map(),
     sheetViewWrites: new Map(),
@@ -792,6 +793,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     .related-cell-editor > .ant-select,
     .related-cell-editor > .ant-input,
     .related-cell-editor > .ant-space-compact { width: 100%; }
+    .related-record-drawer-root { z-index: 1100 !important; }
     .related-record-drawer-root .ant-drawer-content-wrapper { width: min(720px, 100%) !important; }
     .related-record-drawer .ant-drawer-header { background: var(--workspace-surface); border-bottom-color: var(--workspace-border-soft); }
     .related-record-drawer .ant-drawer-body { padding: 8px 28px 32px; background: var(--workspace-bg); }
@@ -799,8 +801,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     .related-record-page { max-width: 760px; margin: 0 auto; }
     .related-drawer-title { margin: 12px 0 22px; color: var(--workspace-text); font-size: 28px; line-height: 1.15; overflow-wrap: anywhere; }
     .related-drawer-fields { width: 100%; }
-    .related-field-icon { cursor: default; }
-    .related-field-icon:hover { background: var(--antd-primary-bg); color: var(--antd-primary); }
+    .related-field-icon { cursor: pointer; }
     .related-drawer-footer { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 8px; }
     .related-drawer-footer .ant-btn { min-height: ${antdTokens.controlHeightLG}px; font-weight: 600; }
     .relation-pagination { display: flex; justify-content: center; padding: 12px 14px 0; }
@@ -3566,6 +3567,19 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     return currentSheetConfiguration()?.columns?.[index] || defaultProperty(index, state.fields[index] || "");
   }
 
+  function propertyEditorSheet() {
+    if (state.propertyTarget?.gid) {
+      return state.workspace?.sheets?.[String(state.propertyTarget.gid)] || null;
+    }
+    return currentSheetConfiguration();
+  }
+
+  function propertyForEditorColumn(index) {
+    const sheet = propertyEditorSheet();
+    return sheet?.columns?.[index]
+      || defaultProperty(index, state.propertyTarget ? "" : (state.fields[index] || ""));
+  }
+
   function currentSourceLabels() {
     const columns = currentSheetConfiguration()?.columns || [];
     return state.fields.map((label, index) => String(columns[index]?.sourceHeader ?? label));
@@ -3911,6 +3925,47 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
       || defaultProperty(column.propertyIndex, column.header);
   }
 
+  function relationConfigurationHeaders(relation, configured = relationSheetConfiguration(relation)) {
+    const columns = displayRelationColumns(relation);
+    const width = Math.max(
+      configured?.columns?.length || 0,
+      ...columns.map((column) => column.propertyIndex + 1),
+      0
+    );
+    const headers = Array.from(
+      { length: width },
+      (_, index) => String(configured?.columns?.[index]?.sourceHeader || "")
+    );
+    for (const column of columns) headers[column.propertyIndex] = String(column.header || "");
+    return headers;
+  }
+
+  function relationPropertyTarget(relation) {
+    const configured = relationSheetConfiguration(relation);
+    let gid = String(relation.sheetGid || "");
+    if (!gid) {
+      gid = String(visibleSheets().find((sheet) =>
+        normalizedColumn(sheet.name) === normalizedColumn(relation.sheetName)
+      )?.gid || "");
+    }
+    if (!gid && configured) {
+      gid = String(Object.entries(state.workspace?.sheets || {}).find(([, sheet]) => sheet === configured)?.[0] || "");
+    }
+    if (!gid) return null;
+    const headers = relationConfigurationHeaders(relation, configured);
+    reconcileSheetConfiguration(gid, relation.sheetName, headers);
+    return { kind: "related", gid, sheetName: relation.sheetName };
+  }
+
+  function openRelatedPropertyEditor(relation, column) {
+    const target = relationPropertyTarget(relation);
+    if (!target) {
+      setStatus(`No pude identificar la configuración de ${relation.sheetName}`, "error");
+      return;
+    }
+    openPropertyEditor(column.propertyIndex, target);
+  }
+
   function relatedDraftKey(sheetName, rowNumber, columnIndex) {
     return `${encodeURIComponent(sheetName)}:${rowNumber}:${columnIndex}`;
   }
@@ -4139,14 +4194,30 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
                 "div",
                 { className: "field-label" },
                 React.createElement(
-                  "span",
-                  { className: "field-configure property-type-icon related-field-icon" },
+                  "button",
+                  {
+                    className: "field-configure property-type-icon related-field-icon",
+                    type: "button",
+                    title: `Configurar ${property.name || column.header}`,
+                    "aria-label": `Configurar ${property.name || column.header}`,
+                    "data-configure-related-column": String(column.propertyIndex + 1),
+                    onClick: () => openRelatedPropertyEditor(relation, column)
+                  },
                   typeBadge(property.type)
                 ),
                 React.createElement(
                   "div",
                   { className: "field-label-copy" },
-                  React.createElement("span", { className: "field-label-text" }, property.name || column.header),
+                  React.createElement(
+                    "button",
+                    {
+                      className: "field-label-text",
+                      type: "button",
+                      title: `Configurar ${property.name || column.header}`,
+                      onClick: () => openRelatedPropertyEditor(relation, column)
+                    },
+                    property.name || column.header
+                  ),
                   React.createElement("small", { className: "field-type-name" }, property.type)
                 )
               ),
@@ -5210,7 +5281,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
   function renderPropertyTypeSelect() {
     if (!ui.propertyTypeHost._reactRoot) ui.propertyTypeHost._reactRoot = createRoot(ui.propertyTypeHost);
     const selector = React.createElement(PropertyTypeControl, {
-      key: `${state.propertyColumn}:${ui.propertyType.value}`,
+      key: `${state.propertyTarget?.gid || drawerGid()}:${state.propertyColumn}:${ui.propertyType.value}`,
       initialValue: ui.propertyType.value
     });
     flushSync(() => ui.propertyTypeHost._reactRoot.render(antdTree(selector)));
@@ -5219,7 +5290,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
   function renderPropertySettings(reset = false) {
     const index = state.propertyColumn;
     if (index === null) return;
-    const property = propertyForColumn(index);
+    const property = propertyForEditorColumn(index);
     const type = ui.propertyType.value;
     const existingProtection = ui.propertyForm.elements.namedItem("protected");
     const protectedValue = reset || !(existingProtection instanceof panelFrame.contentWindow.HTMLInputElement)
@@ -5320,10 +5391,12 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     )));
   }
 
-  function openPropertyEditor(index) {
-    const property = propertyForColumn(index);
+  function openPropertyEditor(index, target = null) {
+    state.propertyTarget = target;
+    const property = propertyForEditorColumn(index);
     state.propertyColumn = index;
-    ui.propertySource.textContent = `Columna ${columnName(index + 1)} · encabezado en Sheets: ${property.sourceHeader || "sin encabezado"}`;
+    const sheetLabel = target?.sheetName ? `${target.sheetName} · ` : "";
+    ui.propertySource.textContent = `${sheetLabel}Columna ${columnName(index + 1)} · encabezado en Sheets: ${property.sourceHeader || "sin encabezado"}`;
     ui.propertyName.value = property.name;
     ui.propertyType.value = property.type;
     renderPropertyTypeSelect();
@@ -5335,12 +5408,15 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
   function closePropertyEditor() {
     ui.propertyDrawer.hidden = true;
     state.propertyColumn = null;
+    state.propertyTarget = null;
   }
 
   async function savePropertyConfiguration(event) {
     event.preventDefault();
     const index = state.propertyColumn;
-    const sheet = currentSheetConfiguration();
+    const target = state.propertyTarget;
+    const editingRelated = target?.kind === "related";
+    const sheet = propertyEditorSheet();
     if (index === null || !sheet?.columns?.[index]) return;
     const formData = new FormData(ui.propertyForm);
     const previous = sheet.columns[index];
@@ -5378,8 +5454,10 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
       checkedValue: formData.get("checkedValue") ?? previous.checkedValue,
       uncheckedValue: formData.get("uncheckedValue") ?? previous.uncheckedValue
     }, index, previous.sourceHeader);
-    const drafts = new Map(currentInputValues().map((value, columnIndex) => [columnIndex, value]));
-    if (next.protected) {
+    const drafts = editingRelated
+      ? null
+      : new Map(currentInputValues().map((value, columnIndex) => [columnIndex, value]));
+    if (!editingRelated && next.protected) {
       if (!state.primaryDrafts.get(index)?.systemGenerated) state.primaryDrafts.delete(index);
       drafts.set(index, state.primaryDrafts.get(index)?.value ?? state.values[index] ?? "");
     }
@@ -5389,8 +5467,20 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     sheet.updatedAt = Date.now();
     state.activity.config = true;
     syncSaveState();
-    renderFields(drafts);
-    renderSheetViewActions();
+    if (editingRelated) {
+      for (const [key, draft] of state.relatedDrafts) {
+        if (
+          normalizedColumn(draft.sheetName) !== normalizedColumn(target.sheetName)
+          || draft.columnIndex !== index
+        ) continue;
+        if (next.protected) state.relatedDrafts.delete(key);
+        else draft.property = next;
+      }
+      notifyRelatedDrafts();
+    } else {
+      renderFields(drafts);
+      renderSheetViewActions();
+    }
     closePropertyEditor();
     try {
       await writeWorkspace();

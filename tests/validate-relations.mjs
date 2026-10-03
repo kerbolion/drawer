@@ -502,6 +502,58 @@ try {
     throw new Error(`El registro Deck no abrió el drawer de Workspace: ${JSON.stringify(relatedDrawer)}`);
   }
 
+  const relatedPropertyEditor = await cdp.evaluate(`(() => {
+    const panel = document.getElementById("sheets-session-probe").shadowRoot.querySelector(".panel-frame").contentDocument;
+    const relatedDrawer = panel.querySelector(".related-record-drawer");
+    const relatedRoot = panel.querySelector(".related-record-drawer-root");
+    relatedDrawer.querySelector('[data-configure-related-column="5"]').click();
+    const propertyDrawer = panel.querySelector(".property-drawer");
+    return {
+      open: !propertyDrawer.hidden,
+      source: propertyDrawer.querySelector(".property-source")?.textContent || "",
+      propertyZIndex: Number(getComputedStyle(propertyDrawer).zIndex),
+      relatedZIndex: Number(getComputedStyle(relatedRoot).zIndex)
+    };
+  })()`);
+  if (
+    !relatedPropertyEditor.open
+    || !relatedPropertyEditor.source.includes("Servicios")
+    || !relatedPropertyEditor.source.includes("Columna E")
+    || relatedPropertyEditor.propertyZIndex <= relatedPropertyEditor.relatedZIndex
+  ) {
+    throw new Error(`La propiedad relacionada no abrió en el editor correcto: ${JSON.stringify(relatedPropertyEditor)}`);
+  }
+
+  await cdp.evaluate(`(() => {
+    const panel = document.getElementById("sheets-session-probe").shadowRoot.querySelector(".panel-frame").contentDocument;
+    const typeSelect = panel.querySelector("#srd-property-type");
+    typeSelect.value = "longText";
+    typeSelect.dispatchEvent(new Event("change", { bubbles: true }));
+    panel.querySelector("#srd-property-form").requestSubmit();
+  })()`);
+  await delay(120);
+  const relatedPropertyApplied = await cdp.evaluate(`(() => {
+    const panel = document.getElementById("sheets-session-probe").shadowRoot.querySelector(".panel-frame").contentDocument;
+    const relatedDrawer = panel.querySelector(".related-record-drawer");
+    const editor = relatedDrawer?.querySelector('[data-related-column="5"]');
+    return {
+      drawerOpen: Boolean(relatedDrawer),
+      propertyHidden: panel.querySelector(".property-drawer")?.hidden,
+      fieldType: editor?.dataset.fieldType || "",
+      control: editor?.querySelector("textarea")?.tagName || "",
+      value: editor?.querySelector("textarea")?.value || ""
+    };
+  })()`);
+  if (
+    !relatedPropertyApplied.drawerOpen
+    || !relatedPropertyApplied.propertyHidden
+    || relatedPropertyApplied.fieldType !== "longText"
+    || relatedPropertyApplied.control !== "TEXTAREA"
+    || relatedPropertyApplied.value !== "A"
+  ) {
+    throw new Error(`La configuración relacionada no se aplicó sin cerrar el registro: ${JSON.stringify(relatedPropertyApplied)}`);
+  }
+
   const drawerCancel = await cdp.evaluate(`(() => {
     const host = document.getElementById("sheets-session-probe");
     const panel = host.shadowRoot.querySelector(".panel-frame").contentDocument;
