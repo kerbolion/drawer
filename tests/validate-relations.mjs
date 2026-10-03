@@ -746,12 +746,15 @@ try {
     const panel = document.getElementById("sheets-session-probe").shadowRoot.querySelector(".panel-frame").contentDocument;
     const control = panel.querySelector('[data-column="2"]');
     const button = control.querySelector('[data-copy-field-value]');
+    const compact = control.querySelector(".property-value-compact");
     return {
       state: button.dataset.copyState,
       usesCheckIcon: Boolean(button.querySelector('[data-icon="check"]')),
       disabled: button.disabled,
       protectedInputDisabled: control.querySelector("textarea")?.disabled,
-      compact: control.querySelector(".property-value-compact")?.classList.contains("ant-space-compact")
+      compact: compact?.classList.contains("ant-space-compact"),
+      copyButtonHeight: button.getBoundingClientRect().height,
+      compactHeight: compact?.getBoundingClientRect().height
     };
   })()`);
   copiedPropertyValue.values = await cdp.evaluate("globalThis.__copiedPropertyValues", isolated.executionContextId);
@@ -761,7 +764,9 @@ try {
     !copiedPropertyValue.usesCheckIcon ||
     copiedPropertyValue.disabled ||
     !copiedPropertyValue.protectedInputDisabled ||
-    !copiedPropertyValue.compact
+    !copiedPropertyValue.compact ||
+    copiedPropertyValue.compactHeight <= 32 ||
+    Math.abs(copiedPropertyValue.copyButtonHeight - copiedPropertyValue.compactHeight) > 1
   ) {
     throw new Error(`La copia de valores no siguió el estado esperado: ${JSON.stringify(copiedPropertyValue)}`);
   }

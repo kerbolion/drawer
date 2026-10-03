@@ -609,7 +609,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     .antd-field-control > .ant-space-compact { width: 100%; }
     .property-value-compact { width: 100%; min-width: 0; }
     .property-value-compact > :not(.ant-btn) { min-width: 0; flex: 1 1 auto; }
-    .property-value-compact > .ant-btn { flex: 0 0 auto; }
+    .property-value-compact > .ant-btn { flex: 0 0 auto; height: auto; align-self: stretch; }
     .property-value-compact.is-checkbox > .ant-checkbox-wrapper {
       min-height: ${antdTokens.controlHeight}px; border: 1px solid var(--antd-border); border-radius: ${antdTokens.borderRadius}px 0 0 ${antdTokens.borderRadius}px;
       padding: 4px 11px; background: var(--antd-bg-container); color: var(--antd-text);
