@@ -387,6 +387,27 @@ try {
   if (!propertyOverRecord.open || propertyOverRecord.propertyZIndex <= propertyOverRecord.recordZIndex || propertyOverRecord.title !== "Editar propiedad") {
     throw new Error(`Editar propiedad no abrio encima del registro de Tabla: ${JSON.stringify(propertyOverRecord)}`);
   }
+
+  await cdp.evaluate(panelExpression(`
+    const selector = panel.querySelector('#srd-property-type-picker')?.closest('.ant-select')?.querySelector('.ant-select-selector');
+    selector?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: panel.defaultView }));
+    selector?.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: panel.defaultView }));
+    selector?.click();
+  `));
+  await delay(100);
+  const propertyPopupLayer = await cdp.evaluate(panelExpression(`
+    const propertyDrawer = panel.querySelector('.property-drawer');
+    const popup = [...panel.querySelectorAll('.ant-select-dropdown')].find((item) => getComputedStyle(item).display !== 'none');
+    return {
+      open: Boolean(popup),
+      popupZIndex: popup ? Number(getComputedStyle(popup).zIndex) : 0,
+      propertyZIndex: Number(getComputedStyle(propertyDrawer).zIndex)
+    };
+  `));
+  if (!propertyPopupLayer.open || propertyPopupLayer.popupZIndex <= propertyPopupLayer.propertyZIndex) {
+    throw new Error(`El desplegable de propiedad quedo detras del drawer: ${JSON.stringify(propertyPopupLayer)}`);
+  }
+  await cdp.evaluate(panelExpression('panel.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));'));
   await cdp.evaluate(panelExpression('panel.querySelector(".property-drawer .secondary-button").click();'));
 
   await cdp.evaluate(panelExpression('panel.querySelector(".drawer > header .close").click();'));

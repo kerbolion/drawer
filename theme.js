@@ -16,7 +16,8 @@ export function getWorkspaceThemeConfig(darkMode = false) {
       colorTextSecondary: darkMode ? "rgba(255, 255, 255, 0.68)" : "#4b5563",
       colorTextTertiary: darkMode ? "rgba(255, 255, 255, 0.55)" : "#6b7280",
       borderRadius: 6,
-      fontFamily
+      fontFamily,
+      zIndexPopupBase: 1200
     },
     components: {
       Card: { borderRadiusLG: 6 },
