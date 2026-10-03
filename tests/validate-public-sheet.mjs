@@ -287,6 +287,9 @@ try {
     const toggle = panel.querySelector("[data-theme-toggle]");
     toggle.click();
     await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    const activeToggle = panel.querySelector("[data-theme-toggle]");
+    const toggleRect = activeToggle.getBoundingClientRect();
+    const iconRect = activeToggle.querySelector(".ant-switch-inner-checked .anticon").getBoundingClientRect();
     return {
       hostTheme: host.dataset.theme,
       googleTheme: document.documentElement.dataset.srdTheme,
@@ -295,6 +298,8 @@ try {
       toggleTheme: panel.querySelector("[data-theme-toggle]")?.dataset.themeToggle || null,
       panelBackground: getComputedStyle(panel.body).backgroundColor,
       sheetViewBackground: getComputedStyle(sheetViewFrame.contentDocument.body).backgroundColor,
+      iconSignedVerticalOffset: (iconRect.top + iconRect.height / 2) - (toggleRect.top + toggleRect.height / 2),
+      iconVerticalOffset: Math.abs((iconRect.top + iconRect.height / 2) - (toggleRect.top + toggleRect.height / 2)),
       googleFilter: getComputedStyle(document.body).filter,
       storedTheme: localStorage.getItem("srd:theme-mode")
     };
@@ -307,6 +312,7 @@ try {
     || darkTheme.toggleTheme !== "dark"
     || darkTheme.panelBackground !== "rgb(31, 31, 31)"
     || darkTheme.sheetViewBackground !== "rgb(31, 31, 31)"
+    || darkTheme.iconVerticalOffset > 0.5
     || !darkTheme.googleFilter.includes("invert")
     || darkTheme.storedTheme !== "dark"
   ) {
@@ -319,11 +325,16 @@ try {
     const panel = frame.contentDocument;
     panel.querySelector("[data-theme-toggle]").click();
     await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    const activeToggle = panel.querySelector("[data-theme-toggle]");
+    const toggleRect = activeToggle.getBoundingClientRect();
+    const iconRect = activeToggle.querySelector(".ant-switch-inner-unchecked .anticon").getBoundingClientRect();
     return {
       hostTheme: host.dataset.theme,
       googleTheme: document.documentElement.dataset.srdTheme,
       panelTheme: panel.documentElement.dataset.theme,
       panelBackground: getComputedStyle(panel.body).backgroundColor,
+      iconSignedVerticalOffset: (iconRect.top + iconRect.height / 2) - (toggleRect.top + toggleRect.height / 2),
+      iconVerticalOffset: Math.abs((iconRect.top + iconRect.height / 2) - (toggleRect.top + toggleRect.height / 2)),
       googleFilter: getComputedStyle(document.body).filter,
       storedTheme: localStorage.getItem("srd:theme-mode")
     };
@@ -333,6 +344,7 @@ try {
     || lightTheme.googleTheme !== "light"
     || lightTheme.panelTheme !== "light"
     || lightTheme.panelBackground !== "rgb(255, 255, 255)"
+    || lightTheme.iconVerticalOffset > 0.5
     || lightTheme.googleFilter !== "none"
     || lightTheme.storedTheme !== "light"
   ) {

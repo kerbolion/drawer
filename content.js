@@ -503,6 +503,15 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     .sheet-view-actions .ant-btn { color: var(--workspace-text-muted); }
     .sheet-view-actions .ant-btn:hover { color: var(--workspace-primary); }
     .theme-toggle { display: inline-flex; align-items: center; justify-content: center; }
+    [data-theme-toggle] .ant-switch-inner-checked,
+    [data-theme-toggle] .ant-switch-inner-unchecked {
+      display: flex; align-items: center; justify-content: center;
+    }
+    [data-theme-toggle] .anticon {
+      display: inline-flex; align-items: center; justify-content: center; line-height: 1;
+      vertical-align: 0; transform: translateY(5px);
+    }
+    [data-theme-toggle] .anticon svg { display: block; }
     .icon-button {
       width: ${antdTokens.controlHeight}px; height: ${antdTokens.controlHeight}px;
       border: 0; border-radius: ${antdTokens.borderRadius}px; background: transparent;
@@ -594,12 +603,12 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     .antd-field-control > .ant-space-compact { width: 100%; }
     .fields[aria-busy="true"] { cursor: progress; }
     .property-drawer {
-      position: fixed; inset: 0; z-index: 20; display: flex; flex-direction: column;
+      position: fixed; inset: 0; z-index: 1120; display: flex; flex-direction: column;
       background: var(--antd-bg-container); animation: property-enter ${antdTokens.motionDurationMid} ease-out;
     }
     .property-drawer[hidden] { display: none; }
     .account-drawer {
-      position: fixed; inset: 0; z-index: 30; display: flex; flex-direction: column;
+      position: fixed; inset: 0; z-index: 1130; display: flex; flex-direction: column;
       background: var(--antd-bg-container); animation: property-enter ${antdTokens.motionDurationMid} ease-out;
     }
     .account-drawer[hidden] { display: none; }
@@ -1266,7 +1275,6 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     const mode = React.useSyncExternalStore(subscribeToTheme, themeSnapshot, themeSnapshot);
     const darkMode = mode === "dark";
     return React.createElement(Switch, {
-      size: "small",
       checked: darkMode,
       checkedChildren: React.createElement(MoonOutlined),
       unCheckedChildren: React.createElement(SunOutlined),

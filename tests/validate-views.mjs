@@ -373,6 +373,22 @@ try {
     throw new Error(`Abrir no reutilizo el drawer original encima de Tabla: ${JSON.stringify(originalRecord)}`);
   }
 
+  const propertyOverRecord = await cdp.evaluate(panelExpression(`
+    const recordDrawer = panel.querySelector('.drawer.is-workspace-record-overlay');
+    panel.querySelector('.drawer > main .field-configure').click();
+    const propertyDrawer = panel.querySelector('.property-drawer');
+    return {
+      open: !propertyDrawer.hidden,
+      propertyZIndex: Number(getComputedStyle(propertyDrawer).zIndex),
+      recordZIndex: Number(getComputedStyle(recordDrawer).zIndex),
+      title: propertyDrawer.querySelector('h2')?.textContent || ''
+    };
+  `));
+  if (!propertyOverRecord.open || propertyOverRecord.propertyZIndex <= propertyOverRecord.recordZIndex || propertyOverRecord.title !== "Editar propiedad") {
+    throw new Error(`Editar propiedad no abrio encima del registro de Tabla: ${JSON.stringify(propertyOverRecord)}`);
+  }
+  await cdp.evaluate(panelExpression('panel.querySelector(".property-drawer .secondary-button").click();'));
+
   await cdp.evaluate(panelExpression('panel.querySelector(".drawer > header .close").click();'));
   await delay(150);
   const restoredTable = await cdp.evaluate(`(() => {
