@@ -1,5 +1,5 @@
 import React from "react";
-import { flushSync } from "react-dom";
+import { createPortal, flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
 import { StyleProvider } from "@ant-design/cssinjs";
 import Button from "antd/es/button/index.js";
@@ -23,11 +23,10 @@ import {
   AppstoreOutlined,
   CalendarOutlined,
   CheckSquareOutlined,
+  CloseOutlined,
   DeleteOutlined,
   DownOutlined,
   DragOutlined,
-  FullscreenExitOutlined,
-  FullscreenOutlined,
   LeftOutlined,
   LinkOutlined,
   MailOutlined,
@@ -180,7 +179,9 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     cloudWorkspaceHydrated: false,
     cloudWorkspaceTimer: null,
     cloudWorkspaceWriteQueue: Promise.resolve(),
-    workspaceRecordOverlay: false
+    workspaceRecordOverlay: false,
+    sheetViewOpen: false,
+    sheetViewRestorePanel: false
   };
 
   const host = document.createElement("div");
@@ -198,10 +199,12 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
       position: fixed; inset: 0 0 0 auto; z-index: 2147483647;
       width: min(720px, 94vw); height: 100vh; border: 0; background: ${antdTokens.colorBgElevated};
       box-shadow: ${antdTokens.boxShadowSecondary};
-      transition: width 180ms cubic-bezier(.2, 0, 0, 1);
     }
-    .panel-frame.is-sheet-view-expanded { width: 100vw; }
-    .panel-frame[hidden], .reopen[hidden] { display: none; }
+    .sheet-view-frame {
+      position: fixed; inset: 0; z-index: 2147483646;
+      width: 100vw; height: 100vh; border: 0; background: ${antdTokens.colorBgContainer};
+    }
+    .panel-frame[hidden], .sheet-view-frame[hidden], .reopen[hidden] { display: none; }
     .reopen {
       box-sizing: border-box; position: fixed; z-index: 2147483646;
       display: inline-flex; align-items: center; justify-content: center;
@@ -223,6 +226,12 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
   panelFrame.title = "Detalles de la fila";
   panelFrame.hidden = true;
   shadow.appendChild(panelFrame);
+
+  const sheetViewFrame = document.createElement("iframe");
+  sheetViewFrame.className = "sheet-view-frame";
+  sheetViewFrame.title = "Vista de la hoja";
+  sheetViewFrame.hidden = true;
+  shadow.appendChild(sheetViewFrame);
 
   const reopen = document.createElement("button");
   reopen.className = "reopen";
@@ -687,12 +696,12 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     .related-drawer-footer { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 8px; }
     .related-drawer-footer .ant-btn { min-height: ${antdTokens.controlHeightLG}px; font-weight: 600; }
     .relation-pagination { display: flex; justify-content: center; padding: 12px 14px 0; }
-    .sheet-view-drawer-root .ant-drawer-content-wrapper { width: min(720px, 100%) !important; }
-    .sheet-view-drawer-root.is-expanded .ant-drawer-content-wrapper { width: 100% !important; }
-    .sheet-view-drawer .ant-drawer-header { background: var(--workspace-surface); border-bottom-color: var(--workspace-border-soft); }
-    .sheet-view-drawer .ant-drawer-body {
-      min-width: 0; min-height: 0; overflow: hidden; padding: 0; background: var(--workspace-bg);
-    }
+    .sheet-view-root { width: 100%; height: 100%; }
+    .sheet-view-panel { display: flex; width: 100%; height: 100%; min-width: 0; min-height: 0; flex-direction: column; background: var(--workspace-bg); }
+    .sheet-view-panel-header { display: flex; flex: 0 0 auto; min-height: 54px; align-items: center; justify-content: space-between; gap: 16px; padding: 10px 18px; border-bottom: 1px solid var(--workspace-border); background: var(--workspace-surface); }
+    .sheet-view-panel-title { display: flex; min-width: 0; align-items: center; gap: 10px; color: var(--workspace-text); font-size: 16px; font-weight: 700; }
+    .sheet-view-panel-title > span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .sheet-view-panel-body { display: flex; flex: 1; min-width: 0; min-height: 0; overflow: hidden; }
     .sheet-view-surface { display: flex; width: 100%; height: 100%; min-width: 0; min-height: 0; flex-direction: column; }
     .workspace-browser { display: grid; width: 100%; height: 100%; min-width: 0; min-height: 0; grid-template-columns: 248px minmax(0, 1fr); background: var(--workspace-bg); }
     .workspace-browser-sidebar { min-width: 0; overflow: auto; padding: 14px 10px; border-right: 1px solid var(--workspace-border); background: var(--workspace-surface); }
@@ -741,13 +750,12 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     .workspace-table-column-heading .property-type-icon { grid-row: 1 / span 2; width: 26px; min-height: 26px; }
     .workspace-table-column-heading > span:nth-child(2) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .workspace-table-column-heading small { color: var(--workspace-text-muted); font-size: 10px; font-weight: 400; }
-    .workspace-table-cell-value { display: block; width: 100%; overflow: hidden; border: 0; padding: 7px 6px; background: transparent; color: var(--workspace-text); cursor: pointer; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
-    .workspace-table-cell-value:hover { border-radius: 5px; background: var(--workspace-primary-soft); color: var(--workspace-primary); }
-    .workspace-table-cell-value.is-protected { color: var(--workspace-text-secondary); cursor: default; }
-    .workspace-table-cell-value.is-protected:hover { background: transparent; color: var(--workspace-text-secondary); }
-    .workspace-table-inline-editor { display: flex; min-width: 280px; align-items: center; gap: 3px; }
-    .workspace-table-inline-control { flex: 1; min-width: 180px; }
-    .workspace-table-inline-control > .ant-input-number, .workspace-table-inline-control > .ant-picker, .workspace-table-inline-control > .ant-select, .workspace-table-inline-control > .ant-input, .workspace-table-inline-control > .ant-space-compact { width: 100%; }
+    .workspace-table-cell-editor { min-width: 0; width: 100%; }
+    .workspace-table-cell-editor > .ant-input-number,
+    .workspace-table-cell-editor > .ant-picker,
+    .workspace-table-cell-editor > .ant-select,
+    .workspace-table-cell-editor > .ant-input,
+    .workspace-table-cell-editor > .ant-space-compact { width: 100%; }
     .workspace-table-footer { display: flex; flex: 0 0 auto; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 14px; border-top: 1px solid var(--workspace-border); background: var(--workspace-surface); color: var(--workspace-text-muted); font-size: 12px; }
     .workspace-deck-view { display: flex; flex: 1; min-width: 0; min-height: 0; flex-direction: column; background: var(--workspace-surface-muted); }
     .workspace-deck-toolbar { display: flex; flex: 0 0 auto; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 12px; border-bottom: 1px solid var(--workspace-border); background: var(--workspace-surface-raised); }
@@ -834,7 +842,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
       to { transform: scale(1); }
     }
     @media (prefers-reduced-motion: reduce) {
-      .panel-frame, .kanban-card, .kanban-card-overlay, .kanban-card-shell.is-moving { animation: none !important; transition: none !important; }
+      .kanban-card, .kanban-card-overlay, .kanban-card-shell.is-moving { animation: none !important; transition: none !important; }
     }
     .kanban-footer { display: flex; flex: 0 0 auto; justify-content: flex-end; padding: 10px 12px; border-top: 1px solid var(--workspace-border); background: var(--workspace-surface); }
     .month-controls { display: flex; align-items: center; gap: 8px; }
@@ -908,6 +916,17 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     }
   `;
   panelDocument.head.appendChild(panelStyles);
+
+  const sheetViewDocument = sheetViewFrame.contentDocument;
+  installTrustedHtmlBridge(sheetViewFrame.contentWindow);
+  sheetViewDocument.documentElement.lang = "es";
+  sheetViewDocument.body.replaceChildren();
+  const sheetViewStyles = sheetViewDocument.createElement("style");
+  sheetViewStyles.textContent = panelStyles.textContent;
+  sheetViewDocument.head.appendChild(sheetViewStyles);
+  const sheetViewRoot = sheetViewDocument.createElement("div");
+  sheetViewRoot.className = "sheet-view-root";
+  sheetViewDocument.body.appendChild(sheetViewRoot);
 
   function element(tag, className, text) {
     const node = panelDocument.createElement(tag);
@@ -1077,6 +1096,38 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
         child
       )
     );
+  }
+
+  function sheetViewTree(child) {
+    return React.createElement(
+      StyleProvider,
+      { container: sheetViewDocument.head },
+      React.createElement(
+        ConfigProvider,
+        {
+          theme: workspaceThemeConfig,
+          locale: workspaceLocale,
+          getPopupContainer: () => sheetViewDocument.body
+        },
+        child
+      )
+    );
+  }
+
+  function setSheetViewHostOpen(open, title = "Vista de la hoja") {
+    if (open) {
+      if (!state.sheetViewOpen) state.sheetViewRestorePanel = !panelFrame.hidden;
+      state.sheetViewOpen = true;
+      sheetViewFrame.title = title;
+      sheetViewFrame.hidden = false;
+      if (!state.workspaceRecordOverlay) panelFrame.hidden = true;
+      return;
+    }
+    if (!state.sheetViewOpen) return;
+    state.sheetViewOpen = false;
+    sheetViewFrame.hidden = true;
+    if (state.sheetViewRestorePanel && !state.workspaceRecordOverlay) panelFrame.hidden = false;
+    state.sheetViewRestorePanel = false;
   }
 
   function createCloudFormControl({
@@ -1690,8 +1741,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
       sheets: workspaceSheetList()
     }]);
     const movingRowsRef = React.useRef(new Set());
-    const [kanbanExpanded, setKanbanExpanded] = React.useState(() => settings.kanbanExpanded === true);
-    const [calendarExpanded, setCalendarExpanded] = React.useState(() => settings.calendarExpanded === true);
+    const workspaceCellEditsRef = React.useRef(new Map());
     const statusColumns = columns.filter((column) => column.type === "status");
     const dateColumns = columns.filter((column) => column.type === "date");
 
@@ -1708,20 +1758,24 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
         name: current.find((item) => item.id === spreadsheetId())?.name || workspaceDocumentName(),
         sheets: workspaceSheetList()
       }, ...current.filter((item) => item.id !== spreadsheetId())]);
-      setKanbanExpanded(settings.kanbanExpanded === true);
-      setCalendarExpanded(settings.calendarExpanded === true);
     }, [sheetKey]);
 
-    const expandedKanban = view === "kanban" && kanbanExpanded;
-    const expandedCalendar = view === "calendar" && calendarExpanded;
-    const expandedWorkspace = view === "table";
-    const expandedSheetView = expandedWorkspace || expandedKanban || expandedCalendar;
     const activeTarget = view === "table" ? workspaceTarget : { gid: drawerGid(), name: sheetName };
 
+    React.useLayoutEffect(() => {
+      const title = view === "table"
+        ? `Tabla · ${workspaceTarget.name}`
+        : `${view === "kanban" ? "Kanban" : "Calendario"} · ${sheetName}`;
+      setSheetViewHostOpen(Boolean(view), title);
+      return () => setSheetViewHostOpen(false);
+    }, [Boolean(view)]);
+
     React.useEffect(() => {
-      panelFrame.classList.toggle("is-sheet-view-expanded", expandedSheetView);
-      return () => panelFrame.classList.remove("is-sheet-view-expanded");
-    }, [expandedSheetView]);
+      if (!view) return;
+      sheetViewFrame.title = view === "table"
+        ? `Tabla · ${workspaceTarget.name}`
+        : `${view === "kanban" ? "Kanban" : "Calendario"} · ${sheetName}`;
+    }, [view, workspaceTarget.name, sheetName]);
 
     React.useEffect(() => {
       if (!view) return undefined;
@@ -1785,18 +1839,6 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
       if (view === "calendar" && !dateColumns.length) setView("");
       if (view !== "table" && state.workspaceRecordOverlay) closeWorkspaceRecordOverlay();
     }, [view, statusColumns.length, dateColumns.length]);
-
-    const toggleKanbanExpanded = () => {
-      const next = !kanbanExpanded;
-      setKanbanExpanded(next);
-      setCurrentSheetViewSetting("kanbanExpanded", next);
-    };
-
-    const toggleCalendarExpanded = () => {
-      const next = !calendarExpanded;
-      setCalendarExpanded(next);
-      setCurrentSheetViewSetting("calendarExpanded", next);
-    };
 
     const openRow = async (rowNumber) => {
       if (state.primaryDrafts.size || state.relatedDrafts.size) {
@@ -1891,17 +1933,36 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
       const nextValue = serializeEditorValue(nextEditorValue, property);
       const previousValue = String(row.cells[property.index] || "");
       if (valuesEqualForProperty(nextValue, previousValue, property)) return;
+      const editKey = `${workspaceTarget.gid}:${encodeURIComponent(workspaceTarget.name)}:${row.number}:${property.index}`;
+      let editState = workspaceCellEditsRef.current.get(editKey);
+      if (!editState) {
+        editState = {
+          confirmedRevision: 0,
+          confirmedValue: previousValue,
+          revision: 0
+        };
+        workspaceCellEditsRef.current.set(editKey, editState);
+      }
+      const revision = ++editState.revision;
       const optimisticCells = [...row.cells];
       optimisticCells[property.index] = nextValue;
       updateTableRow(row.number, optimisticCells);
       setError("");
       try {
         await writeSheetViewValue(row.number, property, nextValue, optimisticCells, workspaceTarget);
+        if (revision > editState.confirmedRevision) {
+          editState.confirmedRevision = revision;
+          editState.confirmedValue = nextValue;
+        }
+        if (revision === editState.revision) workspaceCellEditsRef.current.delete(editKey);
       } catch (writeError) {
-        const restored = [...optimisticCells];
-        restored[property.index] = previousValue;
-        updateTableRow(row.number, restored);
-        setError(writeError.message);
+        if (revision === editState.revision) {
+          const restored = [...optimisticCells];
+          restored[property.index] = editState.confirmedValue;
+          updateTableRow(row.number, restored);
+          workspaceCellEditsRef.current.delete(editKey);
+          setError(writeError.message);
+        }
         throw writeError;
       }
     };
@@ -2071,37 +2132,44 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
         "data-sheet-view": "calendar",
         onClick: () => setView("calendar")
       }) : null,
-      React.createElement(
-        Drawer,
-        {
-          open: Boolean(view),
-          onClose: () => setView(""),
-          width: expandedSheetView ? "100%" : 720,
-          destroyOnClose: true,
-          className: "sheet-view-drawer",
-          rootClassName: `sheet-view-drawer-root ${expandedSheetView ? "is-expanded" : ""}`.trim(),
-          getContainer: () => panelDocument.body,
-          title: view === "table" ? `Tabla · ${workspaceTarget.name}` : `${view === "kanban" ? "Kanban" : "Calendario"} · ${sheetName}`,
-          extra: view && view !== "table" ? React.createElement(Button, {
-            type: "default",
-            shape: "circle",
-            size: "small",
-            icon: React.createElement(expandedSheetView ? FullscreenExitOutlined : FullscreenOutlined),
-            title: expandedSheetView ? "Restaurar" : "Ampliar",
-            "aria-label": expandedSheetView ? "Restaurar" : "Ampliar",
-            ...(view === "kanban"
-              ? { "data-kanban-expand": expandedKanban ? "expanded" : "compact" }
-              : { "data-calendar-expand": expandedCalendar ? "expanded" : "compact" }),
-            onClick: view === "kanban" ? toggleKanbanExpanded : toggleCalendarExpanded
-          }) : null
-        },
-        React.createElement(
-          "div",
-          { className: "sheet-view-surface", "data-active-sheet-view": view },
-          error && table && view !== "table" ? React.createElement("div", { className: "status error" }, error) : null,
-          content
-        )
-      )
+      view ? createPortal(
+        sheetViewTree(React.createElement(
+          "section",
+          { className: "sheet-view-panel", "data-sheet-view-panel": view },
+          React.createElement(
+            "header",
+            { className: "sheet-view-panel-header" },
+            React.createElement(
+              "div",
+              { className: "sheet-view-panel-title" },
+              React.createElement(view === "table" ? TableOutlined : view === "kanban" ? AppstoreOutlined : CalendarOutlined),
+              React.createElement("span", null, view === "table"
+                ? `Tabla · ${workspaceTarget.name}`
+                : `${view === "kanban" ? "Kanban" : "Calendario"} · ${sheetName}`)
+            ),
+            React.createElement(Button, {
+              type: "text",
+              shape: "circle",
+              icon: React.createElement(CloseOutlined),
+              title: "Cerrar",
+              "aria-label": "Cerrar vista",
+              "data-close-sheet-view": view,
+              onClick: () => setView("")
+            })
+          ),
+          React.createElement(
+            "div",
+            { className: "sheet-view-panel-body" },
+            React.createElement(
+              "div",
+              { className: "sheet-view-surface", "data-active-sheet-view": view },
+              error && table && view !== "table" ? React.createElement("div", { className: "status error" }, error) : null,
+              content
+            )
+          )
+        )),
+        sheetViewRoot
+      ) : null
     );
   }
 
@@ -2501,6 +2569,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
 
   function openWorkspaceRecordOverlay() {
     state.workspaceRecordOverlay = true;
+    panelFrame.hidden = false;
     ui.workspaceRecordMask.hidden = false;
     ui.drawer.classList.add("is-workspace-record-overlay");
     ui.close.title = "Cerrar detalles";
@@ -2513,6 +2582,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     ui.drawer.classList.remove("is-workspace-record-overlay");
     ui.close.title = "Cerrar";
     ui.close.setAttribute("aria-label", "Cerrar");
+    if (state.sheetViewOpen) panelFrame.hidden = true;
   }
 
   async function requestWorkspaceRecordOverlayClose() {
@@ -2930,9 +3000,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
       if (!view || typeof view !== "object") continue;
       clean.sheetViews[String(key)] = {
         calendarColumnId: String(view.calendarColumnId || ""),
-        calendarExpanded: view.calendarExpanded === true,
-        kanbanColumnId: String(view.kanbanColumnId || ""),
-        kanbanExpanded: view.kanbanExpanded === true
+        kanbanColumnId: String(view.kanbanColumnId || "")
       };
     }
     for (const [gid, sheet] of Object.entries(workspace.sheets || {})) {
@@ -5259,11 +5327,30 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     }, delay);
   }
 
+  function coalesceSheetViewMutationTasks(queuedTasks) {
+    const latestByCell = new Map();
+    queuedTasks.forEach((task, index) => {
+      const key = `${task.gid}:${encodeURIComponent(task.sheetName)}:${task.row}:${task.property.index}`;
+      const current = latestByCell.get(key);
+      if (!current) {
+        latestByCell.set(key, { ...task, waitingTasks: [task], lastQueuedIndex: index });
+        return;
+      }
+      current.property = task.property;
+      current.value = task.value;
+      current.rowValues = task.rowValues;
+      current.waitingTasks.push(task);
+      current.lastQueuedIndex = index;
+    });
+    return [...latestByCell.values()].sort((left, right) => left.lastQueuedIndex - right.lastQueuedIndex);
+  }
+
   async function flushSheetViewMutations() {
     if (state.sheetViewMutationRunning) return state.sheetViewMutationPromise;
     if (!state.sheetViewMutationQueue.length) return;
     state.sheetViewMutationRunning = true;
-    const tasks = state.sheetViewMutationQueue.splice(0);
+    const queuedTasks = state.sheetViewMutationQueue.splice(0);
+    const tasks = coalesceSheetViewMutationTasks(queuedTasks);
     const lastTask = tasks[tasks.length - 1];
     const selectionReference = qualifiedReference(
       lastTask.sheetName,
@@ -5277,9 +5364,13 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     try {
       await writeRanges(sheetViewBatchOperations(tasks), selectionReference);
       registerSheetViewWrites(tasks);
-      for (const task of tasks) task.resolve();
+      for (const task of tasks) {
+        for (const waitingTask of task.waitingTasks) waitingTask.resolve();
+      }
     } catch (error) {
-      for (const task of tasks) task.reject(error);
+      for (const task of tasks) {
+        for (const waitingTask of task.waitingTasks) waitingTask.reject(error);
+      }
     } finally {
       state.sheetViewMutationRunning = false;
       completeMutation();

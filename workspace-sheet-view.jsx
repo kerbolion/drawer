@@ -9,7 +9,6 @@ import Spin from "antd/es/spin/index.js";
 import {
   AppstoreOutlined,
   CalendarOutlined,
-  CheckOutlined,
   CloseOutlined,
   DeleteOutlined,
   DownOutlined,
@@ -169,52 +168,21 @@ function Filters({ columns, filters, onChange }) {
   );
 }
 
-function InlineCell({ property, rawValue, row, renderEditor, toEditorValue, onCommit }) {
-  const [editing, setEditing] = React.useState(false);
-  const [draft, setDraft] = React.useState(null);
-
-  React.useEffect(() => {
-    if (!editing) setDraft(null);
-  }, [rawValue, editing]);
-
-  if (!editing || property.protected) {
-    return React.createElement(
-      "button",
-      {
-        className: `workspace-table-cell-value ${property.protected ? "is-protected" : ""}`.trim(),
-        type: "button",
-        title: property.protected ? "Campo protegido" : "Editar celda",
-        onClick: () => {
-          if (property.protected) return;
-          setDraft(toEditorValue(rawValue, property));
-          setEditing(true);
-        }
-      },
-      fieldDisplay(rawValue, property)
-    );
-  }
-
+function WorkspaceCellEditor({ property, rawValue, row, renderEditor, toEditorValue, onCommit }) {
   return React.createElement(
     "div",
-    { className: "workspace-table-inline-editor" },
-    React.createElement("div", { className: "workspace-table-inline-control" }, renderEditor(property, draft, setDraft, true)),
-    React.createElement(Button, {
-      type: "text",
-      size: "small",
-      icon: React.createElement(CheckOutlined),
-      "aria-label": "Guardar celda",
-      onClick: async () => {
-        await onCommit(row, property, draft);
-        setEditing(false);
-      }
-    }),
-    React.createElement(Button, {
-      type: "text",
-      size: "small",
-      icon: React.createElement(CloseOutlined),
-      "aria-label": "Cancelar edición",
-      onClick: () => setEditing(false)
-    })
+    {
+      className: "workspace-table-cell-editor related-cell-editor",
+      "data-workspace-row": String(row.number),
+      "data-workspace-column": String(property.index + 1),
+      "data-field-type": property.type,
+      "data-protected": property.protected ? "true" : "false"
+    },
+    renderEditor(
+      property,
+      toEditorValue(rawValue, property),
+      (nextValue) => void onCommit(row, property, nextValue).catch(() => {})
+    )
   );
 }
 
@@ -454,7 +422,7 @@ function TableView({ columns, table, renderEditor, renderTypeIcon, toEditorValue
             ...visibleColumns.map((property) => React.createElement(
               "td",
               { key: property.id, "data-column-id": property.id },
-              React.createElement(InlineCell, {
+              React.createElement(WorkspaceCellEditor, {
                 property,
                 rawValue: row.cells[property.index] || "",
                 row,

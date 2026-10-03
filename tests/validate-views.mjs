@@ -187,6 +187,10 @@ try {
     const panel = document.getElementById("sheets-session-probe").shadowRoot.querySelector(".panel-frame").contentDocument;
     ${body}
   })()`;
+  const viewExpression = (body) => `(() => {
+    const view = document.getElementById("sheets-session-probe").shadowRoot.querySelector(".sheet-view-frame").contentDocument;
+    ${body}
+  })()`;
   const deadline = Date.now() + 10_000;
   let fieldCount = 0;
   while (Date.now() < deadline) {
@@ -210,43 +214,50 @@ try {
   while (Date.now() < tableDeadline) {
     workspaceTable = await cdp.evaluate(`(() => {
       const root = document.getElementById("sheets-session-probe").shadowRoot;
-      const panel = root.querySelector(".panel-frame").contentDocument;
+      const panelFrame = root.querySelector(".panel-frame");
+      const viewFrame = root.querySelector(".sheet-view-frame");
+      const view = viewFrame.contentDocument;
       return {
-        expanded: root.querySelector(".panel-frame").classList.contains("is-sheet-view-expanded"),
-        browser: Boolean(panel.querySelector("[data-workspace-browser]")),
-        documents: Array.from(panel.querySelectorAll(".workspace-browser-document-button"), item => item.textContent.trim()),
-        sheets: Array.from(panel.querySelectorAll(".workspace-browser-sheet"), item => item.textContent.trim()),
-        activeView: panel.querySelector("[data-workspace-view].ant-btn-primary")?.dataset.workspaceView || "",
-        deckRows: Array.from(panel.querySelectorAll("[data-workspace-deck-row]"), row => row.dataset.workspaceDeckRow)
+        mainHidden: panelFrame.hidden,
+        viewOpen: !viewFrame.hidden,
+        viewWidth: viewFrame.getBoundingClientRect().width,
+        viewportWidth: innerWidth,
+        browser: Boolean(view.querySelector("[data-workspace-browser]")),
+        documents: Array.from(view.querySelectorAll(".workspace-browser-document-button"), item => item.textContent.trim()),
+        sheets: Array.from(view.querySelectorAll(".workspace-browser-sheet"), item => item.textContent.trim()),
+        activeView: view.querySelector("[data-workspace-view].ant-btn-primary")?.dataset.workspaceView || "",
+        deckRows: Array.from(view.querySelectorAll("[data-workspace-deck-row]"), row => row.dataset.workspaceDeckRow),
+        antDrawer: Boolean(view.querySelector(".ant-drawer"))
       };
     })()`);
     if (workspaceTable.deckRows?.length === 3) break;
     await delay(100);
   }
-  if (!workspaceTable.expanded || !workspaceTable.browser || workspaceTable.documents.length !== 1 || !workspaceTable.sheets.includes("Contactos") || workspaceTable.activeView !== "deck" || JSON.stringify(workspaceTable.deckRows) !== JSON.stringify(["2", "3", "4"])) {
+  if (!workspaceTable.mainHidden || !workspaceTable.viewOpen || workspaceTable.viewWidth !== workspaceTable.viewportWidth || workspaceTable.antDrawer || !workspaceTable.browser || workspaceTable.documents.length !== 1 || !workspaceTable.sheets.includes("Contactos") || workspaceTable.activeView !== "deck" || JSON.stringify(workspaceTable.deckRows) !== JSON.stringify(["2", "3", "4"])) {
     throw new Error(`La vista Deck no cargo el documento, la hoja y sus registros: ${JSON.stringify(workspaceTable)}`);
   }
 
-  await cdp.evaluate(panelExpression('panel.querySelector("[data-workspace-view=table]").click();'));
+  await cdp.evaluate(viewExpression('view.querySelector("[data-workspace-view=table]").click();'));
   const workspaceRowsDeadline = Date.now() + 3_000;
   while (Date.now() < workspaceRowsDeadline) {
-    if (await cdp.evaluate(panelExpression('return panel.querySelectorAll("[data-workspace-row]").length === 3;'))) break;
+    if (await cdp.evaluate(viewExpression('return view.querySelectorAll("[data-workspace-row]").length === 3;'))) break;
     await delay(80);
   }
-  await cdp.evaluate(panelExpression(`
-    const row = panel.querySelector('[data-workspace-row="2"]');
-    const cell = row.querySelectorAll('td[data-column-id]')[1];
-    cell.querySelector('.workspace-table-cell-value').click();
+  const directEditors = await cdp.evaluate(viewExpression(`
+    const row = view.querySelector('[data-workspace-row="2"]');
+    const cells = Array.from(row.querySelectorAll('td[data-column-id]'));
+    return cells.length > 0 && cells.every(cell => Boolean(cell.querySelector('.workspace-table-cell-editor')));
   `));
-  await delay(80);
-  await cdp.evaluate(panelExpression(`
-    const row = panel.querySelector('[data-workspace-row="2"]');
+  if (!directEditors) throw new Error("Tabla no mostro los editores tipados directamente en sus celdas");
+  await cdp.evaluate(viewExpression(`
+    const row = view.querySelector('[data-workspace-row="2"]');
     const cell = row.querySelectorAll('td[data-column-id]')[1];
-    const input = cell.querySelector('input');
-    const setter = Object.getOwnPropertyDescriptor(panel.defaultView.HTMLInputElement.prototype, 'value').set;
+    const input = cell.querySelector('.workspace-table-cell-editor input');
+    const setter = Object.getOwnPropertyDescriptor(view.defaultView.HTMLInputElement.prototype, 'value').set;
+    setter.call(input, 'Ana desde');
+    input.dispatchEvent(new Event('input', { bubbles: true }));
     setter.call(input, 'Ana desde Tabla');
     input.dispatchEvent(new Event('input', { bubbles: true }));
-    cell.querySelector('[aria-label="Guardar celda"]').click();
   `));
   const inlineEditDeadline = Date.now() + 4_000;
   let inlineEditPaste;
@@ -256,40 +267,61 @@ try {
     await delay(50);
   }
   if (!inlineEditPaste) throw new Error("La edicion directa de Tabla no escribio el campo en Sheets");
+  const inlineCellPastes = (await cdp.evaluate("globalThis.__pastes || []"))
+    .filter((paste) => paste.reference.endsWith("!B2"));
+  if (inlineCellPastes.length !== 1 || inlineCellPastes[0].value !== "Ana desde Tabla") {
+    throw new Error(`La escritura rapida de una celda no se consolido: ${JSON.stringify(inlineCellPastes)}`);
+  }
   sheet.rows[0][1] = "Ana desde Tabla";
   staleVisualizationRows[0][1] = "Ana desde Tabla";
 
-  await cdp.evaluate(panelExpression('panel.querySelector("[data-workspace-open-row=\\"2\\"]").click();'));
+  await cdp.evaluate(viewExpression('view.querySelector("[data-workspace-open-row=\\"2\\"]").click();'));
   const overlayDeadline = Date.now() + 5_000;
   let originalRecord;
   while (Date.now() < overlayDeadline) {
-    originalRecord = await cdp.evaluate(panelExpression(`return {
-      tableVisible: Boolean(panel.querySelector('[data-workspace-browser]')),
-      originalDrawer: panel.querySelector('.drawer')?.classList.contains('is-workspace-record-overlay') || false,
-      oldDrawer: Boolean(panel.querySelector('.workspace-record-drawer')),
-      mask: !panel.querySelector('.workspace-record-mask')?.hidden,
-      fields: panel.querySelectorAll('.drawer > main .field').length,
-      row: panel.defaultView.frameElement.getRootNode().host?.dataset?.row || ''
-    };`));
+    originalRecord = await cdp.evaluate(`(() => {
+      const root = document.getElementById("sheets-session-probe").shadowRoot;
+      const panelFrame = root.querySelector(".panel-frame");
+      const viewFrame = root.querySelector(".sheet-view-frame");
+      const panel = panelFrame.contentDocument;
+      const view = viewFrame.contentDocument;
+      return {
+        tableVisible: Boolean(view.querySelector('[data-workspace-browser]')),
+        mainVisible: !panelFrame.hidden,
+        viewVisible: !viewFrame.hidden,
+        originalDrawer: panel.querySelector('.drawer')?.classList.contains('is-workspace-record-overlay') || false,
+        oldDrawer: Boolean(panel.querySelector('.workspace-record-drawer')),
+        mask: !panel.querySelector('.workspace-record-mask')?.hidden,
+        fields: panel.querySelectorAll('.drawer > main .field').length,
+        row: document.getElementById("sheets-session-probe")?.dataset?.row || ''
+      };
+    })()`);
     if (originalRecord.originalDrawer && originalRecord.fields === 4 && originalRecord.row === "2") break;
     await delay(80);
   }
-  if (!originalRecord.tableVisible || !originalRecord.originalDrawer || originalRecord.oldDrawer || !originalRecord.mask || originalRecord.fields !== 4 || originalRecord.row !== "2") {
+  if (!originalRecord.tableVisible || !originalRecord.mainVisible || !originalRecord.viewVisible || !originalRecord.originalDrawer || originalRecord.oldDrawer || !originalRecord.mask || originalRecord.fields !== 4 || originalRecord.row !== "2") {
     throw new Error(`Abrir no reutilizo el drawer original encima de Tabla: ${JSON.stringify(originalRecord)}`);
   }
 
   await cdp.evaluate(panelExpression('panel.querySelector(".drawer > header .close").click();'));
   await delay(150);
-  const restoredTable = await cdp.evaluate(panelExpression(`return {
-    table: Boolean(panel.querySelector('[data-workspace-row="2"]')),
-    activeView: panel.querySelector('[data-workspace-view].ant-btn-primary')?.dataset.workspaceView || '',
-    overlay: panel.querySelector('.drawer')?.classList.contains('is-workspace-record-overlay') || false
-  };`));
-  if (!restoredTable.table || restoredTable.activeView !== "table" || restoredTable.overlay) {
+  const restoredTable = await cdp.evaluate(`(() => {
+    const root = document.getElementById("sheets-session-probe").shadowRoot;
+    const panelFrame = root.querySelector(".panel-frame");
+    const panel = panelFrame.contentDocument;
+    const view = root.querySelector(".sheet-view-frame").contentDocument;
+    return {
+      table: Boolean(view.querySelector('[data-workspace-row="2"]')),
+      activeView: view.querySelector('[data-workspace-view].ant-btn-primary')?.dataset.workspaceView || '',
+      overlay: panel.querySelector('.drawer')?.classList.contains('is-workspace-record-overlay') || false,
+      mainHidden: panelFrame.hidden
+    };
+  })()`);
+  if (!restoredTable.table || restoredTable.activeView !== "table" || restoredTable.overlay || !restoredTable.mainHidden) {
     throw new Error(`Cerrar detalles no devolvio a la misma vista Tabla: ${JSON.stringify(restoredTable)}`);
   }
 
-  await cdp.evaluate(panelExpression('panel.querySelector("[data-workspace-add-row]").click();'));
+  await cdp.evaluate(viewExpression('view.querySelector("[data-workspace-add-row]").click();'));
   const newRowDeadline = Date.now() + 4_000;
   let newRowDrawer;
   while (Date.now() < newRowDeadline) {
@@ -333,20 +365,19 @@ try {
   await delay(200);
   const clearButtonDeadline = Date.now() + 4_000;
   while (Date.now() < clearButtonDeadline) {
-    if (await cdp.evaluate(panelExpression('return Boolean(panel.querySelector("[aria-label=\\"Limpiar fila 5\\"]"));'))) break;
+    if (await cdp.evaluate(viewExpression('return Boolean(view.querySelector("[aria-label=\\"Limpiar fila 5\\"]"));'))) break;
     await delay(80);
   }
-  const clearButtonReady = await cdp.evaluate(panelExpression('return Boolean(panel.querySelector("[aria-label=\\"Limpiar fila 5\\"]"));'));
+  const clearButtonReady = await cdp.evaluate(viewExpression('return Boolean(view.querySelector("[aria-label=\\"Limpiar fila 5\\"]"));'));
   if (!clearButtonReady) {
-    const diagnostics = await cdp.evaluate(panelExpression(`return {
-      browser: Boolean(panel.querySelector("[data-workspace-browser]")),
-      overlay: panel.querySelector('.drawer')?.classList.contains('is-workspace-record-overlay') || false,
-      rows: Array.from(panel.querySelectorAll("[data-workspace-row]"), row => row.dataset.workspaceRow),
-      clearLabels: Array.from(panel.querySelectorAll("[aria-label^=\\"Limpiar fila\\"]"), button => button.getAttribute("aria-label"))
+    const diagnostics = await cdp.evaluate(viewExpression(`return {
+      browser: Boolean(view.querySelector("[data-workspace-browser]")),
+      rows: Array.from(view.querySelectorAll("[data-workspace-row]"), row => row.dataset.workspaceRow),
+      clearLabels: Array.from(view.querySelectorAll("[aria-label^=\\"Limpiar fila\\"]"), button => button.getAttribute("aria-label"))
     };`));
     throw new Error(`El nuevo registro no permanecio visible en la tabla despues de guardarlo: ${JSON.stringify(diagnostics)}`);
   }
-  await cdp.evaluate(panelExpression('panel.querySelector("[aria-label=\\"Limpiar fila 5\\"]").click();'));
+  await cdp.evaluate(viewExpression('view.querySelector("[aria-label=\\"Limpiar fila 5\\"]").click();'));
   const clearTableDeadline = Date.now() + 4_000;
   let tableClears;
   while (Date.now() < clearTableDeadline) {
@@ -359,7 +390,7 @@ try {
   }
   sheet.rows.pop();
   staleVisualizationRows.pop();
-  await cdp.evaluate(panelExpression('panel.querySelector(".sheet-view-drawer > .ant-drawer-content-wrapper .ant-drawer-close")?.click();'));
+  await cdp.evaluate(viewExpression('view.querySelector("[data-close-sheet-view]")?.click();'));
   await delay(180);
 
   async function configureColumn(column, type, options = "") {
@@ -396,15 +427,15 @@ try {
   const kanbanDeadline = Date.now() + 5_000;
   let kanban;
   while (Date.now() < kanbanDeadline) {
-    kanban = await cdp.evaluate(panelExpression(`
-      const drawer = panel.querySelector(".sheet-view-drawer");
+    kanban = await cdp.evaluate(viewExpression(`
+      const surface = view.querySelector(".sheet-view-panel");
       return {
-        title: drawer?.querySelector(".ant-drawer-title")?.textContent || "",
-        groups: Array.from(drawer?.querySelectorAll("[data-kanban-group]") || [], group => ({
+        title: surface?.querySelector(".sheet-view-panel-title")?.textContent || "",
+        groups: Array.from(surface?.querySelectorAll("[data-kanban-group]") || [], group => ({
           id: group.dataset.kanbanGroup,
           count: Number(group.querySelector(".kanban-count")?.textContent || 0)
         })),
-        rows: Array.from(drawer?.querySelectorAll(".kanban-card-shell") || [], card => card.dataset.sheetRow)
+        rows: Array.from(surface?.querySelectorAll(".kanban-card-shell") || [], card => card.dataset.sheetRow)
       };
     `));
     if (kanban.rows?.length === 3) break;
@@ -414,44 +445,28 @@ try {
     throw new Error(`Kanban no represento toda la hoja: ${JSON.stringify(kanban)}`);
   }
 
-  await cdp.evaluate(panelExpression('panel.querySelector("[data-kanban-expand]").click();'));
-  await delay(250);
-  let expanded = await cdp.evaluate(`(() => {
+  const independentKanban = await cdp.evaluate(`(() => {
     const root = document.getElementById("sheets-session-probe").shadowRoot;
-    const panel = root.querySelector(".panel-frame").contentDocument;
+    const panelFrame = root.querySelector(".panel-frame");
+    const viewFrame = root.querySelector(".sheet-view-frame");
+    const view = viewFrame.contentDocument;
     return {
-      frame: root.querySelector(".panel-frame").classList.contains("is-sheet-view-expanded"),
-      drawer: panel.querySelector(".sheet-view-drawer-root")?.classList.contains("is-expanded") || false,
-      action: panel.querySelector("[data-kanban-expand]")?.getAttribute("aria-label") || ""
+      mainHidden: panelFrame.hidden,
+      viewOpen: !viewFrame.hidden,
+      width: viewFrame.getBoundingClientRect().width,
+      height: viewFrame.getBoundingClientRect().height,
+      viewportWidth: innerWidth,
+      viewportHeight: innerHeight,
+      transition: getComputedStyle(viewFrame).transitionDuration,
+      antDrawer: Boolean(view.querySelector(".ant-drawer")),
+      expandAction: Boolean(view.querySelector("[data-kanban-expand]"))
     };
   })()`);
-  if (!expanded.frame || !expanded.drawer || expanded.action !== "Restaurar") {
-    throw new Error(`Kanban no se amplio a todo el sitio: ${JSON.stringify(expanded)}`);
+  if (!independentKanban.mainHidden || !independentKanban.viewOpen || independentKanban.width !== independentKanban.viewportWidth || independentKanban.height !== independentKanban.viewportHeight || independentKanban.transition !== "0s" || independentKanban.antDrawer || independentKanban.expandAction) {
+    throw new Error(`Kanban no abrio como superficie completa independiente: ${JSON.stringify(independentKanban)}`);
   }
 
-  await cdp.evaluate(panelExpression('panel.querySelector(".sheet-view-drawer .ant-drawer-close").click();'));
-  await delay(250);
-  await cdp.evaluate(panelExpression('panel.querySelector("[data-sheet-view=kanban]").click();'));
-  const reopenedDeadline = Date.now() + 5_000;
-  while (Date.now() < reopenedDeadline) {
-    expanded = await cdp.evaluate(`(() => {
-      const root = document.getElementById("sheets-session-probe").shadowRoot;
-      const panel = root.querySelector(".panel-frame").contentDocument;
-      return {
-        frame: root.querySelector(".panel-frame").classList.contains("is-sheet-view-expanded"),
-        action: panel.querySelector("[data-kanban-expand]")?.getAttribute("aria-label") || "",
-        rows: panel.querySelectorAll(".sheet-view-drawer .kanban-card-shell:not(.kanban-card-overlay)").length
-      };
-    })()`);
-    if (expanded.frame && expanded.action === "Restaurar" && expanded.rows === 3) break;
-    await delay(100);
-  }
-  if (!expanded.frame || expanded.action !== "Restaurar" || expanded.rows !== 3) {
-    throw new Error(`El modo ampliado de Kanban no persistio al reabrir: ${JSON.stringify(expanded)}`);
-  }
-  await delay(250);
-
-  await cdp.evaluate(panelExpression('panel.querySelector(\'.kanban-card-shell[data-sheet-row="4"]\').click();'));
+  await cdp.evaluate(viewExpression('view.querySelector(\'.kanban-card-shell[data-sheet-row="4"]\').click();'));
   await delay(250);
   const afterSingleClick = await cdp.evaluate(`({ box: document.getElementById("t-name-box").value, row: document.getElementById("sheets-session-probe").dataset.row })`);
   if (afterSingleClick.box === "A4" && afterSingleClick.row === "4") {
@@ -459,11 +474,11 @@ try {
   }
 
   const dragPoint = await cdp.evaluate(`(() => {
-    const frame = document.getElementById("sheets-session-probe").shadowRoot.querySelector(".panel-frame");
+    const frame = document.getElementById("sheets-session-probe").shadowRoot.querySelector(".sheet-view-frame");
     const frameRect = frame.getBoundingClientRect();
-    const panel = frame.contentDocument;
-    const card = panel.querySelector('.kanban-card-shell[data-sheet-row="4"]');
-    const target = Array.from(panel.querySelectorAll("[data-kanban-group]")).find(group => group.dataset.kanbanGroup === "En proceso");
+    const view = frame.contentDocument;
+    const card = view.querySelector('.kanban-card-shell[data-sheet-row="4"]');
+    const target = Array.from(view.querySelectorAll("[data-kanban-group]")).find(group => group.dataset.kanbanGroup === "En proceso");
     const start = card.getBoundingClientRect();
     const end = target.getBoundingClientRect();
     return {
@@ -485,11 +500,11 @@ try {
     type: "mouseMoved", x: dragPoint.startX + 12, y: dragPoint.startY + 4, button: "left", buttons: 1
   });
   await delay(120);
-  const dragVisual = await cdp.evaluate(panelExpression(`return {
-    overlay: Boolean(panel.querySelector("[data-drag-overlay]")),
-    source: Array.from(panel.querySelectorAll('.kanban-card-shell[data-sheet-row="4"]')).some(card => card.classList.contains("is-dragging")),
-    classes: Array.from(panel.querySelectorAll('.kanban-card-shell[data-sheet-row="4"]'), card => card.className),
-    drawers: panel.querySelectorAll(".sheet-view-drawer").length
+  const dragVisual = await cdp.evaluate(viewExpression(`return {
+    overlay: Boolean(view.querySelector("[data-drag-overlay]")),
+    source: Array.from(view.querySelectorAll('.kanban-card-shell[data-sheet-row="4"]')).some(card => card.classList.contains("is-dragging")),
+    classes: Array.from(view.querySelectorAll('.kanban-card-shell[data-sheet-row="4"]'), card => card.className),
+    panels: view.querySelectorAll(".sheet-view-panel").length
   };`));
   if (!dragVisual.overlay) {
     throw new Error(`Kanban no mostro la animacion de arrastre: ${JSON.stringify(dragVisual)}`);
@@ -498,7 +513,7 @@ try {
     type: "mouseMoved", x: dragPoint.endX, y: dragPoint.endY, button: "left", buttons: 1
   });
   await delay(100);
-  const dragTarget = await cdp.evaluate(panelExpression(`return Array.from(panel.querySelectorAll("[data-kanban-group]"), group => ({
+  const dragTarget = await cdp.evaluate(viewExpression(`return Array.from(view.querySelectorAll("[data-kanban-group]"), group => ({
     id: group.dataset.kanbanGroup,
     active: group.classList.contains("is-drag-over")
   }));`));
@@ -510,11 +525,11 @@ try {
   });
   await delay(250);
   const secondDrag = await cdp.evaluate(`(() => {
-    const frame = document.getElementById("sheets-session-probe").shadowRoot.querySelector(".panel-frame");
+    const frame = document.getElementById("sheets-session-probe").shadowRoot.querySelector(".sheet-view-frame");
     const frameRect = frame.getBoundingClientRect();
-    const panel = frame.contentDocument;
-    const card = panel.querySelector('.kanban-card-shell[data-sheet-row="3"]');
-    const target = Array.from(panel.querySelectorAll("[data-kanban-group]")).find(group => group.dataset.kanbanGroup === "Nuevo");
+    const view = frame.contentDocument;
+    const card = view.querySelector('.kanban-card-shell[data-sheet-row="3"]');
+    const target = Array.from(view.querySelectorAll("[data-kanban-group]")).find(group => group.dataset.kanbanGroup === "Nuevo");
     const start = card.getBoundingClientRect();
     const end = target.getBoundingClientRect();
     return {
@@ -560,11 +575,11 @@ try {
     throw new Error(`Kanban restauro la seleccion anterior en lugar de conservar la ultima celda editada: ${editedSelection}`);
   }
   const clearDrag = await cdp.evaluate(`(() => {
-    const frame = document.getElementById("sheets-session-probe").shadowRoot.querySelector(".panel-frame");
+    const frame = document.getElementById("sheets-session-probe").shadowRoot.querySelector(".sheet-view-frame");
     const frameRect = frame.getBoundingClientRect();
-    const panel = frame.contentDocument;
-    const card = panel.querySelector('.kanban-card-shell[data-sheet-row="2"]');
-    const target = panel.querySelector('[data-kanban-group="__empty__"]');
+    const view = frame.contentDocument;
+    const card = view.querySelector('.kanban-card-shell[data-sheet-row="2"]');
+    const target = view.querySelector('[data-kanban-group="__empty__"]');
     const start = card.getBoundingClientRect();
     const end = target.getBoundingClientRect();
     return {
@@ -603,8 +618,8 @@ try {
   if (!clearedSelection.endsWith("!C2")) {
     throw new Error(`La limpieza del Kanban no conservo la celda editada: ${clearedSelection}`);
   }
-  await cdp.evaluate(panelExpression(`
-    panel.querySelector('.kanban-card-shell[data-sheet-row="4"]').dispatchEvent(new MouseEvent("dblclick", {
+  await cdp.evaluate(viewExpression(`
+    view.querySelector('.kanban-card-shell[data-sheet-row="4"]').dispatchEvent(new MouseEvent("dblclick", {
       bubbles: true,
       cancelable: true,
       composed: true,
@@ -654,13 +669,13 @@ try {
   const calendarDeadline = Date.now() + 5_000;
   let calendar;
   while (Date.now() < calendarDeadline) {
-    calendar = await cdp.evaluate(panelExpression(`
-      const drawer = panel.querySelector(".sheet-view-drawer");
+    calendar = await cdp.evaluate(viewExpression(`
+      const surface = view.querySelector(".sheet-view-panel");
       return {
-        title: drawer?.querySelector(".ant-drawer-title")?.textContent || "",
-        month: drawer?.querySelector(".month-controls strong")?.textContent || "",
-        weekdays: Array.from(drawer?.querySelectorAll(".calendar-weekday") || [], day => day.textContent),
-        rows: Array.from(drawer?.querySelectorAll(".calendar-item") || [], item => item.dataset.sheetRow)
+        title: surface?.querySelector(".sheet-view-panel-title")?.textContent || "",
+        month: surface?.querySelector(".month-controls strong")?.textContent || "",
+        weekdays: Array.from(surface?.querySelectorAll(".calendar-weekday") || [], day => day.textContent),
+        rows: Array.from(surface?.querySelectorAll(".calendar-item") || [], item => item.dataset.sheetRow)
       };
     `));
     if (calendar.rows?.length === 3) break;
@@ -670,65 +685,71 @@ try {
     throw new Error(`Calendario no siguio el patron de Workspace: ${JSON.stringify(calendar)}`);
   }
 
-  let calendarExpansion = await cdp.evaluate(`(() => {
+  let independentCalendar = await cdp.evaluate(`(() => {
     const root = document.getElementById("sheets-session-probe").shadowRoot;
-    const panel = root.querySelector(".panel-frame").contentDocument;
+    const panelFrame = root.querySelector(".panel-frame");
+    const viewFrame = root.querySelector(".sheet-view-frame");
+    const view = viewFrame.contentDocument;
     return {
-      frame: root.querySelector(".panel-frame").classList.contains("is-sheet-view-expanded"),
-      drawer: panel.querySelector(".sheet-view-drawer-root")?.classList.contains("is-expanded") || false,
-      action: panel.querySelector("[data-calendar-expand]")?.getAttribute("aria-label") || ""
+      mainHidden: panelFrame.hidden,
+      viewOpen: !viewFrame.hidden,
+      width: viewFrame.getBoundingClientRect().width,
+      height: viewFrame.getBoundingClientRect().height,
+      viewportWidth: innerWidth,
+      viewportHeight: innerHeight,
+      transition: getComputedStyle(viewFrame).transitionDuration,
+      antDrawer: Boolean(view.querySelector(".ant-drawer")),
+      expandAction: Boolean(view.querySelector("[data-calendar-expand]"))
     };
   })()`);
-  if (calendarExpansion.frame || calendarExpansion.drawer || calendarExpansion.action !== "Ampliar") {
-    throw new Error(`Calendario compartio indebidamente el modo ampliado de Kanban: ${JSON.stringify(calendarExpansion)}`);
+  if (!independentCalendar.mainHidden || !independentCalendar.viewOpen || independentCalendar.width !== independentCalendar.viewportWidth || independentCalendar.height !== independentCalendar.viewportHeight || independentCalendar.transition !== "0s" || independentCalendar.antDrawer || independentCalendar.expandAction) {
+    throw new Error(`Calendario no abrio como superficie completa independiente: ${JSON.stringify(independentCalendar)}`);
   }
 
-  await cdp.evaluate(panelExpression('panel.querySelector("[data-calendar-expand]").click();'));
-  await delay(250);
-  calendarExpansion = await cdp.evaluate(`(() => {
+  await cdp.evaluate(viewExpression('view.querySelector("[data-close-sheet-view]").click();'));
+  await delay(180);
+  const calendarClosed = await cdp.evaluate(`(() => {
     const root = document.getElementById("sheets-session-probe").shadowRoot;
-    const panel = root.querySelector(".panel-frame").contentDocument;
     return {
-      frame: root.querySelector(".panel-frame").classList.contains("is-sheet-view-expanded"),
-      drawer: panel.querySelector(".sheet-view-drawer-root")?.classList.contains("is-expanded") || false,
-      action: panel.querySelector("[data-calendar-expand]")?.getAttribute("aria-label") || ""
+      mainHidden: root.querySelector(".panel-frame").hidden,
+      viewHidden: root.querySelector(".sheet-view-frame").hidden
     };
   })()`);
-  if (!calendarExpansion.frame || !calendarExpansion.drawer || calendarExpansion.action !== "Restaurar") {
-    throw new Error(`Calendario no se amplio a todo el sitio: ${JSON.stringify(calendarExpansion)}`);
+  if (calendarClosed.mainHidden || !calendarClosed.viewHidden) {
+    throw new Error(`Cerrar Calendario no restauro el drawer principal: ${JSON.stringify(calendarClosed)}`);
   }
 
-  await cdp.evaluate(panelExpression('panel.querySelector(".sheet-view-drawer .ant-drawer-close").click();'));
-  await delay(250);
   await cdp.evaluate(panelExpression('panel.querySelector("[data-sheet-view=calendar]").click();'));
   const calendarReopenDeadline = Date.now() + 5_000;
   while (Date.now() < calendarReopenDeadline) {
-    calendarExpansion = await cdp.evaluate(`(() => {
+    independentCalendar = await cdp.evaluate(`(() => {
       const root = document.getElementById("sheets-session-probe").shadowRoot;
-      const panel = root.querySelector(".panel-frame").contentDocument;
+      const panelFrame = root.querySelector(".panel-frame");
+      const viewFrame = root.querySelector(".sheet-view-frame");
+      const view = viewFrame.contentDocument;
       return {
-        frame: root.querySelector(".panel-frame").classList.contains("is-sheet-view-expanded"),
-        action: panel.querySelector("[data-calendar-expand]")?.getAttribute("aria-label") || "",
-        rows: panel.querySelectorAll(".sheet-view-drawer .calendar-item").length
+        mainHidden: panelFrame.hidden,
+        viewOpen: !viewFrame.hidden,
+        rows: view.querySelectorAll(".calendar-item").length
       };
     })()`);
-    if (calendarExpansion.frame && calendarExpansion.action === "Restaurar" && calendarExpansion.rows === 3) break;
+    if (independentCalendar.mainHidden && independentCalendar.viewOpen && independentCalendar.rows === 3) break;
     await delay(100);
   }
-  if (!calendarExpansion.frame || calendarExpansion.action !== "Restaurar" || calendarExpansion.rows !== 3) {
-    throw new Error(`El modo ampliado de Calendario no persistio al reabrir: ${JSON.stringify(calendarExpansion)}`);
+  if (!independentCalendar.mainHidden || !independentCalendar.viewOpen || independentCalendar.rows !== 3) {
+    throw new Error(`Calendario no reabrio en su superficie independiente: ${JSON.stringify(independentCalendar)}`);
   }
 
   const calendarSelectionBeforeClick = await cdp.evaluate(`({ box: document.getElementById("t-name-box").value, row: document.getElementById("sheets-session-probe").dataset.row })`);
-  await cdp.evaluate(panelExpression('panel.querySelector(\'.calendar-item[data-sheet-row="2"]\').click();'));
+  await cdp.evaluate(viewExpression('view.querySelector(\'.calendar-item[data-sheet-row="2"]\').click();'));
   await delay(250);
   const calendarSelectionAfterClick = await cdp.evaluate(`({ box: document.getElementById("t-name-box").value, row: document.getElementById("sheets-session-probe").dataset.row })`);
   if (calendarSelectionAfterClick.box !== calendarSelectionBeforeClick.box || calendarSelectionAfterClick.row !== calendarSelectionBeforeClick.row) {
     throw new Error(`El evento del Calendario abrio su fila con un solo clic: ${JSON.stringify({ calendarSelectionBeforeClick, calendarSelectionAfterClick })}`);
   }
 
-  await cdp.evaluate(panelExpression(`
-    panel.querySelector('.calendar-item[data-sheet-row="2"]').dispatchEvent(new MouseEvent("dblclick", {
+  await cdp.evaluate(viewExpression(`
+    view.querySelector('.calendar-item[data-sheet-row="2"]').dispatchEvent(new MouseEvent("dblclick", {
       bubbles: true,
       cancelable: true,
       composed: true,
@@ -746,7 +767,7 @@ try {
     throw new Error(`El evento no abrio su fila: ${JSON.stringify(selected)}`);
   }
 
-  console.log("VISTAS_OK: Deck y Tabla navegan, editan, crean y limpian; detalles reutiliza el drawer original; Kanban y Calendario conservan sus flujos.");
+  console.log("VISTAS_OK: Tabla, Kanban y Calendario usan una superficie independiente; sus registros reutilizan el drawer original.");
 } finally {
   cdp?.close();
   if (browser.pid) spawnSync("taskkill", ["/PID", String(browser.pid), "/T", "/F"], { stdio: "ignore", windowsHide: true });
