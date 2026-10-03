@@ -10,6 +10,9 @@
   let interactionQueue = Promise.resolve();
   let bridgeInteractionDepth = 0;
   let sheetChangeTimer = null;
+  let pendingSheetChange = null;
+  let observedSaveIndicator = null;
+  let saveIndicatorObserver = null;
 
   function enqueueInteraction(task) {
     const queued = interactionQueue.then(task, task);
@@ -32,14 +35,71 @@
     return target instanceof Element && (target.id === "t-name-box" || Boolean(target.closest("#t-name-box")));
   }
 
+  function saveIndicator() {
+    return document.getElementById("docs-save-indicator-badge");
+  }
+
+  function normalizedSaveIndicator(indicator) {
+    return [
+      indicator?.getAttribute("aria-label"),
+      indicator?.getAttribute("data-tooltip"),
+      indicator?.textContent,
+      ...Array.from(indicator?.querySelectorAll("[class]") || [], (node) => node.className)
+    ].join(" ").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+  }
+
+  function saveInProgress(indicator) {
+    return /(?:guardando|saving|sincronizando|syncing|docs-sync)/.test(normalizedSaveIndicator(indicator));
+  }
+
+  function emitPendingSheetChange() {
+    if (!pendingSheetChange) return;
+    if (bridgeInteractionDepth > 0) {
+      clearTimeout(sheetChangeTimer);
+      sheetChangeTimer = setTimeout(emitPendingSheetChange, 150);
+      return;
+    }
+    const { reason } = pendingSheetChange;
+    pendingSheetChange = null;
+    sheetChangeTimer = null;
+    window.postMessage({ source: SOURCE, type: "sheet-change", reason }, location.origin);
+  }
+
+  function inspectSaveIndicator() {
+    if (!pendingSheetChange) return;
+    const indicator = observeSaveIndicator();
+    if (!indicator) return;
+    if (saveInProgress(indicator)) emitPendingSheetChange();
+  }
+
+  function observeSaveIndicator() {
+    const indicator = saveIndicator();
+    if (indicator === observedSaveIndicator) return indicator;
+    saveIndicatorObserver?.disconnect();
+    observedSaveIndicator = indicator;
+    if (!indicator) return null;
+    saveIndicatorObserver = new MutationObserver(inspectSaveIndicator);
+    saveIndicatorObserver.observe(indicator, {
+      attributes: true,
+      attributeFilter: ["aria-label", "class", "data-tooltip"],
+      childList: true,
+      characterData: true,
+      subtree: true
+    });
+    return indicator;
+  }
+
   function notifySheetChange(reason) {
     if (bridgeInteractionDepth > 0) return;
+    const committed = reason !== "input" && reason !== "composition";
+    const indicator = observeSaveIndicator();
+    pendingSheetChange = { reason };
     clearTimeout(sheetChangeTimer);
-    sheetChangeTimer = setTimeout(() => {
-      sheetChangeTimer = null;
-      if (bridgeInteractionDepth > 0) return;
-      window.postMessage({ source: SOURCE, type: "sheet-change", reason }, location.origin);
-    }, reason === "input" || reason === "composition" ? 160 : 60);
+    if (!indicator) {
+      sheetChangeTimer = setTimeout(emitPendingSheetChange, committed ? 60 : 160);
+      return;
+    }
+    inspectSaveIndicator();
   }
 
   document.addEventListener("input", (event) => {
@@ -57,7 +117,8 @@
     const key = String(event.key || "").toLowerCase();
     const command = event.ctrlKey || event.metaKey;
     const editable = event.target instanceof Element && Boolean(event.target.closest("input:not(#t-name-box), textarea, [contenteditable='true'], .cell-input"));
-    if (key === "delete" || key === "backspace" || (command && (key === "z" || key === "y")) || (editable && (key === "enter" || key === "tab"))) {
+    const directSheetCommand = !editable && (key === "delete" || key === "backspace" || (command && (key === "z" || key === "y")));
+    if (directSheetCommand || (editable && (key === "enter" || key === "tab"))) {
       notifySheetChange("keyboard");
     }
   }, true);

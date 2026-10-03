@@ -86,6 +86,12 @@ const webServer = http.createServer((request, response) => {
   if (url.pathname.endsWith("/edit")) {
     response.end(`<!doctype html><html><body>
       <input id="t-name-box" value="A2">
+      <div id="docs-save-indicator-badge" aria-label="Estado del documento: Guardado en Drive" data-tooltip="Ver estado del documento">
+        <div class="docs-save-indicator">
+          <div id="docs-save-indicator-id"><div class="docs-icon-img docs-save-20"></div></div>
+          <div class="docs-save-indicator-caption">Guardado en Drive</div>
+        </div>
+      </div>
       <div class="docs-sheet-tab docs-sheet-active-tab" id="sheet-button-0"><span class="docs-sheet-tab-name">Contactos</span></div>
       <div class="docs-sheet-tab" id="sheet-button-1"><span class="docs-sheet-tab-name">Servicios</span></div>
     </body></html>`);
@@ -383,8 +389,34 @@ try {
     throw new Error(`Relacion Contactos -> Servicios incorrecta: ${JSON.stringify(services)}`);
   }
 
+  const setMockSaveState = async (saving) => {
+    const label = saving ? "Guardando…" : "Guardado en Drive";
+    const iconClass = saving ? "docs-sync-20" : "docs-save-20";
+    await cdp.evaluate(`(() => {
+      const badge = document.getElementById("docs-save-indicator-badge");
+      const icon = document.querySelector("#docs-save-indicator-id .docs-icon-img");
+      const caption = badge.querySelector(".docs-save-indicator-caption");
+      badge.setAttribute("aria-label", ${JSON.stringify(`Estado del documento: ${label}`)});
+      icon.className = ${JSON.stringify(`docs-icon-img ${iconClass}`)};
+      caption.textContent = ${JSON.stringify(label)};
+    })()`);
+    await delay(40);
+  };
+
   sheets.Contactos.rows[0][1] = "Ana en vivo";
   await cdp.evaluate(`document.body.dispatchEvent(new Event("input", { bubbles: true }))`);
+  await delay(350);
+  const beforeSave = await cdp.evaluate(snapshot);
+  if (beforeSave.fields.includes("Ana en vivo")) {
+    throw new Error(`El drawer leyó el cambio antes de que Sheets iniciara el guardado: ${JSON.stringify(beforeSave)}`);
+  }
+  await setMockSaveState(true);
+  await delay(200);
+  const whileSaving = await cdp.evaluate(snapshot);
+  if (whileSaving.fields.includes("Ana en vivo")) {
+    throw new Error(`El drawer leyó el cambio mientras Sheets seguía guardando: ${JSON.stringify(whileSaving)}`);
+  }
+  await setMockSaveState(false);
   const liveUpdateDeadline = Date.now() + 6_000;
   let liveUpdate;
   while (Date.now() < liveUpdateDeadline) {
@@ -398,6 +430,8 @@ try {
 
   sheets.Contactos.rows[0][1] = "Ana";
   await cdp.evaluate(`document.body.dispatchEvent(new Event("input", { bubbles: true }))`);
+  await setMockSaveState(true);
+  await setMockSaveState(false);
   const liveRestoreDeadline = Date.now() + 6_000;
   while (Date.now() < liveRestoreDeadline) {
     liveUpdate = await cdp.evaluate(snapshot);
