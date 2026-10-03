@@ -19,7 +19,7 @@ La interfaz usa Ant Design `5.29.3`, la misma versión instalada en `workspace-a
 - Permite editar los relacionados directamente en las celdas de la vista Tabla o desde su drawer usando los mismos controles tipados del formulario principal.
 - Integra los cambios relacionados con **Guardar cambios** y **Cancelar**, escribe únicamente las celdas modificadas en la hoja de destino, restaura la hoja principal y confirma cada fila en segundo plano.
 - Guarda filas y relacionados en caché local persistente, los muestra primero y comprueba cambios en segundo plano.
-- Conserva una configuración independiente por documento y pestaña en `chrome.storage.local`.
+- Conserva una configuración independiente por cuenta, documento y pestaña: abre primero desde `chrome.storage.local` y la sincroniza como un JSON individual en el servidor.
 - Permite configurar cada columna como texto, área de texto, número, monto, fecha, fecha y hora, hora, selección, selección múltiple, estado, casilla, URL, teléfono o correo.
 - Usa los componentes reales de Ant Design para editar cada tipo y muestra el mismo icono de propiedad que Workspace.
 - Permite agregar, eliminar y colorear las opciones de selección y Estado con la paleta de Workspace.
@@ -48,12 +48,39 @@ Pulsa el botón circular de Sheets CRM para abrir el panel. Cambia un campo y pu
 
 Esta versión supone que los encabezados están en la fila 1 y admite columnas hasta `ZZ`.
 
+## Cuentas, pagos y persistencia
+
+La extensión sigue el patrón de MinimalBuilder con una separación explícita entre cliente y servidor:
+
+- El service worker inicia sesión y conserva el JWT en `chrome.storage.local`; el token no se entrega al DOM de Google Sheets.
+- El servidor comprueba usuario activo, estado y vencimiento de la cuenta en cada lectura o escritura.
+- Los roles disponibles son `superadmin`, `admin` y `user`. El superadministrador puede crear, suspender, renovar e impersonar cuentas, además de administrar planes.
+- Stripe Checkout crea o renueva suscripciones y el webhook activa, suspende y actualiza el vencimiento de la cuenta.
+- Cada documento se almacena en `workspaces` como un JSON separado por `account_id` y `spreadsheet_id`. Las revisiones evitan sobrescribir silenciosamente cambios de otra sesión.
+- Solo se sincroniza la configuración del workspace: nombres de hojas y columnas, tipos, opciones, colores y preferencias de vista. Los valores de las filas continúan en el navegador y en Google Sheets.
+
+El backend se encuentra en [`server/`](server/) y su despliegue se documenta en [`server/README.md`](server/README.md). La extensión espera el servicio en `https://solode.click/api/sheets-drawer`; el proxy público debe dirigir ese namespace al contenedor.
+
+## Distribución protegida
+
+Durante el desarrollo se puede cargar la raíz del proyecto. Para compartir o publicar la extensión usa:
+
+```powershell
+npm run build:extension
+```
+
+Ese comando genera `dist-extension/` con únicamente el manifiesto y los archivos ejecutables requeridos. Vite agrupa React y Ant Design, y Terser elimina comentarios, acorta identificadores y minimiza `content`, `background` y `page-write`. Los archivos fuente, pruebas, servidor y credenciales no se copian al paquete distribuible.
+
+Chrome Web Store permite minificación, pero prohíbe ocultar la funcionalidad mediante ofuscación y también prohíbe ejecutar JavaScript remoto en Manifest V3. Por eso la protección efectiva se basa en autorización del servidor, persistencia remota y secretos exclusivamente del backend. El runtime remoto de MinimalBuilder pertenece a los sitios publicados; no es la lógica ejecutable de su extensión.
+
+Antes de publicar, hospeda [`PRIVACY.md`](PRIVACY.md) en una URL pública y declárala en Chrome Web Store.
+
 ## Compartir la carpeta
 
 El directorio ya incluye el skill de Codex en `.codex/skills/google-sheets-browser`. Para usarlo en otra computadora basta con compartir la carpeta completa:
 
 1. Instala una versión actual de Node.js.
-2. Abre `chrome://extensions`, activa **Modo de desarrollador** y carga esta carpeta con **Cargar descomprimida**.
+2. Ejecuta `npm install` y `npm run build:extension`; abre `chrome://extensions`, activa **Modo de desarrollador** y carga `dist-extension` con **Cargar descomprimida**.
 3. Abre esta misma carpeta como proyecto en Codex e inicia una conversación nueva.
 4. Abre en el navegador la hoja de Google Sheets y conserva iniciada la sesión de Google.
 5. Escribe: `Usa $google-sheets-browser para inspeccionar esta hoja: URL_DE_LA_HOJA`.

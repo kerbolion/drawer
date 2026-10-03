@@ -1,0 +1,28 @@
+services:
+  mariadb:
+    image: mariadb:11
+    restart: unless-stopped
+    environment:
+      MARIADB_DATABASE: ${DB_NAME:-sheetsdrawer}
+      MARIADB_USER: ${DB_USER:-sheetsdrawer}
+      MARIADB_PASSWORD: ${DB_PASSWORD:-change-this-database-password}
+      MARIADB_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-change-this-root-password}
+    volumes:
+      - sheetsdrawer-db:/var/lib/mysql
+
+  app:
+    build:
+      context: ..
+      dockerfile: server/Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DB_HOST: mariadb
+      DB_PORT: 3306
+    ports:
+      - "8081:3000"
+    depends_on:
+      - mariadb
+
+volumes:
+  sheetsdrawer-db:

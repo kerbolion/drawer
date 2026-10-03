@@ -1,0 +1,8 @@
+.git
+.codex
+node_modules
+**/node_modules
+**/.env
+dist
+dist-extension
+tests

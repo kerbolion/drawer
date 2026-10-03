@@ -7,7 +7,7 @@ description: Read, inspect, edit, or clear Google Sheets through the Sheets Row 
 
 Use `scripts/sheets.mjs` as the only transport. It starts a short-lived server on `127.0.0.1:17373`; the browser extension picks up one command, executes it in the matching open spreadsheet, returns the result, and the server exits.
 
-The target spreadsheet must be open in a browser where Sheets Row Drawer is loaded. Pass the user's exact Sheets URL so the bridge selects the correct document and `gid`.
+The target spreadsheet must be open in a browser where Sheets Row Drawer is loaded and signed in with an active Sheets CRM account. Pass the user's exact Sheets URL so the bridge selects the correct document and `gid`.
 
 ## Commands
 
@@ -37,6 +37,7 @@ Use `inspect` only for a small range in the active sheet when a displayed value 
 ## Limitations
 
 - The spreadsheet must remain open and responsive in a Chromium browser with the unpacked extension loaded. The active Google session must already have access to the document and edit permission for mutations.
+- Sheets Row Drawer must have an authenticated, active, unexpired service account. Signed-out, suspended, or expired accounts do not poll the local bridge.
 - The bridge is local to the computer at `127.0.0.1:17373`. It accepts one command at a time; a second command fails while the port is occupied. The default command timeout is 30 seconds and can be changed with `--timeout`.
 - Supported operations are `info`, `read`, `inspect`, `write`, and `clear`. There are no dedicated operations for formatting, validation rules, comments, protected ranges, charts, filters, or creating, deleting, renaming, or moving sheets, rows, and columns.
 - Ranges must use A1 notation with one or two column letters (`A` through `ZZ`) and positive row numbers. Whole-column ranges, named ranges, disjoint ranges, and R1C1 notation are not accepted.
@@ -50,4 +51,4 @@ Use `inspect` only for a small range in the active sheet when a displayed value 
 
 An explicit request to edit or clear specified data authorizes that operation. If the target sheet, range, or replacement values are ambiguous, resolve the ambiguity before mutating the document. Do not treat a read request as authorization to write.
 
-If the matching spreadsheet is not open, open the exact URL in the user's default browser and retry the command. If the bridge still times out, verify that the unpacked extension was reloaded after its latest build, then retry once. Do not fall back to Google APIs or attempt to read browser cookies.
+If the matching spreadsheet is not open, open the exact URL in the user's default browser and retry the command. If the bridge still times out, verify that the extension was loaded from the latest `dist-extension` build, that its account session is active, and that Google Sheets was refreshed; then retry once. Do not fall back to Google APIs or attempt to read browser cookies.

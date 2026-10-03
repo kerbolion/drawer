@@ -60,6 +60,7 @@ import dayjs from "dayjs";
 import "dayjs/locale/es.js";
 import { CircleDollarSign, Clock3, Hash, ListChecks, Type } from "lucide-react";
 import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
+import { createCloudAccountUi } from "./cloud-account.js";
 
 (() => {
   "use strict";
@@ -167,7 +168,13 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
     relatedDraftListeners: new Set(),
     relatedDraftVersion: 0,
     activity: { row: false, relations: false, config: false },
-    indicatorError: false
+    indicatorError: false,
+    cloudRequired: Boolean(globalThis.chrome?.runtime?.id && globalThis.chrome?.runtime?.sendMessage),
+    cloudSession: null,
+    cloudWorkspaceRevision: 0,
+    cloudWorkspaceHydrated: false,
+    cloudWorkspaceTimer: null,
+    cloudWorkspaceWriteQueue: Promise.resolve()
   };
 
   const host = document.createElement("div");
@@ -459,6 +466,54 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
       background: ${antdTokens.colorBgContainer}; animation: property-enter ${antdTokens.motionDurationMid} ease-out;
     }
     .property-drawer[hidden] { display: none; }
+    .account-drawer {
+      position: fixed; inset: 0; z-index: 30; display: flex; flex-direction: column;
+      background: ${antdTokens.colorBgContainer}; animation: property-enter ${antdTokens.motionDurationMid} ease-out;
+    }
+    .account-drawer[hidden] { display: none; }
+    .cloud-account-body { max-width: 820px; width: 100%; margin: 0 auto; }
+    .cloud-card {
+      display: grid; gap: 14px; margin-bottom: 14px; padding: 18px;
+      border: 1px solid var(--workspace-border); border-radius: 8px;
+      background: var(--workspace-surface); box-shadow: 0 6px 18px var(--workspace-shadow-soft);
+    }
+    .cloud-card h3 { margin: 0; color: var(--workspace-text); font-size: 15px; }
+    .cloud-copy { margin: 0; color: var(--workspace-text-muted); font-size: 12px; }
+    .cloud-form-item { display: grid; gap: 6px; color: var(--workspace-text); font-size: 13px; font-weight: 600; }
+    .cloud-form-label { display: block; }
+    .cloud-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 4px; }
+    .cloud-message { margin-bottom: 14px; padding: 9px 12px; border: 1px solid; border-radius: 6px; font-size: 12px; }
+    .cloud-message.error { border-color: ${antdTokens.colorErrorBorder}; background: ${antdTokens.colorErrorBg}; color: ${antdTokens.colorErrorText}; }
+    .cloud-message.success { border-color: ${antdTokens.colorSuccessBorder}; background: ${antdTokens.colorSuccessBg}; color: ${antdTokens.colorSuccessText}; }
+    .cloud-account-summary {
+      display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 12px;
+      margin-bottom: 14px; padding: 14px 16px; border: 1px solid var(--workspace-border); border-radius: 8px;
+      background: var(--workspace-surface);
+    }
+    .cloud-account-summary > div { display: grid; gap: 2px; min-width: 0; }
+    .cloud-account-summary strong, .cloud-account-summary span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .cloud-account-summary > div span { color: var(--workspace-text-muted); font-size: 12px; }
+    .cloud-avatar {
+      display: inline-flex; width: 38px; height: 38px; align-items: center; justify-content: center;
+      border-radius: 50%; background: ${antdTokens.colorPrimaryBg}; color: ${antdTokens.colorPrimary}; font-weight: 700;
+    }
+    .cloud-status { padding: 3px 8px; border-radius: 999px; background: ${antdTokens.colorSuccessBg}; color: ${antdTokens.colorSuccessText}; font-size: 11px; }
+    .cloud-status.suspended { background: ${antdTokens.colorErrorBg}; color: ${antdTokens.colorErrorText}; }
+    .cloud-tabs { display: flex; gap: 4px; margin-bottom: 14px; border-bottom: 1px solid var(--workspace-border); }
+    .cloud-tabs button { border: 0; border-bottom: 2px solid transparent; padding: 8px 10px; background: transparent; color: var(--workspace-text-muted); cursor: pointer; }
+    .cloud-tabs button.is-active { border-bottom-color: var(--workspace-primary); color: var(--workspace-primary); font-weight: 600; }
+    .cloud-details { display: grid; grid-template-columns: minmax(100px, auto) minmax(0, 1fr); gap: 7px 14px; margin: 0; font-size: 12px; }
+    .cloud-details dt { color: var(--workspace-text-muted); }
+    .cloud-details dd { margin: 0; color: var(--workspace-text); font-weight: 600; }
+    .cloud-admin-list { display: grid; gap: 14px; }
+    .cloud-admin-card { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .cloud-admin-card h3, .cloud-admin-card .cloud-copy, .cloud-admin-card .cloud-actions { grid-column: 1 / -1; }
+    .account-button { position: relative; font-size: 0; }
+    .account-button svg { width: 17px; height: 17px; }
+    .account-button[data-authenticated="true"]::after {
+      content: ""; position: absolute; right: 4px; bottom: 4px; width: 6px; height: 6px;
+      border: 1px solid ${antdTokens.colorBgContainer}; border-radius: 50%; background: ${antdTokens.colorSuccess};
+    }
     .property-header {
       display: flex; align-items: center; justify-content: space-between; gap: 16px;
       padding: 16px 24px; border-bottom: 1px solid ${antdTokens.colorBorderSecondary};
@@ -720,6 +775,8 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
       .view-controls .view-search, .view-controls .ant-select { width: 100% !important; }
       .month-controls { justify-content: space-between; }
       .property-header, .property-body { padding-inline: 16px; }
+      .cloud-admin-card { grid-template-columns: 1fr; }
+      .cloud-admin-card h3, .cloud-admin-card .cloud-copy, .cloud-admin-card .cloud-actions { grid-column: auto; }
       .property-grid { grid-template-columns: 1fr; gap: 0; }
       .workspace-date-picker-popup {
         top: 50% !important; left: 50% !important; right: auto !important;
@@ -1757,11 +1814,33 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
   const drawer = element("aside", "drawer");
   drawer.setAttribute("aria-label", "Detalles de la fila");
   const panelHeader = element("header");
-  const eyebrow = element("div", "eyebrow", "PRUEBA LOCAL · SESIÓN DE GOOGLE");
+  const eyebrow = element("div", "eyebrow", "SHEETS CRM · SESIÓN DE GOOGLE");
   const titleRow = element("div", "title-row");
   const title = element("h1", "", "Detalles de la fila");
   const headerActions = element("div", "header-actions");
   const sheetViewActions = element("div", "sheet-view-actions");
+  const accountButton = element("button", "icon-button account-button");
+  accountButton.type = "button";
+  accountButton.title = "Cuenta";
+  accountButton.setAttribute("aria-label", "Abrir cuenta");
+  accountButton.dataset.authenticated = "false";
+  const accountSvg = panelDocument.createElementNS("http://www.w3.org/2000/svg", "svg");
+  accountSvg.setAttribute("viewBox", "0 0 24 24");
+  accountSvg.setAttribute("fill", "none");
+  accountSvg.setAttribute("stroke", "currentColor");
+  accountSvg.setAttribute("stroke-width", "2");
+  accountSvg.setAttribute("stroke-linecap", "round");
+  accountSvg.setAttribute("stroke-linejoin", "round");
+  accountSvg.setAttribute("aria-hidden", "true");
+  for (const [tag, attributes] of [
+    ["circle", { cx: "12", cy: "8", r: "4" }],
+    ["path", { d: "M4 21a8 8 0 0 1 16 0" }]
+  ]) {
+    const node = panelDocument.createElementNS("http://www.w3.org/2000/svg", tag);
+    for (const [name, value] of Object.entries(attributes)) node.setAttribute(name, value);
+    accountSvg.appendChild(node);
+  }
+  accountButton.appendChild(accountSvg);
   const saveState = element("span", "save-state is-saving");
   saveState.title = "Cargando";
   saveState.setAttribute("role", "status");
@@ -1795,7 +1874,7 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
   close.type = "button";
   close.title = "Cerrar";
   close.setAttribute("aria-label", "Cerrar");
-  headerActions.append(sheetViewActions, saveState, close);
+  headerActions.append(sheetViewActions, saveState, accountButton, close);
   titleRow.append(title, headerActions);
   panelHeader.append(eyebrow, titleRow);
 
@@ -1867,13 +1946,23 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
   propertyForm.append(propertySource, propertyNameItem, propertyTypeItem, propertySettings);
   propertyBody.appendChild(propertyForm);
   propertyDrawer.append(propertyHeader, propertyBody);
+  const cloudAccountUi = state.cloudRequired ? createCloudAccountUi({
+    document: panelDocument,
+    send: cloudMessage,
+    openExternal: (url) => panelFrame.contentWindow.open(url, "_blank", "noopener,noreferrer"),
+    onSessionChange: handleCloudSessionChange,
+    onBlockedClose: () => { panelFrame.hidden = true; }
+  }) : null;
   panelDocument.body.append(drawer, propertyDrawer);
+  if (cloudAccountUi) panelDocument.body.appendChild(cloudAccountUi.element);
 
   const ui = {
     frame: panelFrame,
     drawer,
     close,
     reopen,
+    accountButton,
+    cloudAccountUi,
     sheetViewActions,
     saveState,
     status,
@@ -1908,9 +1997,14 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
   ui.close.addEventListener("click", () => {
     ui.frame.hidden = true;
   });
-  ui.reopen.addEventListener("click", () => {
+  ui.reopen.addEventListener("click", async () => {
     ui.frame.hidden = false;
+    if (state.cloudRequired) {
+      await refreshCloudAccess();
+      if (!cloudAccessAllowed()) ui.cloudAccountUi.open();
+    }
   });
+  ui.accountButton.addEventListener("click", () => ui.cloudAccountUi?.open());
   ui.cancel.addEventListener("click", cancelChanges);
   ui.save.addEventListener("click", saveChanges);
   ui.propertyCancel.addEventListener("click", closePropertyEditor);
@@ -1922,6 +2016,69 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
 
   function spreadsheetId() {
     return location.pathname.match(/\/spreadsheets\/d\/([^/]+)/)?.[1] || "";
+  }
+
+  function cloudMessage(type, payload = {}) {
+    const runtime = globalThis.chrome?.runtime;
+    if (!runtime?.sendMessage) return Promise.resolve({ ok: true, authenticated: true, local: true });
+    return new Promise((resolve) => {
+      try {
+        runtime.sendMessage({ source: "sheets-row-drawer-cloud", type, payload }, (response) => {
+          const runtimeError = globalThis.chrome?.runtime?.lastError;
+          resolve(runtimeError
+            ? { ok: false, status: 0, code: "RUNTIME_ERROR", error: runtimeError.message }
+            : response || { ok: false, status: 0, error: "El servicio no devolvió una respuesta." });
+        });
+      } catch (error) {
+        resolve({ ok: false, status: 0, code: "RUNTIME_ERROR", error: error?.message || "No se pudo contactar al servicio." });
+      }
+    });
+  }
+
+  function cloudAccessAllowed(session = state.cloudSession) {
+    if (!state.cloudRequired) return true;
+    if (!session?.authenticated || !session.user) return false;
+    if (session.user.role === "superadmin") return true;
+    return session.account?.status === "active" && !session.account?.expired;
+  }
+
+  function cloudAccountId(session = state.cloudSession) {
+    return session?.user?.accountId || session?.account?.id || "";
+  }
+
+  function resetWorkspaceForAccount() {
+    window.clearTimeout(state.cloudWorkspaceTimer);
+    state.cloudWorkspaceTimer = null;
+    state.cloudWorkspaceRevision = 0;
+    state.cloudWorkspaceHydrated = false;
+    state.workspace = null;
+    state.workspacePromise = null;
+    state.lastSelection = "";
+  }
+
+  function handleCloudSessionChange(session) {
+    const previousAccountId = cloudAccountId();
+    state.cloudSession = session;
+    const nextAccountId = cloudAccountId(session);
+    ui.accountButton.dataset.authenticated = String(Boolean(session?.authenticated));
+    ui.accountButton.title = session?.authenticated ? `Cuenta · ${session.user?.name || session.user?.email || "Usuario"}` : "Iniciar sesión";
+    host.dataset.cloudAccess = cloudAccessAllowed(session) ? "allowed" : session?.serviceError ? "unavailable" : "blocked";
+    if (String(previousAccountId || "") !== String(nextAccountId || "")) resetWorkspaceForAccount();
+    if (!cloudAccessAllowed(session)) {
+      state.request?.abort();
+      ui.fields.replaceChildren();
+      clearRelations();
+      syncPendingActions();
+      return;
+    }
+    ui.cloudAccountUi?.close();
+    void ensureWorkspaceLoaded().then(() => hydrateCloudWorkspace());
+  }
+
+  async function refreshCloudAccess() {
+    if (!state.cloudRequired) return true;
+    await ui.cloudAccountUi.refresh();
+    return cloudAccessAllowed();
   }
 
   function currentGid() {
@@ -2054,6 +2211,11 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
   }
 
   function workspaceKey() {
+    const owner = state.cloudRequired ? `account:${encodeURIComponent(cloudAccountId() || "signed-out")}` : "local";
+    return `${WORKSPACE_PREFIX}:${owner}:${encodeURIComponent(spreadsheetId())}`;
+  }
+
+  function legacyWorkspaceKey() {
     return `${WORKSPACE_PREFIX}:${encodeURIComponent(spreadsheetId())}`;
   }
 
@@ -2202,8 +2364,11 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
       }
       try {
         const key = workspaceKey();
-        const result = await area.get(key);
-        state.workspace = normalizeWorkspace(result[key]);
+        const legacyKey = legacyWorkspaceKey();
+        const result = await area.get([key, legacyKey]);
+        const stored = result[key] || result[legacyKey];
+        state.workspace = normalizeWorkspace(stored);
+        if (!result[key] && result[legacyKey] && cloudAccountId()) await area.set({ [key]: state.workspace });
       } catch {
         state.workspace = createWorkspace();
       }
@@ -2221,7 +2386,98 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
     state.workspaceWriteQueue = state.workspaceWriteQueue
       .then(() => area.set({ [key]: state.workspace }))
       .catch(() => {});
+    scheduleCloudWorkspaceWrite();
     return state.workspaceWriteQueue;
+  }
+
+  function applyCloudWorkspace(workspace, revision = 0) {
+    state.workspace = normalizeWorkspace(workspace);
+    state.workspacePromise = Promise.resolve(state.workspace);
+    state.cloudWorkspaceRevision = Number(revision) || 0;
+    const area = storageArea();
+    if (area) {
+      const key = workspaceKey();
+      state.workspaceWriteQueue = state.workspaceWriteQueue.then(() => area.set({ [key]: state.workspace })).catch(() => {});
+    }
+    if (state.fields.length) {
+      reconcileSheetConfiguration(currentGid(), state.sheetName || activeSheetName() || `Hoja ${currentGid()}`, state.fields);
+      renderFields(new Map([...state.primaryDrafts.values()].map((draft) => [draft.index, draft.value])));
+      renderSheetViewActions();
+      if (state.row && state.values.length) startRelationships(state.fields, state.values, state.request?.signal, true);
+    }
+  }
+
+  async function hydrateCloudWorkspace() {
+    if (!state.cloudRequired || !cloudAccessAllowed() || state.cloudWorkspaceHydrated) return state.workspace;
+    await ensureWorkspaceLoaded();
+    const result = await cloudMessage("workspace.get", { spreadsheetId: spreadsheetId() });
+    if (!result?.ok) {
+      host.dataset.cloudSync = "error";
+      if ([401, 403].includes(result?.status)) await refreshCloudAccess();
+      return state.workspace;
+    }
+    state.cloudWorkspaceHydrated = true;
+    if (!result.found) {
+      await persistCloudWorkspace();
+      return state.workspace;
+    }
+    const remote = normalizeWorkspace(result.workspace);
+    state.cloudWorkspaceRevision = Number(result.revision) || 0;
+    if (Number(remote.updatedAt || 0) >= Number(state.workspace?.updatedAt || 0)) {
+      applyCloudWorkspace(remote, result.revision);
+    } else {
+      await persistCloudWorkspace();
+    }
+    host.dataset.cloudSync = "ready";
+    return state.workspace;
+  }
+
+  function scheduleCloudWorkspaceWrite() {
+    if (!state.cloudRequired || !cloudAccessAllowed() || !state.cloudWorkspaceHydrated) return;
+    window.clearTimeout(state.cloudWorkspaceTimer);
+    state.cloudWorkspaceTimer = window.setTimeout(() => {
+      state.cloudWorkspaceTimer = null;
+      void persistCloudWorkspace();
+    }, 350);
+  }
+
+  function persistCloudWorkspace() {
+    if (!state.cloudRequired || !cloudAccessAllowed() || !state.workspace) return Promise.resolve();
+    const snapshot = JSON.parse(JSON.stringify(state.workspace));
+    state.cloudWorkspaceWriteQueue = state.cloudWorkspaceWriteQueue.then(async () => {
+      host.dataset.cloudSync = "saving";
+      let result = await cloudMessage("workspace.put", {
+        spreadsheetId: spreadsheetId(),
+        name: panelDocument.title || document.title || activeSheetName(),
+        workspace: snapshot,
+        revision: state.cloudWorkspaceRevision
+      });
+      if (!result?.ok && result?.code === "WORKSPACE_CONFLICT") {
+        const latest = await cloudMessage("workspace.get", { spreadsheetId: spreadsheetId() });
+        if (latest?.ok && latest.found) {
+          const remote = normalizeWorkspace(latest.workspace);
+          if (Number(remote.updatedAt || 0) > Number(snapshot.updatedAt || 0)) {
+            applyCloudWorkspace(remote, latest.revision);
+            host.dataset.cloudSync = "ready";
+            return;
+          }
+          result = await cloudMessage("workspace.put", {
+            spreadsheetId: spreadsheetId(),
+            name: document.title || activeSheetName(),
+            workspace: snapshot,
+            revision: latest.revision
+          });
+        }
+      }
+      if (!result?.ok) {
+        host.dataset.cloudSync = "error";
+        if ([401, 403].includes(result?.status)) await refreshCloudAccess();
+        return;
+      }
+      state.cloudWorkspaceRevision = Number(result.revision) || state.cloudWorkspaceRevision;
+      host.dataset.cloudSync = "ready";
+    }).catch(() => { host.dataset.cloudSync = "error"; });
+    return state.cloudWorkspaceWriteQueue;
   }
 
   function reconcileSheetConfiguration(gid, sheetName, headers) {
@@ -4758,6 +5014,10 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
 
   async function pollCodexBridge() {
     try {
+      if (!cloudAccessAllowed()) {
+        setTimeout(pollCodexBridge, CODEX_BRIDGE_POLL_MS);
+        return;
+      }
       const response = await runtimeBridgeMessage("poll", {
         spreadsheetId: spreadsheetId(),
         gid: currentGid(),
@@ -4782,6 +5042,7 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
 
   function pollSelection() {
     if (state.saving || state.writeInteractionDepth > 0) return;
+    if (!cloudAccessAllowed()) return;
     const reference = nameBoxValue();
     if (!reference) return;
     const gid = currentGid();
@@ -4815,7 +5076,19 @@ import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
     loadRow(row);
   }
 
-  void ensureWorkspaceLoaded().finally(() => {
+  void (async () => {
+    if (state.cloudRequired) {
+      await refreshCloudAccess();
+      if (!cloudAccessAllowed()) {
+        ui.cloudAccountUi.open();
+        return;
+      }
+    } else {
+      state.cloudSession = { authenticated: true, local: true };
+    }
+    await ensureWorkspaceLoaded();
+    await hydrateCloudWorkspace();
+  })().finally(() => {
     renderSheetViewActions();
     setInterval(pollSelection, POLL_MS);
     pollSelection();
