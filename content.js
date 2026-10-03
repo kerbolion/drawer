@@ -3311,6 +3311,17 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     };
   }
 
+  function propertyHeaderKey(header) {
+    const name = String(header || "").trim().normalize("NFC").toLocaleLowerCase("es");
+    return name ? `header:${name}` : "";
+  }
+
+  function rememberPropertyDefinition(definitions, property) {
+    const key = propertyHeaderKey(property?.sourceHeader);
+    if (!key) return;
+    definitions[key] = normalizeProperty(property, Number(property.index) || 0, property.sourceHeader);
+  }
+
   function normalizeWorkspace(workspace) {
     const clean = createWorkspace();
     if (!workspace || typeof workspace !== "object") return clean;
@@ -3330,9 +3341,19 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
       const columns = Array.isArray(sheet.columns)
         ? sheet.columns.map((column, index) => normalizeProperty(column, index, column?.sourceHeader || ""))
         : [];
+      const propertyDefinitions = {};
+      for (const [storedKey, definition] of Object.entries(sheet.propertyDefinitions || {})) {
+        if (!definition || typeof definition !== "object") continue;
+        const sourceHeader = String(definition.sourceHeader || storedKey || "");
+        const key = propertyHeaderKey(sourceHeader);
+        if (!key) continue;
+        propertyDefinitions[key] = normalizeProperty(definition, Number(definition.index) || 0, sourceHeader);
+      }
+      for (const column of columns) rememberPropertyDefinition(propertyDefinitions, column);
       clean.sheets[String(gid)] = {
         name: String(sheet.name || ""),
         columns,
+        propertyDefinitions,
         updatedAt: Number(sheet.updatedAt || clean.updatedAt)
       };
     }
@@ -3471,28 +3492,26 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     if (!state.workspace) state.workspace = createWorkspace();
     const key = String(gid);
     const previous = state.workspace.sheets[key];
-    const available = [...(previous?.columns || [])];
-    const used = new Set();
+    const propertyDefinitions = { ...(previous?.propertyDefinitions || {}) };
+    for (const column of previous?.columns || []) rememberPropertyDefinition(propertyDefinitions, column);
     const columns = headers.map((header, index) => {
       const cleanHeader = String(header || "");
-      const matchingHeader = available.findIndex((column, candidateIndex) =>
-        !used.has(candidateIndex) && cleanHeader && normalizedColumn(column.sourceHeader) === normalizedColumn(cleanHeader)
-      );
-      const samePosition = available.findIndex((column, candidateIndex) =>
-        !used.has(candidateIndex) && Number(column.index) === index
-      );
-      const candidateIndex = matchingHeader >= 0 ? matchingHeader : samePosition;
-      if (candidateIndex < 0) return defaultProperty(index, cleanHeader);
-      used.add(candidateIndex);
-      const candidate = available[candidateIndex];
+      const headerKey = propertyHeaderKey(cleanHeader);
+      const candidate = headerKey ? propertyDefinitions[headerKey] : null;
+      if (!candidate) return defaultProperty(index, cleanHeader);
       const normalized = normalizeProperty(candidate, index, cleanHeader);
       if (!normalized.customName) normalized.name = cleanHeader || defaultProperty(index).name;
       return normalized;
     });
-    const changed = !previous || previous.name !== sheetName || !sameValues(previous.columns, columns);
+    for (const column of columns) rememberPropertyDefinition(propertyDefinitions, column);
+    const changed = !previous
+      || previous.name !== sheetName
+      || !sameValues(previous.columns, columns)
+      || !sameValues(previous.propertyDefinitions || {}, propertyDefinitions);
     const next = {
       name: sheetName,
       columns,
+      propertyDefinitions,
       updatedAt: changed ? Date.now() : Number(previous.updatedAt || Date.now())
     };
     state.workspace.sheets[key] = next;
@@ -5365,6 +5384,8 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
       drafts.set(index, state.primaryDrafts.get(index)?.value ?? state.values[index] ?? "");
     }
     sheet.columns[index] = next;
+    if (!sheet.propertyDefinitions) sheet.propertyDefinitions = {};
+    rememberPropertyDefinition(sheet.propertyDefinitions, next);
     sheet.updatedAt = Date.now();
     state.activity.config = true;
     syncSaveState();

@@ -583,6 +583,81 @@ try {
     throw new Error(`Los botones no quedaron antes de la validacion: ${JSON.stringify(viewButtons)}`);
   }
 
+  await cdp.evaluate(`(() => {
+    document.getElementById("t-name-box").value = "A2";
+    location.hash = "#gid=0&range=A2";
+  })()`);
+  const selectedRowDeadline = Date.now() + 5_000;
+  while (Date.now() < selectedRowDeadline) {
+    const selectedRowReady = await cdp.evaluate(`(() => {
+      const host = document.getElementById("sheets-session-probe");
+      const panel = host.shadowRoot.querySelector(".panel-frame").contentDocument;
+      return host.dataset.row === "2" && panel.querySelectorAll(".field").length === 4;
+    })()`);
+    if (selectedRowReady) break;
+    await delay(80);
+  }
+
+  const configuredSheetSnapshot = {
+    headers: [...sheet.headers],
+    rows: sheet.rows.map((row) => [...row]),
+    staleRows: staleVisualizationRows.map((row) => [...row])
+  };
+  const replaceSheetData = (headers, rows, staleRows = rows) => {
+    sheet.headers.splice(0, sheet.headers.length, ...headers);
+    sheet.rows.splice(0, sheet.rows.length, ...rows.map((row) => [...row]));
+    staleVisualizationRows.splice(0, staleVisualizationRows.length, ...staleRows.map((row) => [...row]));
+  };
+  const notifySheetChange = () => cdp.evaluate(`window.postMessage({
+    source: "sheets-row-drawer",
+    type: "sheet-change"
+  }, location.origin)`, isolated.executionContextId);
+  const waitForPropertyLayout = async (expectedLabels, expectedTypes) => {
+    const layoutDeadline = Date.now() + 5_000;
+    let layout;
+    while (Date.now() < layoutDeadline) {
+      layout = await cdp.evaluate(panelExpression(`return {
+        labels: Array.from(panel.querySelectorAll('.field-label-text'), item => item.textContent.trim()),
+        types: Array.from(panel.querySelectorAll('.field-type-name'), item => item.textContent.trim())
+      };`));
+      if (JSON.stringify(layout.labels) === JSON.stringify(expectedLabels) && JSON.stringify(layout.types) === JSON.stringify(expectedTypes)) return layout;
+      await delay(80);
+    }
+    return layout;
+  };
+
+  replaceSheetData(
+    configuredSheetSnapshot.headers.filter((_, index) => index !== 3),
+    configuredSheetSnapshot.rows.map((row) => row.filter((_, index) => index !== 3)),
+    configuredSheetSnapshot.staleRows.map((row) => row.filter((_, index) => index !== 3))
+  );
+  await notifySheetChange();
+  const partialHeaderLayout = await waitForPropertyLayout(["ID Contacto", "Nombre", "Estado"], ["text", "text", "status"]);
+  if (JSON.stringify(partialHeaderLayout?.types) !== JSON.stringify(["text", "text", "status"])) {
+    throw new Error(`La prueba no alcanzo la lectura parcial de encabezados: ${JSON.stringify(partialHeaderLayout)}`);
+  }
+
+  replaceSheetData(
+    configuredSheetSnapshot.headers.filter((_, index) => index !== 2),
+    configuredSheetSnapshot.rows.map((row) => row.filter((_, index) => index !== 2)),
+    configuredSheetSnapshot.staleRows.map((row) => row.filter((_, index) => index !== 2))
+  );
+  await notifySheetChange();
+  const afterColumnDeletion = await waitForPropertyLayout(["ID Contacto", "Nombre", "Fecha"], ["text", "text", "date"]);
+  if (JSON.stringify(afterColumnDeletion?.labels) !== JSON.stringify(["ID Contacto", "Nombre", "Fecha"]) || JSON.stringify(afterColumnDeletion?.types) !== JSON.stringify(["text", "text", "date"])) {
+    throw new Error(`Eliminar una columna desplazo la configuracion de otra propiedad: ${JSON.stringify(afterColumnDeletion)}`);
+  }
+
+  replaceSheetData(configuredSheetSnapshot.headers, configuredSheetSnapshot.rows, configuredSheetSnapshot.staleRows);
+  await notifySheetChange();
+  const restoredPropertyLayout = await waitForPropertyLayout(
+    ["ID Contacto", "Nombre", "Estado", "Fecha"],
+    ["text", "text", "status", "date"]
+  );
+  if (JSON.stringify(restoredPropertyLayout?.types) !== JSON.stringify(["text", "text", "status", "date"])) {
+    throw new Error(`Restaurar encabezados no recupero sus propiedades por nombre: ${JSON.stringify(restoredPropertyLayout)}`);
+  }
+
   await cdp.evaluate(panelExpression('panel.querySelector("[data-sheet-view=kanban]").click();'));
   const kanbanDeadline = Date.now() + 5_000;
   let kanban;
