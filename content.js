@@ -113,7 +113,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
   const CODEX_BRIDGE_POLL_MS = 1_500;
   const CACHE_PREFIX = "srd:v2";
   const CACHE_INDEX_KEY = `${CACHE_PREFIX}:index`;
-  const WORKSPACE_PREFIX = "srd:workspace:v1";
+  const WORKSPACE_PREFIX = "srd:workspace:v2";
   const THEME_STORAGE_KEY = "srd:theme-mode";
   const MAX_PERSISTENT_ENTRIES = 120;
   const SHEET_MEMORY_TTL = 5_000;
@@ -423,6 +423,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
       --antd-border: ${tokens.colorBorder};
       --antd-border-secondary: ${tokens.colorBorderSecondary};
       --antd-error: ${tokens.colorError};
+      --antd-error-hover: ${tokens.colorErrorHover};
       --antd-error-bg: ${tokens.colorErrorBg};
       --antd-error-border: ${tokens.colorErrorBorder};
       --antd-error-text: ${tokens.colorErrorText};
@@ -622,6 +623,8 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     }
     .cloud-card h3 { margin: 0; color: var(--workspace-text); font-size: 15px; }
     .cloud-copy { margin: 0; color: var(--workspace-text-muted); font-size: 12px; }
+    .cloud-danger-zone { border-color: var(--antd-error-border); background: var(--antd-error-bg); }
+    .cloud-danger-zone h3 { color: var(--antd-error-text); }
     .cloud-form-item { display: grid; gap: 6px; color: var(--workspace-text); font-size: 13px; font-weight: 600; }
     .cloud-form-label { display: block; }
     .cloud-control-host { width: 100%; min-width: 0; font-weight: 400; }
@@ -664,7 +667,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     }
     .property-header h2 { margin: 0; font-size: 16px; }
     .property-actions { display: flex; gap: 8px; }
-    .secondary-button, .primary-button {
+    .secondary-button, .primary-button, .danger-button {
       min-height: ${antdTokens.controlHeight}px; border-radius: ${antdTokens.borderRadius}px;
       padding: 4px 15px; font-weight: 500; cursor: pointer;
     }
@@ -672,6 +675,9 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     .secondary-button:hover { border-color: var(--antd-primary); color: var(--antd-primary); }
     .primary-button { border: 1px solid var(--antd-primary); background: var(--antd-primary); color: var(--antd-white); }
     .primary-button:hover { border-color: var(--antd-primary-hover); background: var(--antd-primary-hover); }
+    .danger-button { border: 1px solid var(--antd-error); background: var(--antd-error); color: var(--antd-white); }
+    .danger-button:hover { border-color: var(--antd-error-hover); background: var(--antd-error-hover); }
+    .danger-button:disabled { border-color: var(--antd-border); background: var(--antd-bg-container-disabled); color: var(--antd-text-disabled); cursor: default; }
     .property-body { flex: 1; overflow: auto; padding: 24px; background: var(--antd-bg-container); }
     .property-form-item { margin-bottom: 22px; }
     .property-form-item > label { display: block; margin-bottom: 8px; color: var(--antd-text); font-weight: 600; }
@@ -1310,7 +1316,8 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     autocomplete = "off",
     min,
     disabled = false,
-    options = []
+    options = [],
+    onChange
   }) {
     const host = element("div", "cloud-control-host");
     const reactRoot = createRoot(host);
@@ -1322,6 +1329,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
 
     const updateValue = (nextValue) => {
       currentValue = nextValue ?? "";
+      onChange?.(currentValue);
       renderControl();
     };
 
@@ -2872,6 +2880,15 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     send: cloudMessage,
     openExternal: (url) => panelFrame.contentWindow.open(url, "_blank", "noopener,noreferrer"),
     onSessionChange: handleCloudSessionChange,
+    onAccountDataCleared: async () => {
+      resetWorkspaceForAccount();
+      state.headerCache.clear();
+      state.sheetCache.clear();
+      state.persistentFallback.clear();
+      await ensureWorkspaceLoaded();
+      await refreshOpenSheetData();
+      await hydrateCloudWorkspace();
+    },
     onBlockedClose: () => { panelFrame.hidden = true; },
     createFormControl: createCloudFormControl
   }) : null;
@@ -3227,10 +3244,6 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     return `${WORKSPACE_PREFIX}:${owner}:${encodeURIComponent(spreadsheetId())}`;
   }
 
-  function legacyWorkspaceKey() {
-    return `${WORKSPACE_PREFIX}:${encodeURIComponent(spreadsheetId())}`;
-  }
-
   function storageArea() {
     try {
       return globalThis.chrome?.storage?.local || null;
@@ -3271,7 +3284,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
 
   function createWorkspace() {
     return {
-      version: 1,
+      version: 2,
       spreadsheetId: spreadsheetId(),
       sheets: {},
       relationViews: {},
@@ -3282,7 +3295,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
 
   function defaultProperty(index, header = "") {
     return {
-      id: `column-${index + 1}`,
+      id: stablePropertyId(header, index),
       index,
       sourceHeader: header,
       name: header || `Columna ${columnName(index + 1)}`,
@@ -3319,7 +3332,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     return {
       ...fallback,
       ...source,
-      id: String(source.id || fallback.id),
+      id: fallback.id,
       index,
       sourceHeader: String(header || source.sourceHeader || ""),
       name: String(source.name || header || fallback.name),
@@ -3362,92 +3375,56 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     return `field-${(hash >>> 0).toString(36)}`;
   }
 
-  function repairPropertyIds(properties) {
-    const idCounts = new Map();
-    for (const property of properties) {
-      const id = String(property?.id || "");
-      if (id) idCounts.set(id, (idCounts.get(id) || 0) + 1);
-    }
-    const duplicateIds = new Set([...idCounts].filter(([, count]) => count > 1).map(([id]) => id));
-    const used = new Set();
-    const columns = properties.map((property, index) => {
-      const originalId = String(property?.id || "");
-      let id = originalId;
-      if (!id || used.has(id)) {
-        const base = stablePropertyId(property?.sourceHeader, index);
-        id = base;
-        let suffix = 2;
-        while (used.has(id)) {
-          id = `${base}-${suffix}`;
-          suffix += 1;
-        }
-      }
-      used.add(id);
-      return id === originalId ? property : { ...property, id };
+  function assignCurrentPropertyIds(properties) {
+    const occurrences = new Map();
+    return properties.map((property, index) => {
+      const base = stablePropertyId(property?.sourceHeader, index);
+      const occurrence = (occurrences.get(base) || 0) + 1;
+      occurrences.set(base, occurrence);
+      return { ...property, id: occurrence === 1 ? base : `${base}-${occurrence}` };
     });
-    return { columns, duplicateIds };
-  }
-
-  function repairSheetViewPropertyIds(workspace, gid, previousColumns, columns, duplicateIds) {
-    if (!duplicateIds.size) return false;
-    const view = workspace?.sheetViews?.[String(gid)];
-    if (!view) return false;
-    const next = { ...view };
-    next.hiddenColumnIds = (Array.isArray(view.hiddenColumnIds) ? view.hiddenColumnIds : [])
-      .filter((id) => !duplicateIds.has(String(id)));
-    for (const [setting, type] of [["kanbanColumnId", "status"], ["calendarColumnId", "date"]]) {
-      const currentId = String(view[setting] || "");
-      if (!duplicateIds.has(currentId)) continue;
-      const propertyIndex = previousColumns.findIndex((property) =>
-        String(property.id || "") === currentId && property.type === type
-      );
-      next[setting] = propertyIndex >= 0 ? String(columns[propertyIndex]?.id || "") : "";
-    }
-    if (sameValues(view, next)) return false;
-    workspace.sheetViews[String(gid)] = next;
-    return true;
   }
 
   function normalizeWorkspace(workspace) {
     const clean = createWorkspace();
-    if (!workspace || typeof workspace !== "object") return clean;
+    if (!workspace || typeof workspace !== "object" || Number(workspace.version) !== clean.version) return clean;
     clean.updatedAt = Number(workspace.updatedAt || Date.now());
     for (const [key, view] of Object.entries(workspace.relationViews || {})) {
       if (view === "deck" || view === "table") clean.relationViews[String(key)] = view;
     }
-    for (const [key, view] of Object.entries(workspace.sheetViews || {})) {
-      if (!view || typeof view !== "object") continue;
-      clean.sheetViews[String(key)] = {
-        calendarColumnId: String(view.calendarColumnId || ""),
-        kanbanColumnId: String(view.kanbanColumnId || ""),
-        hiddenColumnIds: [...new Set((Array.isArray(view.hiddenColumnIds) ? view.hiddenColumnIds : [])
-          .map((id) => String(id || "").trim())
-          .filter(Boolean))]
-      };
-    }
     for (const [gid, sheet] of Object.entries(workspace.sheets || {})) {
       if (!sheet || typeof sheet !== "object") continue;
-      const storedColumns = Array.isArray(sheet.columns)
+      const columns = assignCurrentPropertyIds(Array.isArray(sheet.columns)
         ? sheet.columns.map((column, index) => normalizeProperty(column, index, column?.sourceHeader || ""))
-        : [];
-      const repaired = repairPropertyIds(storedColumns);
-      const columns = repaired.columns;
+        : []);
       const propertyDefinitions = {};
-      for (const [storedKey, definition] of Object.entries(sheet.propertyDefinitions || {})) {
+      for (const definition of Object.values(sheet.propertyDefinitions || {})) {
         if (!definition || typeof definition !== "object") continue;
-        const sourceHeader = String(definition.sourceHeader || storedKey || "");
+        const sourceHeader = String(definition.sourceHeader || "");
         const key = propertyHeaderKey(sourceHeader);
         if (!key) continue;
         propertyDefinitions[key] = normalizeProperty(definition, Number(definition.index) || 0, sourceHeader);
       }
-      for (const column of columns) rememberPropertyDefinition(propertyDefinitions, column);
       clean.sheets[String(gid)] = {
         name: String(sheet.name || ""),
         columns,
         propertyDefinitions,
         updatedAt: Number(sheet.updatedAt || clean.updatedAt)
       };
-      repairSheetViewPropertyIds(clean, gid, storedColumns, columns, repaired.duplicateIds);
+    }
+    for (const [key, view] of Object.entries(workspace.sheetViews || {})) {
+      if (!view || typeof view !== "object") continue;
+      const columns = clean.sheets[String(key)]?.columns || [];
+      const ids = new Set(columns.map((column) => column.id));
+      const calendarColumnId = String(view.calendarColumnId || "");
+      const kanbanColumnId = String(view.kanbanColumnId || "");
+      clean.sheetViews[String(key)] = {
+        calendarColumnId: columns.some((column) => column.id === calendarColumnId && column.type === "date") ? calendarColumnId : "",
+        kanbanColumnId: columns.some((column) => column.id === kanbanColumnId && column.type === "status") ? kanbanColumnId : "",
+        hiddenColumnIds: [...new Set((Array.isArray(view.hiddenColumnIds) ? view.hiddenColumnIds : [])
+          .map((id) => String(id || "").trim())
+          .filter((id) => ids.has(id)))]
+      };
     }
     return clean;
   }
@@ -3463,11 +3440,8 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
       }
       try {
         const key = workspaceKey();
-        const legacyKey = legacyWorkspaceKey();
-        const result = await area.get([key, legacyKey]);
-        const stored = result[key] || result[legacyKey];
-        state.workspace = normalizeWorkspace(stored);
-        if (!result[key] && result[legacyKey] && cloudAccountId()) await area.set({ [key]: state.workspace });
+        const result = await area.get(key);
+        state.workspace = normalizeWorkspace(result[key]);
       } catch {
         state.workspace = createWorkspace();
       }
@@ -3585,8 +3559,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     const key = String(gid);
     const previous = state.workspace.sheets[key];
     const propertyDefinitions = { ...(previous?.propertyDefinitions || {}) };
-    for (const column of previous?.columns || []) rememberPropertyDefinition(propertyDefinitions, column);
-    const candidateColumns = headers.map((header, index) => {
+    const columns = assignCurrentPropertyIds(headers.map((header, index) => {
       const cleanHeader = String(header || "");
       const headerKey = propertyHeaderKey(cleanHeader);
       const candidate = headerKey ? propertyDefinitions[headerKey] : null;
@@ -3594,16 +3567,12 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
       const normalized = normalizeProperty(candidate, index, cleanHeader);
       if (!normalized.customName) normalized.name = cleanHeader || defaultProperty(index).name;
       return normalized;
-    });
-    const repaired = repairPropertyIds(candidateColumns);
-    const columns = repaired.columns;
-    const viewChanged = repairSheetViewPropertyIds(state.workspace, key, candidateColumns, columns, repaired.duplicateIds);
+    }));
     for (const column of columns) rememberPropertyDefinition(propertyDefinitions, column);
     const changed = !previous
       || previous.name !== sheetName
       || !sameValues(previous.columns, columns)
-      || !sameValues(previous.propertyDefinitions || {}, propertyDefinitions)
-      || viewChanged;
+      || !sameValues(previous.propertyDefinitions || {}, propertyDefinitions);
     const next = {
       name: sheetName,
       columns,

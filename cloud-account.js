@@ -47,6 +47,7 @@ export function createCloudAccountUi(options) {
     send,
     openExternal,
     onSessionChange,
+    onAccountDataCleared,
     onBlockedClose,
     createFormControl
   } = options;
@@ -341,7 +342,54 @@ export function createCloudAccountUi(options) {
     stop?.addEventListener("click", async () => {
       try { setSession(await request("admin.stopImpersonation")); } catch (error) { showError(error.message); }
     });
-    card.append(details, name.item, email.item, password.item, actionRow(stop, billing, logout, save));
+    const deleteAll = ["admin", "superadmin"].includes(user?.role) && !state.session.canStopImpersonation
+      ? button(document, "Eliminar todo", "danger-button")
+      : null;
+    deleteAll?.addEventListener("click", () => {
+      state.tab = "delete";
+      state.error = "";
+      render();
+    });
+    card.append(details, name.item, email.item, password.item, actionRow(deleteAll, stop, billing, logout, save));
+    body.appendChild(card);
+  }
+
+  function renderDeleteAccount() {
+    heading.textContent = "Eliminar todos los datos";
+    const card = el(document, "div", "cloud-card cloud-danger-zone");
+    card.appendChild(el(document, "h3", "", "Esta acción es permanente"));
+    card.appendChild(el(document, "p", "cloud-copy", "Se eliminarán todos los documentos y configuraciones guardados en Abrir CRM. Esta acción no se puede deshacer."));
+    let confirmationValue = "";
+    const remove = button(document, "Eliminar todo", "danger-button");
+    remove.disabled = true;
+    const confirmation = formInput({
+      name: "deleteConfirmation",
+      label: "Escribe ELIMINAR TODO para confirmar",
+      autocomplete: "off",
+      onChange: (value) => {
+        confirmationValue = String(value || "");
+        remove.disabled = confirmationValue !== "ELIMINAR TODO";
+      }
+    });
+    const back = button(document, "Volver");
+    back.addEventListener("click", () => {
+      state.tab = "profile";
+      state.error = "";
+      render();
+    });
+    remove.addEventListener("click", async () => {
+      if (confirmationValue !== "ELIMINAR TODO") {
+        showError("Escribe ELIMINAR TODO exactamente para continuar.");
+        return;
+      }
+      try {
+        await request("account.clear", { confirmation: confirmationValue });
+        await onAccountDataCleared?.();
+        state.tab = "profile";
+        showNotice("Todos los datos guardados de la cuenta fueron eliminados.");
+      } catch (error) { showError(error.message); }
+    });
+    card.append(confirmation.item, actionRow(back, remove));
     body.appendChild(card);
   }
 
@@ -490,6 +538,7 @@ export function createCloudAccountUi(options) {
     if (state.tab === "admin") renderAdmin();
     else if (state.tab === "plans") renderPlans();
     else if (state.tab === "renew") renderRenewal();
+    else if (state.tab === "delete") renderDeleteAccount();
     else renderProfile();
   }
 

@@ -499,6 +499,23 @@ app.put(`${apiPrefix}/auth/me`, accountSession, async (request, response) => {
   }
 });
 
+app.delete(`${apiPrefix}/account/data`, accountSession, async (request, response) => {
+  if (request.body?.confirmation !== "ELIMINAR TODO") {
+    return response.status(400).json({ message: "Escribe ELIMINAR TODO exactamente para continuar." });
+  }
+  if (request.user?.impersonatedBy) {
+    return response.status(403).json({ message: "No puedes eliminar una cuenta durante una impersonación." });
+  }
+  if (!["admin", "superadmin"].includes(request.user?.role)) {
+    return response.status(403).json({ message: "Solo el administrador de la cuenta puede eliminar todos sus datos." });
+  }
+  if (!request.account?.id) return response.status(404).json({ message: "Cuenta no encontrada." });
+
+  const accountId = Number(request.account.id);
+  const [result] = await pool.query("DELETE FROM workspaces WHERE account_id=?", [accountId]);
+  response.json({ ok: true, accountId, deletedWorkspaces: Number(result.affectedRows) || 0 });
+});
+
 const workspaceForRequest = async request => {
   const spreadsheetId = normalizeSpreadsheetId(request.params.spreadsheetId);
   if (!spreadsheetId) return { spreadsheetId: "", workspace: null };

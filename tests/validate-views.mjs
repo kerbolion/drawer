@@ -289,7 +289,7 @@ try {
   await cdp.evaluate(viewExpression('view.querySelector("[data-sheet-view-cancel]").click();'));
   await delay(120);
   const cancelledTable = await cdp.evaluate(viewExpression(`return {
-    value: view.querySelector('[data-workspace-row="2"] td[data-column-id="column-2"] input')?.value || "",
+    value: view.querySelectorAll('[data-workspace-row="2"] td[data-column-id]')[1]?.querySelector('input')?.value || "",
     saveDisabled: view.querySelector("[data-sheet-view-save]").disabled,
     state: view.querySelector("[data-sheet-view-save-state]")?.dataset.sheetViewSaveState || ""
   };`));
@@ -437,7 +437,8 @@ try {
   const hiddenInTable = await cdp.evaluate(viewExpression(`return {
     checked: Array.from(view.querySelectorAll('.workspace-table-columns .ant-checkbox-wrapper'))
       .find((item) => item.textContent.trim() === 'Nombre')?.querySelector('input')?.checked,
-    cellVisible: Boolean(view.querySelector('[data-workspace-row="2"] td[data-column-id="column-2"]'))
+    cellVisible: Array.from(view.querySelectorAll('.workspace-data-table thead .workspace-table-column-heading > span:nth-child(2)'))
+      .some((item) => item.textContent.trim() === 'Nombre')
   };`));
   if (hiddenInTable.checked !== false || hiddenInTable.cellVisible) {
     throw new Error(`Ocultar una columna no se aplico a Tabla: ${JSON.stringify(hiddenInTable)}`);
@@ -465,7 +466,8 @@ try {
         .find((item) => item.textContent.trim() === 'Nombre');
       return {
         checked: option?.querySelector('input')?.checked,
-        cellVisible: Boolean(view.querySelector('[data-workspace-row="2"] td[data-column-id="column-2"]'))
+        cellVisible: Array.from(view.querySelectorAll('.workspace-data-table thead .workspace-table-column-heading > span:nth-child(2)'))
+          .some((item) => item.textContent.trim() === 'Nombre')
       };
     `));
     if (persistedColumns.checked === false && !persistedColumns.cellVisible) break;
@@ -505,7 +507,8 @@ try {
   const restoredColumn = await cdp.evaluate(viewExpression(`return {
     checked: Array.from(view.querySelectorAll('.workspace-table-columns .ant-checkbox-wrapper'))
       .find((item) => item.textContent.trim() === 'Nombre')?.querySelector('input')?.checked,
-    cellVisible: Boolean(view.querySelector('[data-workspace-row="2"] td[data-column-id="column-2"]'))
+    cellVisible: Array.from(view.querySelectorAll('.workspace-data-table thead .workspace-table-column-heading > span:nth-child(2)'))
+      .some((item) => item.textContent.trim() === 'Nombre')
   };`));
   if (!restoredColumn.checked || !restoredColumn.cellVisible) {
     throw new Error(`Volver a mostrar la columna no se aplico: ${JSON.stringify(restoredColumn)}`);

@@ -30,6 +30,15 @@
     if (area) await area.remove(keys);
   }
 
+  async function clearAccountDataStorage(accountId) {
+    const stored = await storageGet(null);
+    const accountMarker = `:account:${encodeURIComponent(String(accountId))}:`;
+    const keys = Object.keys(stored).filter((key) => (
+      (key.startsWith("srd:workspace:") && key.includes(accountMarker)) || key.startsWith("srd:v2:")
+    ));
+    await storageRemove([...new Set(keys)]);
+  }
+
   async function apiBase() {
     const stored = await storageGet(STORAGE_KEYS.apiBase);
     return String(stored[STORAGE_KEYS.apiBase] || API_BASE_DEFAULT).replace(/\/$/, "");
@@ -155,6 +164,15 @@
       case "account.update": {
         const result = await cloudRequest("/auth/me", { method: "PUT", body: payload });
         return result.ok ? { ok: true, ...result.data } : result;
+      }
+      case "account.clear": {
+        const result = await cloudRequest("/account/data", {
+          method: "DELETE",
+          body: { confirmation: payload.confirmation }
+        });
+        if (!result.ok) return result;
+        await clearAccountDataStorage(result.data.accountId);
+        return { ok: true, ...result.data };
       }
       case "billing.plans": {
         const result = await cloudRequest("/billing/plans", { clearInvalidSession: false });
