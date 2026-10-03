@@ -11,19 +11,6 @@ function button(document, text, className = "secondary-button") {
   return node;
 }
 
-function input(document, { name, label, type = "text", value = "", autocomplete = "off", min = "" }) {
-  const item = el(document, "label", "cloud-form-item");
-  item.appendChild(el(document, "span", "cloud-form-label", label));
-  const control = el(document, "input", "property-input");
-  control.name = name;
-  control.type = type;
-  control.value = value ?? "";
-  control.autocomplete = autocomplete;
-  if (min !== "") control.min = min;
-  item.appendChild(control);
-  return { item, control };
-}
-
 function dateInputValue(value) {
   if (!value) return "";
   const date = new Date(value);
@@ -60,8 +47,12 @@ export function createCloudAccountUi(options) {
     send,
     openExternal,
     onSessionChange,
-    onBlockedClose
+    onBlockedClose,
+    createFormControl
   } = options;
+
+  if (typeof createFormControl !== "function") throw new TypeError("Falta el renderizador de controles del workspace.");
+  const mountedControls = new Set();
 
   const state = {
     session: { authenticated: false },
@@ -91,7 +82,9 @@ export function createCloudAccountUi(options) {
   function setBusy(value) {
     state.busy = Boolean(value);
     root.setAttribute("aria-busy", String(state.busy));
+    for (const control of mountedControls) control.setBusy?.(state.busy);
     for (const control of root.querySelectorAll("button,input,select")) {
+      if (control.closest("[data-cloud-mounted-control]")) continue;
       if (state.busy) {
         if (!control.hasAttribute("data-cloud-disabled")) {
           control.setAttribute("data-cloud-disabled", String(control.disabled));
@@ -102,6 +95,25 @@ export function createCloudAccountUi(options) {
         control.removeAttribute("data-cloud-disabled");
       }
     }
+  }
+
+  function disposeMountedControls() {
+    for (const control of mountedControls) control.destroy?.();
+    mountedControls.clear();
+  }
+
+  function formInput(config) {
+    const item = el(document, "label", "cloud-form-item");
+    item.appendChild(el(document, "span", "cloud-form-label", config.label));
+    const control = createFormControl(config);
+    control.element.setAttribute("data-cloud-mounted-control", "");
+    item.appendChild(control.element);
+    mountedControls.add(control);
+    return { item, control };
+  }
+
+  function formSelect(config) {
+    return formInput({ ...config, type: "select" });
   }
 
   function showError(message) {
@@ -175,35 +187,33 @@ export function createCloudAccountUi(options) {
   }
 
   function planInput(selectedCode = "") {
-    const item = el(document, "label", "cloud-form-item");
-    item.appendChild(el(document, "span", "cloud-form-label", "Plan"));
-    const control = el(document, "select", "property-input");
-    for (const plan of state.plans) {
-      const option = el(document, "option", "", `${plan.name} · ${money(plan)} / ${plan.interval === "year" ? "año" : "mes"}`);
-      option.value = plan.code;
-      control.appendChild(option);
-    }
-    if (state.plans.some(plan => plan.code === selectedCode)) control.value = selectedCode;
-    if (!state.plans.length) {
-      const option = el(document, "option", "", "No hay planes disponibles");
-      option.value = "";
-      control.appendChild(option);
-      control.disabled = true;
-    }
-    item.appendChild(control);
-    return { item, control };
+    const value = state.plans.some(plan => plan.code === selectedCode) ? selectedCode : state.plans[0]?.code || "";
+    return formSelect({
+      name: "plan",
+      label: "Plan",
+      value,
+      disabled: !state.plans.length,
+      options: state.plans.length
+        ? state.plans.map(plan => ({
+            value: plan.code,
+            label: `${plan.name} · ${money(plan)} / ${plan.interval === "year" ? "año" : "mes"}`
+          }))
+        : [{ value: "", label: "No hay planes disponibles" }]
+    });
   }
 
   function renderLogin() {
     heading.textContent = "Iniciar sesión";
-    const card = el(document, "div", "cloud-card");
+    const card = el(document, "form", "cloud-card");
     card.appendChild(el(document, "h3", "", "Sheets CRM"));
     card.appendChild(el(document, "p", "cloud-copy", "Inicia sesión para cargar la configuración de este documento y usar el servicio."));
-    const email = input(document, { name: "email", label: "Correo", type: "email", autocomplete: "email" });
-    const password = input(document, { name: "password", label: "Contraseña", type: "password", autocomplete: "current-password" });
+    const email = formInput({ name: "email", label: "Correo", type: "email", autocomplete: "email" });
+    const password = formInput({ name: "password", label: "Contraseña", type: "password", autocomplete: "current-password" });
     const login = button(document, "Iniciar sesión", "primary-button");
+    login.type = "submit";
     const signup = button(document, "Contratar");
-    login.addEventListener("click", async () => {
+    card.addEventListener("submit", async (event) => {
+      event.preventDefault();
       try {
         const result = await request("login", { email: email.control.value, password: password.control.value });
         setSession(result);
@@ -224,9 +234,9 @@ export function createCloudAccountUi(options) {
   function renderSignup() {
     heading.textContent = "Contratar Sheets CRM";
     const card = el(document, "div", "cloud-card");
-    const name = input(document, { name: "name", label: "Nombre", autocomplete: "name" });
-    const email = input(document, { name: "email", label: "Correo", type: "email", autocomplete: "email" });
-    const password = input(document, { name: "password", label: "Contraseña", type: "password", autocomplete: "new-password" });
+    const name = formInput({ name: "name", label: "Nombre", autocomplete: "name" });
+    const email = formInput({ name: "email", label: "Correo", type: "email", autocomplete: "email" });
+    const password = formInput({ name: "password", label: "Contraseña", type: "password", autocomplete: "new-password" });
     const plan = planInput();
     const back = button(document, "Volver");
     const checkout = button(document, "Ir a pagar", "primary-button");
@@ -297,9 +307,9 @@ export function createCloudAccountUi(options) {
     ]) {
       details.append(el(document, "dt", "", term), el(document, "dd", "", value));
     }
-    const name = input(document, { name: "name", label: "Nombre", value: user?.name || "", autocomplete: "name" });
-    const email = input(document, { name: "email", label: "Correo", type: "email", value: user?.email || "", autocomplete: "email" });
-    const password = input(document, { name: "password", label: "Nueva contraseña", type: "password", autocomplete: "new-password" });
+    const name = formInput({ name: "name", label: "Nombre", value: user?.name || "", autocomplete: "name" });
+    const email = formInput({ name: "email", label: "Correo", type: "email", value: user?.email || "", autocomplete: "email" });
+    const password = formInput({ name: "password", label: "Nueva contraseña", type: "password", autocomplete: "new-password" });
     const save = button(document, "Guardar perfil", "primary-button");
     save.addEventListener("click", async () => {
       try {
@@ -372,11 +382,11 @@ export function createCloudAccountUi(options) {
     heading.textContent = "Administración";
     const create = el(document, "div", "cloud-card");
     create.appendChild(el(document, "h3", "", "Nueva cuenta"));
-    const name = input(document, { name: "name", label: "Nombre" });
-    const email = input(document, { name: "email", label: "Correo admin", type: "email" });
-    const password = input(document, { name: "password", label: "Contraseña", type: "password" });
-    const expires = input(document, { name: "expiresAt", label: "Vencimiento", type: "datetime-local" });
-    const max = input(document, { name: "maxWorkspaces", label: "Máximo de documentos", type: "number", value: "0", min: "0" });
+    const name = formInput({ name: "name", label: "Nombre" });
+    const email = formInput({ name: "email", label: "Correo admin", type: "email" });
+    const password = formInput({ name: "password", label: "Contraseña", type: "password" });
+    const expires = formInput({ name: "expiresAt", label: "Vencimiento", type: "datetime" });
+    const max = formInput({ name: "maxWorkspaces", label: "Máximo de documentos", type: "number", value: 0, min: 0 });
     const submit = button(document, "Crear cuenta", "primary-button");
     submit.addEventListener("click", async () => {
       try {
@@ -399,9 +409,9 @@ export function createCloudAccountUi(options) {
       const card = el(document, "div", "cloud-card cloud-admin-card");
       card.appendChild(el(document, "h3", "", account.name || `Cuenta ${account.id}`));
       card.appendChild(el(document, "p", "cloud-copy", `${account.adminEmail || "Sin correo"} · ${account.workspaceCount || 0} documentos · ${account.userCount || 0} usuarios`));
-      const accountName = input(document, { name: "name", label: "Nombre", value: account.name || "" });
-      const expiration = input(document, { name: "expiresAt", label: "Vencimiento", type: "datetime-local", value: dateInputValue(account.expiresAt) });
-      const limit = input(document, { name: "maxWorkspaces", label: "Máximo de documentos", type: "number", value: String(account.maxWorkspaces || 0), min: "0" });
+      const accountName = formInput({ name: "name", label: "Nombre", value: account.name || "" });
+      const expiration = formInput({ name: "expiresAt", label: "Vencimiento", type: "datetime", value: dateInputValue(account.expiresAt) });
+      const limit = formInput({ name: "maxWorkspaces", label: "Máximo de documentos", type: "number", value: Number(account.maxWorkspaces) || 0, min: 0 });
       const save = button(document, "Guardar", "primary-button");
       const toggle = button(document, account.status === "active" ? "Suspender" : "Activar");
       const targetUser = state.adminUsers.find(user => Number(user.accountId) === Number(account.id));
@@ -437,25 +447,21 @@ export function createCloudAccountUi(options) {
   function planForm(plan = null) {
     const card = el(document, "div", "cloud-card");
     card.appendChild(el(document, "h3", "", plan ? plan.name : "Nuevo plan"));
-    const code = input(document, { name: "code", label: "Código", value: plan?.code || "" });
-    const name = input(document, { name: "name", label: "Nombre", value: plan?.name || "" });
-    const amount = input(document, { name: "amountCents", label: "Monto en centavos", type: "number", value: String(plan?.amountCents || ""), min: "0" });
-    const currency = input(document, { name: "currency", label: "Moneda", value: plan?.currency || "usd" });
-    const max = input(document, { name: "maxWorkspaces", label: "Máximo de documentos", type: "number", value: String(plan?.maxWorkspaces || 0), min: "0" });
-    const intervalItem = el(document, "label", "cloud-form-item");
-    intervalItem.appendChild(el(document, "span", "cloud-form-label", "Frecuencia"));
-    const interval = el(document, "select", "property-input");
-    for (const [value, label] of [["month", "Mensual"], ["year", "Anual"]]) {
-      const option = el(document, "option", "", label);
-      option.value = value;
-      option.selected = (plan?.interval || "month") === value;
-      interval.appendChild(option);
-    }
-    intervalItem.appendChild(interval);
+    const code = formInput({ name: "code", label: "Código", value: plan?.code || "" });
+    const name = formInput({ name: "name", label: "Nombre", value: plan?.name || "" });
+    const amount = formInput({ name: "amountCents", label: "Monto en centavos", type: "number", value: plan?.amountCents ?? "", min: 0 });
+    const currency = formInput({ name: "currency", label: "Moneda", value: plan?.currency || "usd" });
+    const max = formInput({ name: "maxWorkspaces", label: "Máximo de documentos", type: "number", value: Number(plan?.maxWorkspaces) || 0, min: 0 });
+    const interval = formSelect({
+      name: "interval",
+      label: "Frecuencia",
+      value: plan?.interval || "month",
+      options: [{ value: "month", label: "Mensual" }, { value: "year", label: "Anual" }]
+    });
     const save = button(document, plan ? "Guardar" : "Crear plan", "primary-button");
     save.addEventListener("click", async () => {
       try {
-        const payload = { id: plan?.id, code: code.control.value, name: name.control.value, amountCents: Number(amount.control.value), currency: currency.control.value, interval: interval.value, maxWorkspaces: Number(max.control.value), active: plan?.active ?? true, public: plan?.public ?? true, sortOrder: plan?.sortOrder || 0 };
+        const payload = { id: plan?.id, code: code.control.value, name: name.control.value, amountCents: Number(amount.control.value), currency: currency.control.value, interval: interval.control.value, maxWorkspaces: Number(max.control.value), active: plan?.active ?? true, public: plan?.public ?? true, sortOrder: plan?.sortOrder || 0 };
         await request(plan ? "admin.plan.update" : "admin.plan.create", payload);
         await loadAdminPlans();
         showNotice(plan ? "Plan actualizado." : "Plan creado.");
@@ -466,7 +472,7 @@ export function createCloudAccountUi(options) {
       try { await request("admin.plan.delete", { id: plan.id }); await loadAdminPlans(); } catch (error) { showError(error.message); }
     });
     if (plan) code.control.disabled = true;
-    card.append(code.item, name.item, amount.item, currency.item, intervalItem, max.item, actionRow(remove, save));
+    card.append(code.item, name.item, amount.item, currency.item, interval.item, max.item, actionRow(remove, save));
     return card;
   }
 
@@ -488,6 +494,7 @@ export function createCloudAccountUi(options) {
   }
 
   function render() {
+    disposeMountedControls();
     body.replaceChildren();
     const message = statusMessage();
     if (message) body.appendChild(message);

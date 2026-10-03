@@ -481,6 +481,7 @@ import { createCloudAccountUi } from "./cloud-account.js";
     .cloud-copy { margin: 0; color: var(--workspace-text-muted); font-size: 12px; }
     .cloud-form-item { display: grid; gap: 6px; color: var(--workspace-text); font-size: 13px; font-weight: 600; }
     .cloud-form-label { display: block; }
+    .cloud-control-host { width: 100%; min-width: 0; font-weight: 400; }
     .cloud-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 4px; }
     .cloud-message { margin-bottom: 14px; padding: 9px 12px; border: 1px solid; border-radius: 6px; font-size: 12px; }
     .cloud-message.error { border-color: ${antdTokens.colorErrorBorder}; background: ${antdTokens.colorErrorBg}; color: ${antdTokens.colorErrorText}; }
@@ -962,6 +963,116 @@ import { createCloudAccountUi } from "./cloud-account.js";
         child
       )
     );
+  }
+
+  function createCloudFormControl({
+    name = "",
+    type = "text",
+    value = "",
+    autocomplete = "off",
+    min,
+    disabled = false,
+    options = []
+  }) {
+    const host = element("div", "cloud-control-host");
+    const reactRoot = createRoot(host);
+    let currentValue = value ?? "";
+    let baseDisabled = Boolean(disabled);
+    let busy = false;
+    let destroyed = false;
+    let initialized = false;
+
+    const updateValue = (nextValue) => {
+      currentValue = nextValue ?? "";
+      renderControl();
+    };
+
+    const renderControl = () => {
+      if (destroyed) return;
+      const isDisabled = baseDisabled || busy;
+      const fullWidth = { width: "100%" };
+      let control;
+
+      if (type === "select") {
+        control = React.createElement(Select, {
+          value: currentValue,
+          disabled: isDisabled,
+          options,
+          onChange: updateValue,
+          style: fullWidth
+        });
+      } else if (type === "number") {
+        control = React.createElement(InputNumber, {
+          name,
+          value: currentValue === "" ? null : Number(currentValue),
+          min: min === "" || min === undefined ? undefined : Number(min),
+          disabled: isDisabled,
+          controls: true,
+          onChange: updateValue,
+          style: fullWidth
+        });
+      } else if (type === "datetime") {
+        const pickerValue = currentValue && dayjs(currentValue).isValid() ? dayjs(currentValue) : null;
+        control = React.createElement(DatePicker, {
+          name,
+          value: pickerValue,
+          disabled: isDisabled,
+          allowClear: true,
+          locale: datePickerLocale,
+          popupClassName: "workspace-date-picker-popup",
+          placement: "bottomRight",
+          showTime: { format: "HH:mm" },
+          format: "DD/MM/YYYY HH:mm",
+          onChange: (date) => updateValue(date ? date.format("YYYY-MM-DDTHH:mm") : ""),
+          style: fullWidth
+        });
+      } else {
+        const Component = type === "password" ? Input.Password : Input;
+        control = React.createElement(Component, {
+          name,
+          value: String(currentValue),
+          type: type === "email" ? "email" : undefined,
+          autoComplete: autocomplete,
+          disabled: isDisabled,
+          onChange: (event) => updateValue(event.target.value),
+          style: fullWidth
+        });
+      }
+
+      const tree = antdTree(control);
+      if (!initialized) {
+        flushSync(() => reactRoot.render(tree));
+        initialized = true;
+      } else {
+        reactRoot.render(tree);
+      }
+    };
+
+    const adapter = {
+      element: host,
+      get value() { return currentValue; },
+      set value(nextValue) {
+        currentValue = nextValue ?? "";
+        renderControl();
+      },
+      get disabled() { return baseDisabled; },
+      set disabled(nextValue) {
+        baseDisabled = Boolean(nextValue);
+        renderControl();
+      },
+      setBusy(nextValue) {
+        busy = Boolean(nextValue);
+        renderControl();
+      },
+      destroy() {
+        if (destroyed) return;
+        destroyed = true;
+        reactRoot.unmount();
+      }
+    };
+
+    renderControl();
+    return adapter;
   }
 
   function renderTypeIcon(button, type) {
@@ -1951,7 +2062,8 @@ import { createCloudAccountUi } from "./cloud-account.js";
     send: cloudMessage,
     openExternal: (url) => panelFrame.contentWindow.open(url, "_blank", "noopener,noreferrer"),
     onSessionChange: handleCloudSessionChange,
-    onBlockedClose: () => { panelFrame.hidden = true; }
+    onBlockedClose: () => { panelFrame.hidden = true; },
+    createFormControl: createCloudFormControl
   }) : null;
   panelDocument.body.append(drawer, propertyDrawer);
   if (cloudAccountUi) panelDocument.body.appendChild(cloudAccountUi.element);
