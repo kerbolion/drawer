@@ -873,6 +873,7 @@ try {
     const tabs = Array.from(document.querySelectorAll(".docs-sheet-tab"));
     tabs.forEach(tab => tab.classList.remove("docs-sheet-active-tab"));
     tabs.find(tab => tab.textContent.includes("Contactos")).classList.add("docs-sheet-active-tab");
+    tabs.find(tab => tab.textContent.includes("Servicios")).id = "sheet-servicios";
     location.hash = "gid=0&range=A2";
     const box = document.getElementById("t-name-box");
     box.value = "A2";
@@ -1308,6 +1309,19 @@ try {
   }
   const relatedServiceId = newRelatedService.id;
   await cdp.evaluate(`(() => {
+    const nameBox = document.getElementById("t-name-box");
+    nameBox.addEventListener("keydown", event => {
+      if (event.key !== "Enter") return;
+      const match = String(nameBox.value || "").match(/^'([^']+)'!([A-Z]+\\d+)$/);
+      if (!match) return;
+      const tabs = Array.from(document.querySelectorAll(".docs-sheet-tab"));
+      const target = tabs.find(tab => tab.textContent.includes(match[1]));
+      if (!target) return;
+      tabs.forEach(tab => tab.classList.remove("docs-sheet-active-tab"));
+      target.classList.add("docs-sheet-active-tab");
+      const gid = match[1] === "Servicios" ? "1" : "0";
+      location.hash = "gid=" + gid + "&range=" + match[2];
+    }, { capture: true });
     const panel = document.getElementById("sheets-session-probe").shadowRoot.querySelector(".panel-frame").contentDocument;
     const drawer = panel.querySelector(".related-record-drawer");
     const input = drawer.querySelector('[data-related-column="4"] input');
@@ -1324,19 +1338,32 @@ try {
   let relatedCreated;
   while (Date.now() < relatedCreatedDeadline) {
     relatedCreated = await cdp.evaluate(`(() => {
+      const host = document.getElementById("sheets-session-probe");
       const panel = document.getElementById("sheets-session-probe").shadowRoot.querySelector(".panel-frame").contentDocument;
       const relation = Array.from(panel.querySelectorAll(".relation")).find(item => item.querySelector(".relation-title")?.textContent === "Servicios");
       return {
+        gid: new URLSearchParams(location.hash.slice(1)).get("gid") || "",
+        row: host.dataset.row || "",
+        sheet: document.querySelector(".docs-sheet-active-tab .docs-sheet-tab-name")?.textContent || "",
+        selection: document.getElementById("t-name-box")?.value || "",
+        id: panel.querySelector('[data-column="1"]')?.dataset.serializedValue || "",
+        meta: panel.querySelector(".meta")?.textContent || "",
         count: relation?.querySelector(".relation-count")?.textContent || "",
         drawerOpen: Boolean(panel.querySelector(".related-record-drawer")),
         pastes: window.__createRelatedPastes
       };
     })()`);
-    if (relatedCreated.count === "3" && !relatedCreated.drawerOpen) break;
+    if (relatedCreated.gid === "1" && relatedCreated.row === "2" && relatedCreated.id === "C-1" && relatedCreated.count === "3" && !relatedCreated.drawerOpen) break;
     await delay(100);
   }
   if (
-    relatedCreated?.count !== "3" ||
+    relatedCreated?.gid !== "1" ||
+    relatedCreated.row !== "2" ||
+    relatedCreated.sheet !== "Servicios" ||
+    relatedCreated.selection !== "'Servicios'!D7" ||
+    relatedCreated.id !== "C-1" ||
+    !relatedCreated.meta.includes("Contactos") ||
+    relatedCreated.count !== "3" ||
     relatedCreated.drawerOpen ||
     relatedCreated.pastes.length !== 2 ||
     relatedCreated.pastes[0].reference !== "'Servicios'!A7" ||
@@ -1344,7 +1371,82 @@ try {
     relatedCreated.pastes[1].reference !== "'Servicios'!D7" ||
     relatedCreated.pastes[1].value !== "Creado desde relacionados"
   ) {
-    throw new Error(`El alta relacionada no quedó vinculada y confirmada: ${JSON.stringify(relatedCreated)}`);
+    throw new Error(`El alta relacionada reemplazó el formulario principal: ${JSON.stringify(relatedCreated)}`);
+  }
+
+  await cdp.evaluate(`(() => {
+    const panel = document.getElementById("sheets-session-probe").shadowRoot.querySelector(".panel-frame").contentDocument;
+    panel.querySelector('[data-add-related-record="Servicios"]').click();
+  })()`);
+  const secondRelatedDeadline = Date.now() + 5_000;
+  let secondRelated;
+  while (Date.now() < secondRelatedDeadline) {
+    secondRelated = await cdp.evaluate(`(() => {
+      const panel = document.getElementById("sheets-session-probe").shadowRoot.querySelector(".panel-frame").contentDocument;
+      const drawer = panel.querySelector(".related-record-drawer");
+      return {
+        open: Boolean(drawer),
+        id: drawer?.querySelector('[data-related-column="1"] input')?.value || "",
+        relationId: drawer?.querySelector('[data-related-column="2"] input')?.value || ""
+      };
+    })()`);
+    if (secondRelated.open && secondRelated.id && secondRelated.relationId) break;
+    await delay(100);
+  }
+  if (
+    !secondRelated?.open
+    || !/^[A-Za-z0-9]{9}$/.test(secondRelated.id)
+    || secondRelated.id === relatedServiceId
+    || secondRelated.relationId !== "C-1"
+  ) {
+    throw new Error(`El segundo registro relacionado no generó su ID: ${JSON.stringify(secondRelated)}`);
+  }
+  const secondRelatedServiceId = secondRelated.id;
+  await cdp.evaluate(`(() => {
+    const panel = document.getElementById("sheets-session-probe").shadowRoot.querySelector(".panel-frame").contentDocument;
+    const drawer = panel.querySelector(".related-record-drawer");
+    const input = drawer.querySelector('[data-related-column="4"] input');
+    const setter = Object.getOwnPropertyDescriptor(panel.defaultView.HTMLInputElement.prototype, "value").set;
+    setter.call(input, "Segundo relacionado");
+    input.dispatchEvent(new panel.defaultView.Event("input", { bubbles: true }));
+    Array.from(drawer.querySelectorAll(".ant-drawer-footer button")).find(button => button.textContent.includes("Guardar"))?.click();
+  })()`);
+  setTimeout(() => {
+    sheets.Servicios.rows.push([secondRelatedServiceId, "C-1", "", "Segundo relacionado", "", ""]);
+  }, 450);
+  await waitForWriteVerification();
+  const secondRelatedSavedDeadline = Date.now() + 5_000;
+  let secondRelatedSaved;
+  while (Date.now() < secondRelatedSavedDeadline) {
+    secondRelatedSaved = await cdp.evaluate(`(() => {
+      const host = document.getElementById("sheets-session-probe");
+      const panel = host.shadowRoot.querySelector(".panel-frame").contentDocument;
+      const relation = Array.from(panel.querySelectorAll(".relation")).find(item => item.querySelector(".relation-title")?.textContent === "Servicios");
+      return {
+        row: host.dataset.row || "",
+        selection: document.getElementById("t-name-box")?.value || "",
+        id: panel.querySelector('[data-column="1"]')?.dataset.serializedValue || "",
+        count: relation?.querySelector(".relation-count")?.textContent || "",
+        drawerOpen: Boolean(panel.querySelector(".related-record-drawer")),
+        pastes: window.__createRelatedPastes
+      };
+    })()`);
+    if (secondRelatedSaved.row === "2" && secondRelatedSaved.id === "C-1" && secondRelatedSaved.count === "4" && !secondRelatedSaved.drawerOpen) break;
+    await delay(100);
+  }
+  if (
+    secondRelatedSaved?.row !== "2"
+    || secondRelatedSaved.selection !== "'Servicios'!D8"
+    || secondRelatedSaved.id !== "C-1"
+    || secondRelatedSaved.count !== "4"
+    || secondRelatedSaved.drawerOpen
+    || secondRelatedSaved.pastes.length !== 4
+    || secondRelatedSaved.pastes[2].reference !== "'Servicios'!A8"
+    || secondRelatedSaved.pastes[2].value !== `${secondRelatedServiceId}\tC-1`
+    || secondRelatedSaved.pastes[3].reference !== "'Servicios'!D8"
+    || secondRelatedSaved.pastes[3].value !== "Segundo relacionado"
+  ) {
+    throw new Error(`El segundo registro relacionado no conservó el contexto: ${JSON.stringify(secondRelatedSaved)}`);
   }
   console.log("RELACIONES_OK: altas principal y relacionada, ID aleatorio, Deck/Tabla, guardado, tipos y caché confirmados.");
 } finally {

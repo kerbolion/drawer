@@ -1776,8 +1776,8 @@ import { createCloudAccountUi } from "./cloud-account.js";
     const sheet = currentSheetConfiguration();
     const columns = (sheet?.columns || []).filter((column) => String(column.sourceHeader || "").trim());
     flushSync(() => ui.sheetViewActions._reactRoot.render(antdTree(React.createElement(SheetViewActions, {
-      sheetKey: `${currentGid()}:${sheet?.updatedAt || 0}`,
-      sheetName: sheet?.name || activeSheetName() || `Hoja ${currentGid()}`,
+      sheetKey: `${drawerGid()}:${sheet?.updatedAt || 0}`,
+      sheetName: sheet?.name || state.sheetName || activeSheetName() || `Hoja ${drawerGid()}`,
       columns,
       settings: { ...currentSheetViewSettings() },
       refreshKey: state.sheetDataRevision
@@ -2254,6 +2254,10 @@ import { createCloudAccountUi } from "./cloud-account.js";
     return hashGid || searchGid || "0";
   }
 
+  function drawerGid() {
+    return String(state.gid ?? currentGid());
+  }
+
   function activeSheetName() {
     return document.querySelector(".docs-sheet-active-tab .docs-sheet-tab-name")?.textContent.trim() || "";
   }
@@ -2301,6 +2305,10 @@ import { createCloudAccountUi } from "./cloud-account.js";
     if (rowRange) return Number(rowRange[1]);
     const cell = ref.match(/[A-Z]+(\d+)/i);
     return cell ? Number(cell[1]) : null;
+  }
+
+  function rowSelectionSignature(gid, sheetName, row) {
+    return `${gid}:${normalizedColumn(sheetName)}:row:${row}`;
   }
 
   function nameBoxValue() {
@@ -2728,17 +2736,17 @@ import { createCloudAccountUi } from "./cloud-account.js";
   }
 
   function currentSheetConfiguration() {
-    return state.workspace?.sheets?.[String(currentGid())] || null;
+    return state.workspace?.sheets?.[drawerGid()] || null;
   }
 
   function currentSheetViewSettings() {
-    return state.workspace?.sheetViews?.[String(currentGid())] || {};
+    return state.workspace?.sheetViews?.[drawerGid()] || {};
   }
 
   function setCurrentSheetViewSetting(name, value) {
     if (!state.workspace) state.workspace = createWorkspace();
     if (!state.workspace.sheetViews) state.workspace.sheetViews = {};
-    const key = String(currentGid());
+    const key = drawerGid();
     const previous = state.workspace.sheetViews[key] || {};
     if (previous[name] === value) return;
     state.workspace.sheetViews[key] = {
@@ -2749,7 +2757,7 @@ import { createCloudAccountUi } from "./cloud-account.js";
   }
 
   function relationViewKey(sheetName) {
-    return `${currentGid()}:${normalizedColumn(sheetName)}`;
+    return `${drawerGid()}:${normalizedColumn(sheetName)}`;
   }
 
   function relationView(sheetName) {
@@ -3093,9 +3101,8 @@ import { createCloudAccountUi } from "./cloud-account.js";
       )
     ) return direct;
 
-    const candidates = Object.entries(configuredSheets)
-      .filter(([gid]) => gid !== String(currentGid()))
-      .map(([, sheet]) => ({
+    const candidates = Object.values(configuredSheets)
+      .map((sheet) => ({
         sheet,
         nameMatches: normalizedColumn(sheet.name) === targetName,
         headerMatches: headerMatchCount(sheet)
@@ -3633,7 +3640,7 @@ import { createCloudAccountUi } from "./cloud-account.js";
 
   async function loadRelationships(currentHeaders, currentValues, signal) {
     const currentSheet = state.sheetName || activeSheetName();
-    const persistentKey = cacheKey("relations", currentGid(), state.row);
+    const persistentKey = cacheKey("relations", drawerGid(), state.row);
     const cached = await readPersistentCache(persistentKey);
     if (signal?.aborted) return;
     const usableCache = cached?.currentSheet === currentSheet && Array.isArray(cached.relations);
@@ -3990,12 +3997,12 @@ import { createCloudAccountUi } from "./cloud-account.js";
     const sourceLabels = fitCells(labels, width);
     state.values = fitCells(values, width);
     state.fields = sourceLabels.map((label, index) => label || `Columna ${columnName(index + 1)}`);
-    reconcileSheetConfiguration(currentGid(), state.sheetName || activeSheetName() || `Hoja ${currentGid()}`, sourceLabels);
+    reconcileSheetConfiguration(drawerGid(), state.sheetName || activeSheetName() || `Hoja ${drawerGid()}`, sourceLabels);
     renderSheetViewActions();
     setEmptyState(false);
     renderFields(new Map([...state.primaryDrafts.values()].map((draft) => [draft.index, draft.value])));
     state.viewRow = row;
-    state.viewGid = currentGid();
+    state.viewGid = drawerGid();
     host.dataset.row = String(row);
     ui.fields.inert = false;
     ui.fields.removeAttribute("aria-busy");
@@ -4029,10 +4036,10 @@ import { createCloudAccountUi } from "./cloud-account.js";
     state.fields = sourceLabels.map((label, index) => label || `Columna ${columnName(index + 1)}`);
     state.values = Array.from({ length: width }, () => "");
     state.primaryDrafts.clear();
-    reconcileSheetConfiguration(currentGid(), state.sheetName || activeSheetName() || `Hoja ${currentGid()}`, sourceLabels);
+    reconcileSheetConfiguration(drawerGid(), state.sheetName || activeSheetName() || `Hoja ${drawerGid()}`, sourceLabels);
     renderSheetViewActions();
     state.viewRow = row;
-    state.viewGid = currentGid();
+    state.viewGid = drawerGid();
     host.dataset.row = String(row);
     clearRenderedFields();
     clearRelations();
@@ -4972,7 +4979,7 @@ import { createCloudAccountUi } from "./cloud-account.js";
             if (entry.creation) {
               state.primaryCreation = null;
               delete host.dataset.creatingRecord;
-              state.lastSelection = `${entry.gid}:${normalizedColumn(entry.creation.sheetName)}:row:${entry.row}`;
+              state.lastSelection = rowSelectionSignature(entry.gid, entry.creation.sheetName, entry.row);
               ui.meta.textContent = `${entry.creation.sheetName} · fila ${entry.row}`;
               setStatus(`Registro creado en la fila ${entry.row}`);
             }
@@ -5270,11 +5277,20 @@ import { createCloudAccountUi } from "./cloud-account.js";
     notifyRelatedDrafts();
     setStatus(`Guardando ${changeCount} campo(s)…`, "busy");
     try {
-      const createsRelatedRecord = relatedPlan.rowPlans.some((plan) => plan.drafts.some((draft) => draft.row.isNew));
-      const selectionReference = createsRelatedRecord
-        ? qualifiedReference(state.sheetName, `A${state.row}`)
-        : "";
-      await writeRanges(operations, selectionReference);
+      const createdRelatedDraft = relatedPlan.rowPlans
+        .flatMap((plan) => plan.drafts)
+        .find((draft) => draft.row.isNew);
+      await writeRanges(operations);
+      if (createdRelatedDraft) {
+        const targetGid = createdRelatedDraft.relation.sheetGid
+          || visibleSheets().find((sheet) => normalizedColumn(sheet.name) === normalizedColumn(createdRelatedDraft.sheetName))?.gid
+          || currentGid();
+        state.lastSelection = rowSelectionSignature(
+          String(targetGid),
+          createdRelatedDraft.sheetName,
+          createdRelatedDraft.rowNumber
+        );
+      }
       registerPrimaryWrite(primaryPlan);
       registerRelatedWrites(relatedPlan.rowPlans);
       host.dataset.writeVerification = "pending";
@@ -5646,7 +5662,7 @@ import { createCloudAccountUi } from "./cloud-account.js";
     const row = selectedRow(reference);
     const sheetSignature = normalizedColumn(sheetName);
     const signature = row
-      ? `${gid}:${sheetSignature}:row:${row}`
+      ? rowSelectionSignature(gid, sheetName, row)
       : `${gid}:${sheetSignature}:reference:${normalizedReference}`;
     if (signature === state.lastSelection) return;
     state.lastSelection = signature;
