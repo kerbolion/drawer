@@ -271,7 +271,7 @@ function DeckView({ columns, table, renderTypeIcon, onAddRow, onOpenRow }) {
               { className: "workspace-deck-fields" },
               ...previewColumns.map((property) => React.createElement(
                 "div",
-                { className: "workspace-deck-field", key: property.id },
+                { className: "workspace-deck-field", key: `${property.id}:${property.index}` },
                 React.createElement("span", { className: "property-type-icon workspace-deck-field-icon" }, renderTypeIcon(property)),
                 React.createElement("span", null, property.name),
                 React.createElement("strong", { title: text(row.cells[property.index]) }, fieldDisplay(row.cells[property.index], property))
@@ -300,13 +300,13 @@ function DeckView({ columns, table, renderTypeIcon, onAddRow, onOpenRow }) {
   );
 }
 
-function TableView({ columns, table, renderEditor, renderTypeIcon, toEditorValue, onAddRow, onCellChange, onClearRows, onOpenRow }) {
+function TableView({ columns, hiddenColumnIds, table, renderEditor, renderTypeIcon, toEditorValue, onAddRow, onCellChange, onClearRows, onHiddenColumnIdsChange, onOpenRow }) {
   const [search, setSearch] = React.useState("");
   const [filters, setFilters] = React.useState([]);
-  const [hiddenColumns, setHiddenColumns] = React.useState([]);
   const [selectedRows, setSelectedRows] = React.useState([]);
   const [page, setPage] = React.useState(1);
   const [pageSize, setPageSize] = React.useState(20);
+  const hiddenColumns = hiddenColumnIds || [];
   const visibleColumns = columns.filter((column) => !hiddenColumns.includes(column.id));
   const rows = table?.rows || [];
   const query = normalized(search);
@@ -350,10 +350,10 @@ function TableView({ columns, table, renderEditor, renderTypeIcon, toEditorValue
           { className: "workspace-table-columns-menu" },
           ...columns.map((column) => React.createElement(Checkbox, {
             checked: !hiddenColumns.includes(column.id),
-            key: column.id,
-            onChange: (event) => setHiddenColumns((current) => event.target.checked
-              ? current.filter((id) => id !== column.id)
-              : [...current, column.id])
+            key: `${column.id}:${column.index}`,
+            onChange: (event) => onHiddenColumnIdsChange(event.target.checked
+              ? hiddenColumns.filter((id) => id !== column.id)
+              : [...hiddenColumns, column.id])
           }, column.name))
         )
       ),
@@ -394,7 +394,7 @@ function TableView({ columns, table, renderEditor, renderTypeIcon, toEditorValue
             React.createElement("th", { className: "workspace-table-row-number" }, "#"),
             ...visibleColumns.map((column) => React.createElement(
               "th",
-              { key: column.id },
+              { key: `${column.id}:${column.index}` },
               React.createElement(
                 "div",
                 { className: "workspace-table-column-heading" },
@@ -421,7 +421,7 @@ function TableView({ columns, table, renderEditor, renderTypeIcon, toEditorValue
             React.createElement("td", { className: "workspace-table-row-number" }, String(row.number)),
             ...visibleColumns.map((property) => React.createElement(
               "td",
-              { key: property.id, "data-column-id": property.id },
+              { key: `${property.id}:${property.index}`, "data-column-id": property.id },
               React.createElement(WorkspaceCellEditor, {
                 property,
                 rawValue: row.cells[property.index] || "",
@@ -481,11 +481,13 @@ export function WorkspaceSheetView({
   currentDocumentId,
   documents,
   error,
+  hiddenColumnIds,
   loading,
   onAddRow,
   onCellChange,
   onClearRows,
   onDocumentSelect,
+  onHiddenColumnIdsChange,
   onOpenRow,
   onSheetSelect,
   renderCalendar,
@@ -497,6 +499,8 @@ export function WorkspaceSheetView({
   sheetName,
   table
 }) {
+  const hiddenColumns = hiddenColumnIds || [];
+  const visibleColumns = columns.filter((column) => !hiddenColumns.includes(column.id));
   const hasKanban = columns.some((column) => column.type === "status");
   const hasCalendar = columns.some((column) => column.type === "date");
   const [activeView, setActiveView] = React.useState("deck");
@@ -572,11 +576,12 @@ export function WorkspaceSheetView({
           : !table
             ? React.createElement(Empty, { description: "No hay datos para mostrar" })
             : activeView === "kanban"
-              ? renderKanban(openRow)
+              ? renderKanban(openRow, visibleColumns)
               : activeView === "calendar"
-                ? renderCalendar(openRow)
+                ? renderCalendar(openRow, visibleColumns)
                 : activeView === "table" ? React.createElement(TableView, {
                   columns,
+                  hiddenColumnIds: hiddenColumns,
                   table,
                   renderEditor,
                   renderTypeIcon,
@@ -584,9 +589,10 @@ export function WorkspaceSheetView({
                   onAddRow,
                   onCellChange,
                   onClearRows,
+                  onHiddenColumnIdsChange,
                   onOpenRow: openRow
                 }) : React.createElement(DeckView, {
-                  columns,
+                  columns: visibleColumns,
                   table,
                   renderTypeIcon,
                   onAddRow,

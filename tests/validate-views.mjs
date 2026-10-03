@@ -428,6 +428,89 @@ try {
     throw new Error(`Cerrar detalles no devolvio a la misma vista Tabla: ${JSON.stringify(restoredTable)}`);
   }
 
+  await cdp.evaluate(viewExpression(`
+    const option = Array.from(view.querySelectorAll('.workspace-table-columns .ant-checkbox-wrapper'))
+      .find((item) => item.textContent.trim() === 'Nombre');
+    option?.querySelector('input')?.click();
+  `));
+  await delay(120);
+  const hiddenInTable = await cdp.evaluate(viewExpression(`return {
+    checked: Array.from(view.querySelectorAll('.workspace-table-columns .ant-checkbox-wrapper'))
+      .find((item) => item.textContent.trim() === 'Nombre')?.querySelector('input')?.checked,
+    cellVisible: Boolean(view.querySelector('[data-workspace-row="2"] td[data-column-id="column-2"]'))
+  };`));
+  if (hiddenInTable.checked !== false || hiddenInTable.cellVisible) {
+    throw new Error(`Ocultar una columna no se aplico a Tabla: ${JSON.stringify(hiddenInTable)}`);
+  }
+
+  await cdp.evaluate(viewExpression('view.querySelector("[data-workspace-view=deck]").click();'));
+  await delay(100);
+  const hiddenInDeck = await cdp.evaluate(viewExpression(`return {
+    activeView: view.querySelector('[data-workspace-view].ant-btn-primary')?.dataset.workspaceView || '',
+    labels: Array.from(view.querySelectorAll('.workspace-deck-field > span:nth-child(2)'), item => item.textContent.trim())
+  };`));
+  if (hiddenInDeck.activeView !== "deck" || hiddenInDeck.labels.includes("Nombre")) {
+    throw new Error(`La columna oculta siguio visible en Deck: ${JSON.stringify(hiddenInDeck)}`);
+  }
+
+  await cdp.evaluate(viewExpression('view.querySelector("[data-close-sheet-view]").click();'));
+  await delay(150);
+  await cdp.evaluate(panelExpression('panel.querySelector("[data-sheet-view=table]").click();'));
+  const persistedColumnsDeadline = Date.now() + 5_000;
+  let persistedColumns;
+  while (Date.now() < persistedColumnsDeadline) {
+    persistedColumns = await cdp.evaluate(viewExpression(`
+      view.querySelector('[data-workspace-view=table]')?.click();
+      const option = Array.from(view.querySelectorAll('.workspace-table-columns .ant-checkbox-wrapper'))
+        .find((item) => item.textContent.trim() === 'Nombre');
+      return {
+        checked: option?.querySelector('input')?.checked,
+        cellVisible: Boolean(view.querySelector('[data-workspace-row="2"] td[data-column-id="column-2"]'))
+      };
+    `));
+    if (persistedColumns.checked === false && !persistedColumns.cellVisible) break;
+    await delay(80);
+  }
+  if (persistedColumns?.checked !== false || persistedColumns.cellVisible) {
+    throw new Error(`La visibilidad de columnas no persistio al reabrir Tabla: ${JSON.stringify(persistedColumns)}`);
+  }
+
+  await cdp.evaluate(viewExpression('view.querySelector("[data-workspace-open-row=\\"2\\"]").click();'));
+  const hiddenDrawerDeadline = Date.now() + 5_000;
+  let hiddenInDrawer;
+  while (Date.now() < hiddenDrawerDeadline) {
+    hiddenInDrawer = await cdp.evaluate(panelExpression(`return {
+      open: panel.querySelector('.drawer')?.classList.contains('is-workspace-record-overlay') || false,
+      labels: Array.from(panel.querySelectorAll('.drawer > main .field:not([hidden]) .field-label-text'), item => item.textContent.trim()),
+      hiddenDisplay: (() => {
+        const field = Array.from(panel.querySelectorAll('.drawer > main .field'))
+          .find(item => item.querySelector('.field-label-text')?.textContent.trim() === 'Nombre');
+        return field ? getComputedStyle(field).display : '';
+      })()
+    };`));
+    if (hiddenInDrawer.open) break;
+    await delay(80);
+  }
+  if (!hiddenInDrawer?.open || hiddenInDrawer.labels.includes("Nombre") || hiddenInDrawer.labels.length !== 3 || hiddenInDrawer.hiddenDisplay !== "none") {
+    throw new Error(`La columna oculta siguio visible en el drawer: ${JSON.stringify(hiddenInDrawer)}`);
+  }
+  await cdp.evaluate(panelExpression('panel.querySelector(".drawer > header .close").click();'));
+  await delay(120);
+  await cdp.evaluate(viewExpression(`
+    const option = Array.from(view.querySelectorAll('.workspace-table-columns .ant-checkbox-wrapper'))
+      .find((item) => item.textContent.trim() === 'Nombre');
+    option?.querySelector('input')?.click();
+  `));
+  await delay(120);
+  const restoredColumn = await cdp.evaluate(viewExpression(`return {
+    checked: Array.from(view.querySelectorAll('.workspace-table-columns .ant-checkbox-wrapper'))
+      .find((item) => item.textContent.trim() === 'Nombre')?.querySelector('input')?.checked,
+    cellVisible: Boolean(view.querySelector('[data-workspace-row="2"] td[data-column-id="column-2"]'))
+  };`));
+  if (!restoredColumn.checked || !restoredColumn.cellVisible) {
+    throw new Error(`Volver a mostrar la columna no se aplico: ${JSON.stringify(restoredColumn)}`);
+  }
+
   await cdp.evaluate(viewExpression('view.querySelector("[data-workspace-add-row]").click();'));
   const newRowDeadline = Date.now() + 4_000;
   let newRowDrawer;
@@ -1016,6 +1099,72 @@ try {
   }
   if (selected?.box !== "A2" || selected.row !== "2") {
     throw new Error(`El evento no abrio su fila: ${JSON.stringify(selected)}`);
+  }
+
+  const removeFirstColumn = (row) => [row[1] || "", row[2] || "", row[3] || "", "", ""];
+  sheet.headers.splice(0, sheet.headers.length, "Nombre", "Estado", "Fecha", "", "");
+  sheet.rows.splice(0, sheet.rows.length, ...sheet.rows.map(removeFirstColumn));
+  staleVisualizationRows.splice(0, staleVisualizationRows.length, ...staleVisualizationRows.map(removeFirstColumn));
+  await cdp.evaluate(`window.postMessage({ source: "sheets-row-drawer", type: "sheet-change", reason: "test-column-removal" }, location.origin)`);
+  const removedColumnDeadline = Date.now() + 5_000;
+  while (Date.now() < removedColumnDeadline) {
+    const labels = await cdp.evaluate(panelExpression(`return Array.from(panel.querySelectorAll('.field-label-text'), item => item.textContent.trim());`));
+    if (JSON.stringify(labels) === JSON.stringify(["Nombre", "Estado", "Fecha"])) break;
+    await delay(80);
+  }
+
+  const insertNewColumn = (row) => [row[0] || "", "Nuevo", row[1] || "", row[2] || "", ""];
+  sheet.headers.splice(0, sheet.headers.length, "Nombre", "Nueva", "Estado", "Fecha", "");
+  sheet.rows.splice(0, sheet.rows.length, ...sheet.rows.map(insertNewColumn));
+  staleVisualizationRows.splice(0, staleVisualizationRows.length, ...staleVisualizationRows.map(insertNewColumn));
+  await cdp.evaluate(`window.postMessage({ source: "sheets-row-drawer", type: "sheet-change", reason: "test-column-insertion" }, location.origin)`);
+  const insertedColumnDeadline = Date.now() + 5_000;
+  while (Date.now() < insertedColumnDeadline) {
+    const labels = await cdp.evaluate(panelExpression(`return Array.from(panel.querySelectorAll('.field-label-text'), item => item.textContent.trim());`));
+    if (JSON.stringify(labels) === JSON.stringify(["Nombre", "Nueva", "Estado", "Fecha"])) break;
+    await delay(80);
+  }
+
+  await cdp.evaluate(panelExpression('panel.querySelector("[data-sheet-view=table]").click();'));
+  const repairedTableDeadline = Date.now() + 5_000;
+  while (Date.now() < repairedTableDeadline) {
+    const ready = await cdp.evaluate(viewExpression(`
+      view.querySelector('[data-workspace-view=table]')?.click();
+      return view.querySelectorAll('[data-workspace-row]').length > 0;
+    `));
+    if (ready) break;
+    await delay(80);
+  }
+  for (let iteration = 0; iteration < 3; iteration += 1) {
+    await cdp.evaluate(viewExpression(`
+      const option = Array.from(view.querySelectorAll('.workspace-table-columns .ant-checkbox-wrapper'))
+        .find(item => item.textContent.trim() === 'Nueva');
+      option?.querySelector('input')?.click();
+    `));
+    await delay(80);
+    await cdp.evaluate(viewExpression(`
+      const option = Array.from(view.querySelectorAll('.workspace-table-columns .ant-checkbox-wrapper'))
+        .find(item => item.textContent.trim() === 'Nueva');
+      option?.querySelector('input')?.click();
+    `));
+    await delay(80);
+  }
+  const repairedColumns = await cdp.evaluate(viewExpression(`return {
+    headings: Array.from(view.querySelectorAll('.workspace-data-table thead .workspace-table-column-heading > span:nth-child(2)'), item => item.textContent.trim()),
+    ids: Array.from(view.querySelectorAll('[data-workspace-row="2"] td[data-column-id]'), item => item.dataset.columnId),
+    options: Array.from(view.querySelectorAll('.workspace-table-columns .ant-checkbox-wrapper'), item => ({
+      label: item.textContent.trim(),
+      checked: item.querySelector('input')?.checked === true
+    }))
+  };`));
+  if (
+    JSON.stringify(repairedColumns.headings) !== JSON.stringify(["Nombre", "Nueva", "Estado", "Fecha"])
+    || new Set(repairedColumns.ids).size !== 4
+    || repairedColumns.ids.length !== 4
+    || repairedColumns.options.length !== 4
+    || repairedColumns.options.some((option) => !option.checked)
+  ) {
+    throw new Error(`Los identificadores repetidos desestabilizaron las columnas: ${JSON.stringify(repairedColumns)}`);
   }
 
   console.log("VISTAS_OK: Tabla, Kanban y Calendario usan una superficie independiente; sus registros reutilizan el drawer original.");

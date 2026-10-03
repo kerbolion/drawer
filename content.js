@@ -572,6 +572,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
       display: grid; grid-template-columns: 190px minmax(0, 1fr); align-items: flex-start; gap: 18px;
       min-height: 57px; padding: 12px 0; border-bottom: 1px solid var(--workspace-border-subtle);
     }
+    .field[hidden] { display: none !important; }
     .field:last-child { border-bottom: 0; }
     .field-label {
       display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: flex-start; gap: 8px;
@@ -1475,7 +1476,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
       },
       ...fields.map((column) => React.createElement(
         "div",
-        { className: "kanban-field", key: column.id },
+        { className: "kanban-field", key: `${column.id}:${column.index}` },
         React.createElement("span", { className: "property-type-icon" }, typeBadge(column.type, 12)),
         React.createElement("span", null, column.name),
         React.createElement("strong", null, sheetViewCellLabel(row.cells[column.index], column) || "Sin valor")
@@ -1567,8 +1568,10 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     );
   }
 
-  function SheetKanban({ table, columns, initialColumnId, movingRows, onColumnChange, onMoveRow, onOpenRow }) {
+  function SheetKanban({ table, columns, visibleColumnIds, initialColumnId, movingRows, onColumnChange, onMoveRow, onOpenRow }) {
     const statusColumns = columns.filter((column) => column.type === "status");
+    const visibleIds = Array.isArray(visibleColumnIds) ? new Set(visibleColumnIds) : null;
+    const displayColumns = visibleIds ? columns.filter((column) => visibleIds.has(column.id)) : columns;
     const [columnId, setColumnId] = React.useState(() => (
       statusColumns.some((column) => column.id === initialColumnId) ? initialColumnId : statusColumns[0]?.id || ""
     ));
@@ -1624,7 +1627,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     const longestGroup = Math.max(0, ...Object.values(groupedRows).map((groupRows) => groupRows.length));
     const totalPages = Math.max(1, Math.ceil(longestGroup / pageSize));
     const safePage = Math.min(page, totalPages);
-    const titleColumn = columns.find((column) => column.type === "text") || columns[0];
+    const titleColumn = displayColumns.find((column) => column.type === "text") || displayColumns[0];
 
     const selectColumn = (nextColumnId) => {
       setColumnId(nextColumnId);
@@ -1709,7 +1712,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
             const visibleRows = groupRows.slice((safePage - 1) * pageSize, safePage * pageSize);
             return React.createElement(KanbanColumn, {
               activeRowNumber: activeRow?.number || null,
-              columns,
+              columns: displayColumns,
               dragOverGroup,
               group,
               groupRows,
@@ -1734,7 +1737,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
               "div",
               { className: "kanban-card-shell kanban-card-overlay", "data-drag-overlay": "" },
               React.createElement(KanbanCardContent, {
-                columns,
+                columns: displayColumns,
                 row: activeRow,
                 statusColumn,
                 titleColumn
@@ -1759,8 +1762,10 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     );
   }
 
-  function SheetCalendar({ table, columns, initialColumnId, onColumnChange, onOpenRow }) {
+  function SheetCalendar({ table, columns, visibleColumnIds, initialColumnId, onColumnChange, onOpenRow }) {
     const dateColumns = columns.filter((column) => column.type === "date");
+    const visibleIds = Array.isArray(visibleColumnIds) ? new Set(visibleColumnIds) : null;
+    const displayColumns = visibleIds ? columns.filter((column) => visibleIds.has(column.id)) : columns;
     const [columnId, setColumnId] = React.useState(() => (
       dateColumns.some((column) => column.id === initialColumnId) ? initialColumnId : dateColumns[0]?.id || ""
     ));
@@ -1861,7 +1866,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
                       if (event.key === "Enter" || event.key === " ") onOpenRow(row.number);
                     }
                   },
-                  sheetViewRowTitle(row, columns)
+                  sheetViewRowTitle(row, displayColumns)
                 ))
               )
             );
@@ -1920,6 +1925,8 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     const [, setSheetViewDraftVersion] = React.useState(0);
     const [sheetViewSaving, setSheetViewSaving] = React.useState(false);
     const [sheetViewSaveError, setSheetViewSaveError] = React.useState(false);
+    const [, setColumnVisibilityRevision] = React.useState(0);
+    const sourceColumns = visibleColumnsForSheet(drawerGid(), columns, sheetName);
     const statusColumns = columns.filter((column) => column.type === "status");
     const dateColumns = columns.filter((column) => column.type === "date");
 
@@ -1971,6 +1978,20 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
       return [...sheetViewDraftsRef.current.keys()].some((key) => key.startsWith(prefix));
     };
     const bumpSheetViewDrafts = () => setSheetViewDraftVersion((current) => current + 1);
+    const changeHiddenColumnIds = (gid, sheetName, hiddenColumnIds) => {
+      const targetGid = configuredSheetGid(gid, sheetName);
+      setSheetViewSetting(targetGid, "hiddenColumnIds", hiddenColumnIds);
+      setColumnVisibilityRevision((current) => current + 1);
+      queueMicrotask(() => {
+        if (
+          targetGid === configuredSheetGid(drawerGid(), state.sheetName)
+          && state.fields.length
+        ) {
+          renderFields(new Map([...state.primaryDrafts.values()].map((draft) => [draft.index, draft.value])));
+        }
+        notifyRelatedDrafts();
+      });
+    };
 
     const tableWithSheetViewDrafts = (nextTable, target = activeTarget) => {
       if (!nextTable) return nextTable;
@@ -2216,7 +2237,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
         if (
           selectedRow(nameBoxValue()) === Number(rowNumber)
           && normalizedColumn(activeSheetName()) === normalizedColumn(workspaceTarget.name)
-        ) await loadRow(Number(rowNumber), true);
+        ) await loadRow(Number(rowNumber), true, workspaceTarget);
         else pollSelection();
       } catch (focusError) {
         closeWorkspaceRecordOverlay();
@@ -2269,7 +2290,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
           throw new Error(`Sheets no activÃ³ la hoja ${workspaceTarget.name}`);
         }
         openWorkspaceRecordOverlay();
-        await beginPrimaryRecordCreation();
+        await beginPrimaryRecordCreation(workspaceTarget);
       } catch (creationError) {
         closeWorkspaceRecordOverlay();
         setError(creationError.message);
@@ -2322,25 +2343,29 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
         currentDocumentId: spreadsheetId(),
         documents,
         error,
+        hiddenColumnIds: sheetHiddenColumnIds(workspaceTarget.gid, workspaceTarget.name),
         loading: loading && !table,
         onAddRow: addWorkspaceRow,
         onCellChange: editWorkspaceCell,
         onClearRows: clearWorkspaceRows,
         onDocumentSelect: selectWorkspaceDocument,
+        onHiddenColumnIdsChange: (hiddenColumnIds) => changeHiddenColumnIds(workspaceTarget.gid, workspaceTarget.name, hiddenColumnIds),
         onOpenRow: openWorkspaceRow,
         onSheetSelect: selectWorkspaceSheet,
-        renderCalendar: (openWorkspaceRow) => React.createElement(SheetCalendar, {
+        renderCalendar: (openWorkspaceRow, visibleColumns) => React.createElement(SheetCalendar, {
           table,
           columns: workspaceColumns,
+          visibleColumnIds: visibleColumns.map((column) => column.id),
           initialColumnId: state.workspace?.sheetViews?.[workspaceTarget.gid]?.calendarColumnId,
           onColumnChange: (columnId) => setSheetViewSetting(workspaceTarget.gid, "calendarColumnId", columnId),
           onOpenRow: openWorkspaceRow
         }),
         renderEditor: (property, value, onChange) => React.createElement(PropertyEditorControl, { property, value, onChange }),
         renderTypeIcon: (property) => typeBadge(property.type, 12),
-        renderKanban: (openWorkspaceRow) => React.createElement(SheetKanban, {
+        renderKanban: (openWorkspaceRow, visibleColumns) => React.createElement(SheetKanban, {
           table,
           columns: workspaceColumns,
+          visibleColumnIds: visibleColumns.map((column) => column.id),
           initialColumnId: state.workspace?.sheetViews?.[workspaceTarget.gid]?.kanbanColumnId,
           movingRows,
           onColumnChange: (columnId) => setSheetViewSetting(workspaceTarget.gid, "kanbanColumnId", columnId),
@@ -2360,7 +2385,8 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
           ? React.createElement(SheetKanban, {
             table,
             columns,
-            initialColumnId: settings.kanbanColumnId,
+            visibleColumnIds: sourceColumns.map((column) => column.id),
+            initialColumnId: currentSheetViewSettings().kanbanColumnId || settings.kanbanColumnId,
             movingRows,
             onColumnChange: (columnId) => setCurrentSheetViewSetting("kanbanColumnId", columnId),
             onMoveRow: moveRow,
@@ -2370,7 +2396,8 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
             ? React.createElement(SheetCalendar, {
               table,
               columns,
-              initialColumnId: settings.calendarColumnId,
+              visibleColumnIds: sourceColumns.map((column) => column.id),
+              initialColumnId: currentSheetViewSettings().calendarColumnId || settings.calendarColumnId,
               onColumnChange: (columnId) => setCurrentSheetViewSetting("calendarColumnId", columnId),
               onOpenRow: openRow
             })
@@ -3017,9 +3044,10 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
   }
 
   function currentGid() {
+    const activeTabGid = sheetTabGid(document.querySelector(".docs-sheet-active-tab .docs-sheet-tab-name"));
     const searchGid = new URLSearchParams(location.search).get("gid");
     const hashGid = new URLSearchParams(location.hash.slice(1)).get("gid");
-    return hashGid || searchGid || "0";
+    return activeTabGid || hashGid || searchGid || "0";
   }
 
   function drawerGid() {
@@ -3031,6 +3059,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
   }
 
   function sheetTabGid(nameNode) {
+    if (!nameNode) return "";
     const tab = nameNode.closest(".docs-sheet-tab");
     if (!tab) return "";
     const candidates = [
@@ -3323,6 +3352,62 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     definitions[key] = normalizeProperty(property, Number(property.index) || 0, property.sourceHeader);
   }
 
+  function stablePropertyId(header, index) {
+    const seed = propertyHeaderKey(header) || `column:${Number(index) + 1}`;
+    let hash = 2166136261;
+    for (let position = 0; position < seed.length; position += 1) {
+      hash ^= seed.charCodeAt(position);
+      hash = Math.imul(hash, 16777619);
+    }
+    return `field-${(hash >>> 0).toString(36)}`;
+  }
+
+  function repairPropertyIds(properties) {
+    const idCounts = new Map();
+    for (const property of properties) {
+      const id = String(property?.id || "");
+      if (id) idCounts.set(id, (idCounts.get(id) || 0) + 1);
+    }
+    const duplicateIds = new Set([...idCounts].filter(([, count]) => count > 1).map(([id]) => id));
+    const used = new Set();
+    const columns = properties.map((property, index) => {
+      const originalId = String(property?.id || "");
+      let id = originalId;
+      if (!id || used.has(id)) {
+        const base = stablePropertyId(property?.sourceHeader, index);
+        id = base;
+        let suffix = 2;
+        while (used.has(id)) {
+          id = `${base}-${suffix}`;
+          suffix += 1;
+        }
+      }
+      used.add(id);
+      return id === originalId ? property : { ...property, id };
+    });
+    return { columns, duplicateIds };
+  }
+
+  function repairSheetViewPropertyIds(workspace, gid, previousColumns, columns, duplicateIds) {
+    if (!duplicateIds.size) return false;
+    const view = workspace?.sheetViews?.[String(gid)];
+    if (!view) return false;
+    const next = { ...view };
+    next.hiddenColumnIds = (Array.isArray(view.hiddenColumnIds) ? view.hiddenColumnIds : [])
+      .filter((id) => !duplicateIds.has(String(id)));
+    for (const [setting, type] of [["kanbanColumnId", "status"], ["calendarColumnId", "date"]]) {
+      const currentId = String(view[setting] || "");
+      if (!duplicateIds.has(currentId)) continue;
+      const propertyIndex = previousColumns.findIndex((property) =>
+        String(property.id || "") === currentId && property.type === type
+      );
+      next[setting] = propertyIndex >= 0 ? String(columns[propertyIndex]?.id || "") : "";
+    }
+    if (sameValues(view, next)) return false;
+    workspace.sheetViews[String(gid)] = next;
+    return true;
+  }
+
   function normalizeWorkspace(workspace) {
     const clean = createWorkspace();
     if (!workspace || typeof workspace !== "object") return clean;
@@ -3334,14 +3419,19 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
       if (!view || typeof view !== "object") continue;
       clean.sheetViews[String(key)] = {
         calendarColumnId: String(view.calendarColumnId || ""),
-        kanbanColumnId: String(view.kanbanColumnId || "")
+        kanbanColumnId: String(view.kanbanColumnId || ""),
+        hiddenColumnIds: [...new Set((Array.isArray(view.hiddenColumnIds) ? view.hiddenColumnIds : [])
+          .map((id) => String(id || "").trim())
+          .filter(Boolean))]
       };
     }
     for (const [gid, sheet] of Object.entries(workspace.sheets || {})) {
       if (!sheet || typeof sheet !== "object") continue;
-      const columns = Array.isArray(sheet.columns)
+      const storedColumns = Array.isArray(sheet.columns)
         ? sheet.columns.map((column, index) => normalizeProperty(column, index, column?.sourceHeader || ""))
         : [];
+      const repaired = repairPropertyIds(storedColumns);
+      const columns = repaired.columns;
       const propertyDefinitions = {};
       for (const [storedKey, definition] of Object.entries(sheet.propertyDefinitions || {})) {
         if (!definition || typeof definition !== "object") continue;
@@ -3357,6 +3447,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
         propertyDefinitions,
         updatedAt: Number(sheet.updatedAt || clean.updatedAt)
       };
+      repairSheetViewPropertyIds(clean, gid, storedColumns, columns, repaired.duplicateIds);
     }
     return clean;
   }
@@ -3495,7 +3586,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     const previous = state.workspace.sheets[key];
     const propertyDefinitions = { ...(previous?.propertyDefinitions || {}) };
     for (const column of previous?.columns || []) rememberPropertyDefinition(propertyDefinitions, column);
-    const columns = headers.map((header, index) => {
+    const candidateColumns = headers.map((header, index) => {
       const cleanHeader = String(header || "");
       const headerKey = propertyHeaderKey(cleanHeader);
       const candidate = headerKey ? propertyDefinitions[headerKey] : null;
@@ -3504,11 +3595,15 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
       if (!normalized.customName) normalized.name = cleanHeader || defaultProperty(index).name;
       return normalized;
     });
+    const repaired = repairPropertyIds(candidateColumns);
+    const columns = repaired.columns;
+    const viewChanged = repairSheetViewPropertyIds(state.workspace, key, candidateColumns, columns, repaired.duplicateIds);
     for (const column of columns) rememberPropertyDefinition(propertyDefinitions, column);
     const changed = !previous
       || previous.name !== sheetName
       || !sameValues(previous.columns, columns)
-      || !sameValues(previous.propertyDefinitions || {}, propertyDefinitions);
+      || !sameValues(previous.propertyDefinitions || {}, propertyDefinitions)
+      || viewChanged;
     const next = {
       name: sheetName,
       columns,
@@ -3521,15 +3616,39 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
   }
 
   function currentSheetConfiguration() {
-    return state.workspace?.sheets?.[drawerGid()] || null;
+    return state.workspace?.sheets?.[configuredSheetGid(drawerGid(), state.sheetName)] || null;
   }
 
   function currentSheetViewSettings() {
-    return state.workspace?.sheetViews?.[drawerGid()] || {};
+    return state.workspace?.sheetViews?.[configuredSheetGid(drawerGid(), state.sheetName)] || {};
+  }
+
+  function configuredSheetGid(gid = drawerGid(), sheetName = "") {
+    const key = String(gid ?? "");
+    const configured = state.workspace?.sheets || {};
+    const exact = configured[key];
+    if (exact && (!sheetName || normalizedColumn(exact.name) === normalizedColumn(sheetName))) return key;
+    if (sheetName) {
+      const named = Object.entries(configured).find(([, sheet]) =>
+        normalizedColumn(sheet?.name) === normalizedColumn(sheetName)
+      );
+      if (named) return String(named[0]);
+    }
+    return key;
+  }
+
+  function sheetHiddenColumnIds(gid = drawerGid(), sheetName = "") {
+    const ids = state.workspace?.sheetViews?.[configuredSheetGid(gid, sheetName)]?.hiddenColumnIds;
+    return Array.isArray(ids) ? ids : [];
+  }
+
+  function visibleColumnsForSheet(gid, columns, sheetName = "") {
+    const hidden = new Set(sheetHiddenColumnIds(gid, sheetName));
+    return (columns || []).filter((column) => !hidden.has(column.id));
   }
 
   function setCurrentSheetViewSetting(name, value) {
-    setSheetViewSetting(drawerGid(), name, value);
+    setSheetViewSetting(configuredSheetGid(drawerGid(), state.sheetName), name, value);
   }
 
   function setSheetViewSetting(gid, name, value) {
@@ -3537,10 +3656,13 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     if (!state.workspace.sheetViews) state.workspace.sheetViews = {};
     const key = String(gid);
     const previous = state.workspace.sheetViews[key] || {};
-    if (previous[name] === value) return;
+    const nextValue = Array.isArray(value)
+      ? [...new Set(value.map((item) => String(item || "").trim()).filter(Boolean))]
+      : typeof value === "boolean" ? value : String(value || "");
+    if (sameValues(previous[name], nextValue)) return;
     state.workspace.sheetViews[key] = {
       ...previous,
-      [name]: typeof value === "boolean" ? value : String(value || "")
+      [name]: nextValue
     };
     void writeWorkspace();
   }
@@ -3925,6 +4047,29 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
       || defaultProperty(column.propertyIndex, column.header);
   }
 
+  function relationConfiguredGid(relation, configured = relationSheetConfiguration(relation)) {
+    let gid = String(relation.sheetGid || "");
+    if (!gid) {
+      gid = String(visibleSheets().find((sheet) =>
+        normalizedColumn(sheet.name) === normalizedColumn(relation.sheetName)
+      )?.gid || "");
+    }
+    if (!gid && configured) {
+      gid = String(Object.entries(state.workspace?.sheets || {}).find(([, sheet]) => sheet === configured)?.[0] || "");
+    }
+    return gid;
+  }
+
+  function visibleRelationColumns(relation) {
+    const configured = relationSheetConfiguration(relation);
+    const hidden = new Set(sheetHiddenColumnIds(relationConfiguredGid(relation, configured), relation.sheetName));
+    return displayRelationColumns(relation).filter((column) => {
+      const property = configured?.columns?.[column.propertyIndex]
+        || defaultProperty(column.propertyIndex, column.header);
+      return !hidden.has(property.id);
+    });
+  }
+
   function relationConfigurationHeaders(relation, configured = relationSheetConfiguration(relation)) {
     const columns = displayRelationColumns(relation);
     const width = Math.max(
@@ -3942,15 +4087,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
 
   function relationPropertyTarget(relation) {
     const configured = relationSheetConfiguration(relation);
-    let gid = String(relation.sheetGid || "");
-    if (!gid) {
-      gid = String(visibleSheets().find((sheet) =>
-        normalizedColumn(sheet.name) === normalizedColumn(relation.sheetName)
-      )?.gid || "");
-    }
-    if (!gid && configured) {
-      gid = String(Object.entries(state.workspace?.sheets || {}).find(([, sheet]) => sheet === configured)?.[0] || "");
-    }
+    const gid = relationConfiguredGid(relation, configured);
     if (!gid) return null;
     const headers = relationConfigurationHeaders(relation, configured);
     reconcileSheetConfiguration(gid, relation.sheetName, headers);
@@ -4303,12 +4440,13 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
   }
 
   function RelationSection({ relation, initialView }) {
+    useRelatedDraftVersion();
     const [expanded, setExpanded] = React.useState(true);
     const [view, setView] = React.useState(initialView);
     const [page, setPage] = React.useState(1);
     const [openRow, setOpenRow] = React.useState(null);
     const [creating, setCreating] = React.useState(false);
-    const columns = displayRelationColumns(relation);
+    const columns = visibleRelationColumns(relation);
     const pageSize = view === "table" ? 10 : 4;
     const totalCount = relation.totalCount ?? relation.rows.length;
     const availableCount = relation.rows.length;
@@ -4599,10 +4737,10 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     }
   }
 
-  async function headers(signal, force = false) {
-    const key = `${spreadsheetId()}:${currentGid()}`;
+  async function headers(signal, force = false, gid = currentGid()) {
+    const key = `${spreadsheetId()}:${gid}`;
     if (!force && state.headerCache.has(key)) return state.headerCache.get(key);
-    const rows = await readRange(`A1:${MAX_COLUMN}1`, signal);
+    const rows = await readRange(`A1:${MAX_COLUMN}1`, signal, gid);
     const rawLabels = rows.find((row) => row.number === 1)?.cells || [];
     const labels = fitCells(rawLabels, usedCellWidth(rawLabels));
     state.headerCache.set(key, labels);
@@ -4909,14 +5047,14 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     syncPendingActions();
   }
 
-  async function beginPrimaryRecordCreation() {
+  async function beginPrimaryRecordCreation(target = null) {
     if (state.primaryDrafts.size || state.relatedDrafts.size) {
       setStatus("Guarda o cancela los cambios pendientes antes de agregar un registro.", "error");
       return;
     }
 
-    const gid = currentGid();
-    const sheetName = activeSheetName() || state.sheetName || `Hoja ${gid}`;
+    const gid = String(target?.gid || currentGid());
+    const sheetName = String(target?.name || activeSheetName() || state.sheetName || `Hoja ${gid}`);
     setActivity("creation", true);
     try {
       await waitForRecordCreationReady();
@@ -4924,8 +5062,8 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
       const width = usedCellWidth(table.headers);
       if (!width) throw new Error("La hoja necesita encabezados antes de agregar registros.");
       const sourceLabels = fitCells(table.headers, width);
-      reconcileSheetConfiguration(gid, sheetName, sourceLabels);
-      const properties = sourceLabels.map((label, index) => propertyForColumn(index));
+      const configured = reconcileSheetConfiguration(gid, sheetName, sourceLabels);
+      const properties = sourceLabels.map((label, index) => configured.columns[index] || defaultProperty(index, label));
       const drafts = randomIdDrafts(properties, table.rows);
       const row = nextRecordRowNumber(table);
 
@@ -4986,9 +5124,9 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     }
   }
 
-  async function loadRow(row, force = false) {
-    const gid = currentGid();
-    const sheetName = activeSheetName() || `Hoja ${gid}`;
+  async function loadRow(row, force = false, target = null) {
+    const gid = String(target?.gid || currentGid());
+    const sheetName = String(target?.name || activeSheetName() || `Hoja ${gid}`);
     if (
       !force
       && state.loading
@@ -5033,7 +5171,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
 
     try {
       const [labels, rows] = await Promise.all([
-        headers(request.signal, true),
+        headers(request.signal, true, gid),
         readRange(`A${row}:${MAX_COLUMN}${row}`, request.signal, gid, { allowEmpty: true })
       ]);
       const values = rows.find((item) => item.number === row)?.cells || [];
@@ -5114,6 +5252,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
 
   function renderFields(drafts = new Map()) {
     const existing = Array.from(ui.fields.children);
+    const hiddenColumnIds = new Set(sheetHiddenColumnIds(drawerGid(), state.sheetName));
     state.fields.forEach((sourceLabel, index) => {
       const property = propertyForColumn(index);
       let wrapper = existing[index];
@@ -5156,6 +5295,8 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
       renderTypeIcon(configure, property.type);
       wrapper.dataset.fieldType = property.type;
       wrapper.dataset.protected = property.protected ? "true" : "false";
+      wrapper.dataset.columnId = property.id;
+      wrapper.hidden = hiddenColumnIds.has(property.id);
       let control = editor.querySelector("[data-column]");
       if (!control || control.dataset.fieldType !== property.type) {
         if (control?._reactRoot) flushSync(() => control._reactRoot.unmount());
