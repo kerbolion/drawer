@@ -9,6 +9,10 @@ Servicio de cuentas y persistencia para la extensión. Conserva el patrón de Mi
 3. Configura el proxy público para enviar `/api/sheets-drawer/*` a este servicio.
 4. En Stripe, registra el webhook `POST /api/sheets-drawer/stripe/webhook`.
 
+## EasyPanel
+
+La instalación de producción sigue el mismo esquema de MinimalBuilder: una MariaDB privada y una App independiente dentro del mismo proyecto de EasyPanel. Consulta la guía completa en [`../EASYPANEL.md`](../EASYPANEL.md). El dominio público configurado para la extensión es `https://abrircrm.com`.
+
 La cuenta `superadmin` se crea una sola vez a partir de `ADMIN_EMAIL` y `ADMIN_PASSWORD`. El servidor valida usuario activo, estado y expiración de la cuenta en cada lectura o escritura de un workspace.
 
 ## Datos

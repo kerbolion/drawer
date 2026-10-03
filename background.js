@@ -4,7 +4,7 @@
   const BRIDGE_ORIGIN = "http://127.0.0.1:17373";
   const BRIDGE_HEADER = "sheets-row-drawer-v1";
   const CLOUD_SOURCE = "sheets-row-drawer-cloud";
-  const API_BASE_DEFAULT = "https://solode.click/api/sheets-drawer";
+  const API_BASE_DEFAULT = "https://abrircrm.com/api/sheets-drawer";
   const STORAGE_KEYS = {
     apiBase: "srd:cloud:api-base",
     token: "srd:cloud:auth-token",

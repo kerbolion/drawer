@@ -37,7 +37,7 @@ const [manifest, sourceManifest, packageJson] = await Promise.all([
 if (manifest.version !== sourceManifest.version || manifest.version !== packageJson.version) {
   throw new Error("Las versiones del paquete, manifest y proyecto no coinciden.");
 }
-if (!manifest.host_permissions?.includes("https://solode.click/*")) {
+if (!manifest.host_permissions?.includes("https://abrircrm.com/*")) {
   throw new Error("El paquete no declara el servidor autorizado.");
 }
 

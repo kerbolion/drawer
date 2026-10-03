@@ -59,7 +59,7 @@ La extensión sigue el patrón de MinimalBuilder con una separación explícita 
 - Cada documento se almacena en `workspaces` como un JSON separado por `account_id` y `spreadsheet_id`. Las revisiones evitan sobrescribir silenciosamente cambios de otra sesión.
 - Solo se sincroniza la configuración del workspace: nombres de hojas y columnas, tipos, opciones, colores y preferencias de vista. Los valores de las filas continúan en el navegador y en Google Sheets.
 
-El backend se encuentra en [`server/`](server/) y su despliegue se documenta en [`server/README.md`](server/README.md). La extensión espera el servicio en `https://solode.click/api/sheets-drawer`; el proxy público debe dirigir ese namespace al contenedor.
+El backend se encuentra en [`server/`](server/) y su despliegue se documenta en [`server/README.md`](server/README.md). La extensión espera el servicio en `https://abrircrm.com/api/sheets-drawer`; el proxy público debe dirigir ese namespace al contenedor. La instalación paso a paso en EasyPanel está en [`EASYPANEL.md`](EASYPANEL.md).
 
 ## Distribución protegida
 
