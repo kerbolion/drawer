@@ -306,6 +306,14 @@ try {
   `));
   await delay(100);
   await cdp.evaluate(viewExpression('view.querySelector("[data-sheet-view-save]").click();'));
+  await delay(250);
+  const tableSavingPresentation = await cdp.evaluate(viewExpression(`return {
+    buttonLoading: view.querySelector("[data-sheet-view-save]").classList.contains("ant-btn-loading"),
+    state: view.querySelector("[data-sheet-view-save-state]")?.dataset.sheetViewSaveState || ""
+  };`));
+  if (tableSavingPresentation.buttonLoading || tableSavingPresentation.state !== "saving") {
+    throw new Error(`Guardar duplico el indicador de carga del encabezado: ${JSON.stringify(tableSavingPresentation)}`);
+  }
   const inlineEditDeadline = Date.now() + 4_000;
   let inlineEditPaste;
   while (Date.now() < inlineEditDeadline) {
@@ -442,9 +450,10 @@ try {
   const clearPending = await cdp.evaluate(viewExpression(`return {
     rowVisible: Boolean(view.querySelector('[data-workspace-row="5"]')),
     wrote: (parent.__clears || []).some((reference) => reference.endsWith("!B5")),
-    saveDisabled: view.querySelector("[data-sheet-view-save]").disabled
+    saveDisabled: view.querySelector("[data-sheet-view-save]").disabled,
+    viewOpen: !view.defaultView.frameElement.hidden
   };`));
-  if (clearPending.rowVisible || clearPending.wrote || clearPending.saveDisabled) {
+  if (clearPending.rowVisible || clearPending.wrote || clearPending.saveDisabled || !clearPending.viewOpen) {
     throw new Error(`Limpiar fila no quedo pendiente antes de guardar: ${JSON.stringify(clearPending)}`);
   }
   await cdp.evaluate(viewExpression('view.querySelector("[data-sheet-view-cancel]").click();'));
@@ -464,6 +473,27 @@ try {
   if (!tableClears.some((reference) => reference.endsWith("!B5"))) {
     throw new Error(`Limpiar un registro desde Tabla no limpio Sheets: ${JSON.stringify(tableClears)}`);
   }
+  await cdp.evaluate(`(() => {
+    document.querySelector(".docs-sheet-active-tab .docs-sheet-tab-name").textContent = "Otra hoja";
+    location.hash = "#gid=1&range=B5";
+  })()`);
+  await delay(550);
+  const viewAfterClearSheetChange = await cdp.evaluate(`(() => {
+    const root = document.getElementById("sheets-session-probe").shadowRoot;
+    const frame = root.querySelector(".sheet-view-frame");
+    return {
+      open: !frame.hidden,
+      panel: frame.contentDocument.querySelector("[data-sheet-view-panel]")?.dataset.sheetViewPanel || ""
+    };
+  })()`);
+  if (!viewAfterClearSheetChange.open || viewAfterClearSheetChange.panel !== "table") {
+    throw new Error(`Limpiar una fila cerro la vista al cambiar la hoja activa: ${JSON.stringify(viewAfterClearSheetChange)}`);
+  }
+  await cdp.evaluate(`(() => {
+    document.querySelector(".docs-sheet-active-tab .docs-sheet-tab-name").textContent = "Contactos";
+    location.hash = "#gid=0&range=B5";
+  })()`);
+  await delay(350);
   sheet.rows.pop();
   staleVisualizationRows.pop();
   const clearSavedDeadline = Date.now() + 5_000;

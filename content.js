@@ -1753,6 +1753,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     const sheetViewDraftsRef = React.useRef(new Map());
     const sheetViewOriginalRowsRef = React.useRef(new Map());
     const sheetViewRemovedRowsRef = React.useRef(new Set());
+    const sourceSheetKeyRef = React.useRef(sheetKey);
     const [, setSheetViewDraftVersion] = React.useState(0);
     const [sheetViewSaving, setSheetViewSaving] = React.useState(false);
     const [sheetViewSaveError, setSheetViewSaveError] = React.useState(false);
@@ -1760,6 +1761,8 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     const dateColumns = columns.filter((column) => column.type === "date");
 
     React.useEffect(() => {
+      if (sourceSheetKeyRef.current === sheetKey || view) return;
+      sourceSheetKeyRef.current = sheetKey;
       setView("");
       setTable(null);
       setError("");
@@ -1778,7 +1781,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
         name: current.find((item) => item.id === spreadsheetId())?.name || workspaceDocumentName(),
         sheets: workspaceSheetList()
       }, ...current.filter((item) => item.id !== spreadsheetId())]);
-    }, [sheetKey]);
+    }, [sheetKey, view]);
 
     const activeTarget = view === "table" ? workspaceTarget : { gid: drawerGid(), name: sheetName };
     const hasSheetViewChanges = sheetViewDraftsRef.current.size > 0;
@@ -2282,7 +2285,6 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
               React.createElement(Button, {
                 type: "primary",
                 disabled: sheetViewSaving || !hasSheetViewChanges,
-                loading: sheetViewSaving,
                 "data-sheet-view-save": "",
                 onClick: () => void saveSheetViewChanges()
               }, "Guardar cambios"),
