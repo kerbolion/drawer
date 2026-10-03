@@ -309,9 +309,10 @@ try {
   await delay(250);
   const tableSavingPresentation = await cdp.evaluate(viewExpression(`return {
     buttonLoading: view.querySelector("[data-sheet-view-save]").classList.contains("ant-btn-loading"),
-    state: view.querySelector("[data-sheet-view-save-state]")?.dataset.sheetViewSaveState || ""
+    state: view.querySelector("[data-sheet-view-save-state]")?.dataset.sheetViewSaveState || "",
+    bodyOpacity: getComputedStyle(view.querySelector(".sheet-view-panel-body")).opacity
   };`));
-  if (tableSavingPresentation.buttonLoading || tableSavingPresentation.state !== "saving") {
+  if (tableSavingPresentation.buttonLoading || tableSavingPresentation.state !== "saving" || tableSavingPresentation.bodyOpacity !== "1") {
     throw new Error(`Guardar duplico el indicador de carga del encabezado: ${JSON.stringify(tableSavingPresentation)}`);
   }
   const inlineEditDeadline = Date.now() + 4_000;
@@ -473,6 +474,13 @@ try {
   if (!tableClears.some((reference) => reference.endsWith("!B5"))) {
     throw new Error(`Limpiar un registro desde Tabla no limpio Sheets: ${JSON.stringify(tableClears)}`);
   }
+  await cdp.evaluate(viewExpression(`
+    view.defaultView.__workspaceLoadingSeen = Boolean(view.querySelector(".workspace-browser-loading"));
+    view.defaultView.__workspaceLoadingObserver = new MutationObserver(() => {
+      if (view.querySelector(".workspace-browser-loading")) view.defaultView.__workspaceLoadingSeen = true;
+    });
+    view.defaultView.__workspaceLoadingObserver.observe(view.body, { childList: true, subtree: true });
+  `));
   await cdp.evaluate(`(() => {
     document.querySelector(".docs-sheet-active-tab .docs-sheet-tab-name").textContent = "Otra hoja";
     location.hash = "#gid=1&range=B5";
@@ -483,12 +491,14 @@ try {
     const frame = root.querySelector(".sheet-view-frame");
     return {
       open: !frame.hidden,
-      panel: frame.contentDocument.querySelector("[data-sheet-view-panel]")?.dataset.sheetViewPanel || ""
+      panel: frame.contentDocument.querySelector("[data-sheet-view-panel]")?.dataset.sheetViewPanel || "",
+      loadingSeen: frame.contentWindow.__workspaceLoadingSeen === true
     };
   })()`);
-  if (!viewAfterClearSheetChange.open || viewAfterClearSheetChange.panel !== "table") {
-    throw new Error(`Limpiar una fila cerro la vista al cambiar la hoja activa: ${JSON.stringify(viewAfterClearSheetChange)}`);
+  if (!viewAfterClearSheetChange.open || viewAfterClearSheetChange.panel !== "table" || viewAfterClearSheetChange.loadingSeen) {
+    throw new Error(`Limpiar una fila interrumpio la vista al cambiar la hoja activa: ${JSON.stringify(viewAfterClearSheetChange)}`);
   }
+  await cdp.evaluate(viewExpression('view.defaultView.__workspaceLoadingObserver?.disconnect();'));
   await cdp.evaluate(`(() => {
     document.querySelector(".docs-sheet-active-tab .docs-sheet-tab-name").textContent = "Contactos";
     location.hash = "#gid=0&range=B5";

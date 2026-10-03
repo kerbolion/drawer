@@ -706,7 +706,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     .sheet-view-panel-title > span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .sheet-view-panel-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 8px; }
     .sheet-view-panel-actions .save-state { margin: 0 2px; }
-    .sheet-view-panel.is-saving .sheet-view-panel-body { opacity: .72; pointer-events: none; }
+    .sheet-view-panel.is-saving .sheet-view-panel-body { pointer-events: none; }
     .sheet-view-panel-body { display: flex; flex: 1; min-width: 0; min-height: 0; overflow: hidden; }
     .sheet-view-surface { display: flex; width: 100%; height: 100%; min-width: 0; min-height: 0; flex-direction: column; }
     .workspace-browser { display: grid; width: 100%; height: 100%; min-width: 0; min-height: 0; grid-template-columns: 248px minmax(0, 1fr); background: var(--workspace-bg); }
@@ -1970,7 +1970,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
         controller.abort();
         setActivity("views", false);
       };
-    }, [view, sheetKey, refreshKey, activeTarget.gid, activeTarget.name]);
+    }, [view, refreshKey, activeTarget.gid, activeTarget.name]);
 
     React.useEffect(() => {
       if (view !== "table") return undefined;
@@ -1998,7 +1998,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
         setDocuments([...unique.values()]);
       })();
       return () => { active = false; };
-    }, [view, sheetKey]);
+    }, [view]);
 
     React.useEffect(() => {
       if (view === "kanban" && !statusColumns.length) setView("");
@@ -2159,7 +2159,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
         currentDocumentId: spreadsheetId(),
         documents,
         error,
-        loading,
+        loading: loading && !table,
         onAddRow: addWorkspaceRow,
         onCellChange: editWorkspaceCell,
         onClearRows: clearWorkspaceRows,
@@ -2189,7 +2189,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
         table,
         toEditorValue: editorValueFromRaw
       })
-      : loading
+      : loading && !table
         ? React.createElement("div", { className: "sheet-view-loading" }, React.createElement(Spin, { size: "large" }))
         : error && !table
           ? React.createElement(SheetViewEmpty, { description: error })
