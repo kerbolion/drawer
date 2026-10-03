@@ -22,6 +22,7 @@ import {
   CalculatorOutlined,
   AppstoreOutlined,
   CalendarOutlined,
+  CheckCircleOutlined,
   CheckSquareOutlined,
   CloseOutlined,
   DeleteOutlined,
@@ -418,6 +419,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     }
     .save-state.is-saving { color: ${antdTokens.colorPrimary}; }
     .save-state.is-saved { color: #22c55e; }
+    .save-state.is-pending { color: ${antdTokens.colorTextDisabled}; }
     .save-state.is-error { color: ${antdTokens.colorError}; }
     .save-state-check, .save-state-spinner, .save-state-error { display: none; }
     .save-state.is-saving .save-state-spinner {
@@ -427,6 +429,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     .save-state.is-saved .save-state-check {
       display: inline-flex; animation: save-state-confirm .42s cubic-bezier(.2, .9, .25, 1.35);
     }
+    .save-state.is-pending .save-state-check { display: inline-flex; opacity: .5; }
     .save-state.is-error .save-state-error { display: inline-flex; font-weight: 800; }
     .save-state svg { display: block; width: 1em; height: 1em; fill: currentColor; }
     @keyframes save-state-spin { to { transform: rotate(360deg); } }
@@ -701,6 +704,9 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     .sheet-view-panel-header { display: flex; flex: 0 0 auto; min-height: 54px; align-items: center; justify-content: space-between; gap: 16px; padding: 10px 18px; border-bottom: 1px solid var(--workspace-border); background: var(--workspace-surface); }
     .sheet-view-panel-title { display: flex; min-width: 0; align-items: center; gap: 10px; color: var(--workspace-text); font-size: 16px; font-weight: 700; }
     .sheet-view-panel-title > span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .sheet-view-panel-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 8px; }
+    .sheet-view-panel-actions .save-state { margin: 0 2px; }
+    .sheet-view-panel.is-saving .sheet-view-panel-body { opacity: .72; pointer-events: none; }
     .sheet-view-panel-body { display: flex; flex: 1; min-width: 0; min-height: 0; overflow: hidden; }
     .sheet-view-surface { display: flex; width: 100%; height: 100%; min-width: 0; min-height: 0; flex-direction: column; }
     .workspace-browser { display: grid; width: 100%; height: 100%; min-width: 0; min-height: 0; grid-template-columns: 248px minmax(0, 1fr); background: var(--workspace-bg); }
@@ -1744,7 +1750,12 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
       sheets: workspaceSheetList()
     }]);
     const movingRowsRef = React.useRef(new Set());
-    const workspaceCellEditsRef = React.useRef(new Map());
+    const sheetViewDraftsRef = React.useRef(new Map());
+    const sheetViewOriginalRowsRef = React.useRef(new Map());
+    const sheetViewRemovedRowsRef = React.useRef(new Set());
+    const [, setSheetViewDraftVersion] = React.useState(0);
+    const [sheetViewSaving, setSheetViewSaving] = React.useState(false);
+    const [sheetViewSaveError, setSheetViewSaveError] = React.useState(false);
     const statusColumns = columns.filter((column) => column.type === "status");
     const dateColumns = columns.filter((column) => column.type === "date");
 
@@ -1754,6 +1765,12 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
       setError("");
       movingRowsRef.current.clear();
       setMovingRows([]);
+      sheetViewDraftsRef.current.clear();
+      sheetViewOriginalRowsRef.current.clear();
+      sheetViewRemovedRowsRef.current.clear();
+      setSheetViewDraftVersion((current) => current + 1);
+      setSheetViewSaving(false);
+      setSheetViewSaveError(false);
       setWorkspaceTarget({ gid: drawerGid(), name: sheetName });
       setWorkspaceColumns(columns);
       setDocuments((current) => [{
@@ -1764,6 +1781,149 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     }, [sheetKey]);
 
     const activeTarget = view === "table" ? workspaceTarget : { gid: drawerGid(), name: sheetName };
+    const hasSheetViewChanges = sheetViewDraftsRef.current.size > 0;
+    const sheetViewSaveMode = sheetViewSaveError
+      ? "error"
+      : sheetViewSaving
+        ? "saving"
+        : hasSheetViewChanges
+          ? "pending"
+          : "saved";
+    const sheetViewSaveLabel = sheetViewSaveMode === "error"
+      ? "Error al guardar"
+      : sheetViewSaveMode === "saving"
+        ? "Guardando"
+        : sheetViewSaveMode === "pending"
+          ? "Cambios pendientes"
+          : "Guardado";
+
+    const sheetViewTargetKey = (target = activeTarget) => `${String(target.gid)}:${normalizedColumn(target.name)}`;
+    const sheetViewRowKey = (target, rowNumber) => `${sheetViewTargetKey(target)}:${Number(rowNumber)}`;
+    const sheetViewDraftKey = (target, rowNumber, propertyIndex) => `${sheetViewRowKey(target, rowNumber)}:${Number(propertyIndex)}`;
+    const hasDraftForRow = (target, rowNumber) => {
+      const prefix = `${sheetViewRowKey(target, rowNumber)}:`;
+      return [...sheetViewDraftsRef.current.keys()].some((key) => key.startsWith(prefix));
+    };
+    const bumpSheetViewDrafts = () => setSheetViewDraftVersion((current) => current + 1);
+
+    const tableWithSheetViewDrafts = (nextTable, target = activeTarget) => {
+      if (!nextTable) return nextTable;
+      const targetKey = sheetViewTargetKey(target);
+      const draftsByRow = new Map();
+      for (const draft of sheetViewDraftsRef.current.values()) {
+        if (draft.targetKey !== targetKey) continue;
+        if (!draftsByRow.has(draft.row)) draftsByRow.set(draft.row, []);
+        draftsByRow.get(draft.row).push(draft);
+      }
+      return {
+        ...nextTable,
+        rows: nextTable.rows
+          .filter((row) => !sheetViewRemovedRowsRef.current.has(sheetViewRowKey(target, row.number)))
+          .map((row) => {
+            const drafts = draftsByRow.get(row.number);
+            if (!drafts?.length) return row;
+            const cells = [...row.cells];
+            for (const draft of drafts) cells[draft.property.index] = draft.value;
+            return { ...row, cells };
+          })
+      };
+    };
+
+    const stageSheetViewValue = (row, property, nextValue, target = activeTarget, allowProtected = false) => {
+      if (!row || (property.protected && !allowProtected) || sheetViewSaving) return false;
+      const normalizedValue = String(nextValue ?? "");
+      const rowKey = sheetViewRowKey(target, row.number);
+      if (!sheetViewOriginalRowsRef.current.has(rowKey)) {
+        sheetViewOriginalRowsRef.current.set(rowKey, { ...row, cells: [...row.cells] });
+      }
+      const originalRow = sheetViewOriginalRowsRef.current.get(rowKey);
+      const originalValue = String(originalRow.cells[property.index] || "");
+      const draftKey = sheetViewDraftKey(target, row.number, property.index);
+      if (valuesEqualForProperty(normalizedValue, originalValue, property)) {
+        sheetViewDraftsRef.current.delete(draftKey);
+      } else {
+        sheetViewDraftsRef.current.set(draftKey, {
+          targetKey: sheetViewTargetKey(target),
+          target: { gid: String(target.gid), name: String(target.name) },
+          row: Number(row.number),
+          property,
+          value: normalizedValue
+        });
+      }
+      if (!hasDraftForRow(target, row.number)) {
+        sheetViewOriginalRowsRef.current.delete(rowKey);
+        sheetViewRemovedRowsRef.current.delete(rowKey);
+      }
+      setTable((current) => current ? ({
+        ...current,
+        rows: current.rows.map((item) => {
+          if (item.number !== row.number) return item;
+          const cells = [...item.cells];
+          cells[property.index] = normalizedValue;
+          return { ...item, cells };
+        })
+      }) : current);
+      setError("");
+      setSheetViewSaveError(false);
+      bumpSheetViewDrafts();
+      return true;
+    };
+
+    const cancelSheetViewChanges = () => {
+      if (sheetViewSaving || !sheetViewDraftsRef.current.size) return;
+      const originals = [...sheetViewOriginalRowsRef.current.values()];
+      setTable((current) => {
+        if (!current) return current;
+        const rows = new Map(current.rows.map((row) => [row.number, row]));
+        for (const original of originals) rows.set(original.number, { ...original, cells: [...original.cells] });
+        return { ...current, rows: [...rows.values()].sort((left, right) => left.number - right.number) };
+      });
+      sheetViewDraftsRef.current.clear();
+      sheetViewOriginalRowsRef.current.clear();
+      sheetViewRemovedRowsRef.current.clear();
+      setSheetViewSaveError(false);
+      setError("");
+      bumpSheetViewDrafts();
+    };
+
+    const saveSheetViewChanges = async () => {
+      if (sheetViewSaving || !sheetViewDraftsRef.current.size) return;
+      const drafts = [...sheetViewDraftsRef.current.values()];
+      const rowsByNumber = new Map((table?.rows || []).map((row) => [row.number, row]));
+      setSheetViewSaving(true);
+      setSheetViewSaveError(false);
+      setError("");
+      try {
+        await Promise.all(drafts.map((draft) => {
+          const original = sheetViewOriginalRowsRef.current.get(sheetViewRowKey(draft.target, draft.row));
+          const rowValues = rowsByNumber.get(draft.row)?.cells
+            || (sheetViewRemovedRowsRef.current.has(sheetViewRowKey(draft.target, draft.row))
+              ? (original?.cells || []).map(() => "")
+              : original?.cells || []);
+          return writeSheetViewValue(draft.row, draft.property, draft.value, rowValues, draft.target);
+        }));
+        const verificationKeys = new Set(drafts.map((draft) => `sheet-view:${draft.target.gid}:${draft.row}:${draft.property.index}`));
+        const deadline = Date.now() + 9_000;
+        while (Date.now() < deadline && [...verificationKeys].some((key) => state.sheetViewWrites.has(key))) await wait(80);
+        sheetViewDraftsRef.current.clear();
+        sheetViewOriginalRowsRef.current.clear();
+        sheetViewRemovedRowsRef.current.clear();
+        bumpSheetViewDrafts();
+      } catch (saveError) {
+        setSheetViewSaveError(true);
+        setError(saveError.message);
+      } finally {
+        setSheetViewSaving(false);
+      }
+    };
+
+    const requestSheetViewClose = () => {
+      if (hasSheetViewChanges || sheetViewSaving) {
+        setError("Guarda o cancela los cambios pendientes antes de cerrar la vista.");
+        return;
+      }
+      setView("");
+    };
 
     React.useLayoutEffect(() => {
       const title = view === "table"
@@ -1793,7 +1953,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
           const configured = reconcileSheetConfiguration(activeTarget.gid, activeTarget.name, nextTable.headers);
           setWorkspaceColumns((configured.columns || []).filter((column) => String(column.sourceHeader || "").trim()));
         }
-        setTable(nextTable);
+        setTable(tableWithSheetViewDrafts(nextTable, activeTarget));
       }).catch((loadError) => {
         if (active && loadError.name !== "AbortError") setError(loadError.message);
       }).finally(() => {
@@ -1844,6 +2004,10 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     }, [view, statusColumns.length, dateColumns.length]);
 
     const openRow = async (rowNumber) => {
+      if (hasSheetViewChanges || sheetViewSaving) {
+        setError("Guarda o cancela los cambios pendientes antes de abrir otra fila.");
+        return;
+      }
       if (state.primaryDrafts.size || state.relatedDrafts.size) {
         setError("Guarda o cancela los cambios pendientes antes de abrir otra fila.");
         return;
@@ -1858,6 +2022,10 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     };
 
     const openWorkspaceRow = async (rowNumber) => {
+      if (hasSheetViewChanges || sheetViewSaving) {
+        setError("Guarda o cancela los cambios pendientes antes de abrir otra fila.");
+        return;
+      }
       if (state.primaryDrafts.size || state.relatedDrafts.size) {
         setError("Guarda o cancela los cambios pendientes antes de abrir otra fila.");
         return;
@@ -1897,38 +2065,13 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
         setError("Guarda o cancela los cambios pendientes antes de mover una ficha.");
         return;
       }
-      const previousValue = String(row.cells[property.index] || "");
-      const optimisticCells = row.cells.map((value, index) => index === property.index ? nextValue : value);
       movingRowsRef.current.add(row.number);
       setMovingRows([...movingRowsRef.current]);
-      setError("");
-      setTable((current) => ({
-        ...current,
-        rows: current.rows.map((item) => item.number === row.number
-          ? { ...item, cells: optimisticCells }
-          : item)
-      }));
-      try {
-        await writeSheetViewValue(row.number, property, nextValue, optimisticCells, activeTarget);
-      } catch (writeError) {
-        setTable((current) => ({
-          ...current,
-          rows: current.rows.map((item) => item.number === row.number
-            ? { ...item, cells: item.cells.map((value, index) => index === property.index ? previousValue : value) }
-            : item)
-        }));
-        setError(writeError.message);
-      } finally {
+      stageSheetViewValue(row, property, nextValue, activeTarget);
+      setTimeout(() => {
         movingRowsRef.current.delete(row.number);
         setMovingRows([...movingRowsRef.current]);
-      }
-    };
-
-    const updateTableRow = (rowNumber, cells) => {
-      setTable((current) => current ? ({
-        ...current,
-        rows: current.rows.map((item) => item.number === rowNumber ? { ...item, cells } : item)
-      }) : current);
+      }, 220);
     };
 
     const editWorkspaceCell = async (row, property, nextEditorValue) => {
@@ -1936,42 +2079,15 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
       const nextValue = serializeEditorValue(nextEditorValue, property);
       const previousValue = String(row.cells[property.index] || "");
       if (valuesEqualForProperty(nextValue, previousValue, property)) return;
-      const editKey = `${workspaceTarget.gid}:${encodeURIComponent(workspaceTarget.name)}:${row.number}:${property.index}`;
-      let editState = workspaceCellEditsRef.current.get(editKey);
-      if (!editState) {
-        editState = {
-          confirmedRevision: 0,
-          confirmedValue: previousValue,
-          revision: 0
-        };
-        workspaceCellEditsRef.current.set(editKey, editState);
-      }
-      const revision = ++editState.revision;
-      const optimisticCells = [...row.cells];
-      optimisticCells[property.index] = nextValue;
-      updateTableRow(row.number, optimisticCells);
-      setError("");
-      try {
-        await writeSheetViewValue(row.number, property, nextValue, optimisticCells, workspaceTarget);
-        if (revision > editState.confirmedRevision) {
-          editState.confirmedRevision = revision;
-          editState.confirmedValue = nextValue;
-        }
-        if (revision === editState.revision) workspaceCellEditsRef.current.delete(editKey);
-      } catch (writeError) {
-        if (revision === editState.revision) {
-          const restored = [...optimisticCells];
-          restored[property.index] = editState.confirmedValue;
-          updateTableRow(row.number, restored);
-          workspaceCellEditsRef.current.delete(editKey);
-          setError(writeError.message);
-        }
-        throw writeError;
-      }
+      stageSheetViewValue(row, property, nextValue, workspaceTarget);
     };
 
     const addWorkspaceRow = async () => {
       if (!table) return;
+      if (hasSheetViewChanges || sheetViewSaving) {
+        setError("Guarda o cancela los cambios pendientes antes de agregar un registro.");
+        return;
+      }
       if (state.primaryDrafts.size || state.relatedDrafts.size) {
         setError("Guarda o cancela los cambios pendientes antes de agregar un registro.");
         return;
@@ -1998,26 +2114,24 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
       if (!table) return;
       const targets = new Set(rowNumbers.map(Number));
       const previousRows = table.rows.filter((row) => targets.has(row.number));
-      setTable((current) => current
-        ? ({ ...current, rows: current.rows.filter((row) => !targets.has(row.number)) })
-        : current);
-      setError("");
-      try {
-        await Promise.all(previousRows.flatMap((row) => workspaceColumns.map((property) =>
-          writeSheetViewValue(row.number, property, "", row.cells.map(() => ""), workspaceTarget)
-        )));
-      } catch (writeError) {
-        setTable((current) => current ? ({
-          ...current,
-          rows: [...current.rows, ...previousRows].sort((left, right) => left.number - right.number)
-        }) : current);
-        setError(writeError.message);
-        throw writeError;
+      for (const row of previousRows) {
+        for (const property of workspaceColumns) stageSheetViewValue(row, property, "", workspaceTarget, true);
+        if (hasDraftForRow(workspaceTarget, row.number)) {
+          sheetViewRemovedRowsRef.current.add(sheetViewRowKey(workspaceTarget, row.number));
+        }
       }
+      setTable((current) => current
+        ? ({ ...current, rows: current.rows.filter((row) => !sheetViewRemovedRowsRef.current.has(sheetViewRowKey(workspaceTarget, row.number))) })
+        : current);
+      bumpSheetViewDrafts();
     };
 
     const selectWorkspaceSheet = (sheet) => {
       if (!sheet?.name) return;
+      if (hasSheetViewChanges || sheetViewSaving) {
+        setError("Guarda o cancela los cambios pendientes antes de cambiar de hoja.");
+        return;
+      }
       const gid = String(sheet.gid || "");
       const configured = state.workspace?.sheets?.[gid];
       setWorkspaceTarget({ gid, name: sheet.name });
@@ -2028,6 +2142,10 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
 
     const selectWorkspaceDocument = (documentItem, targetSheet = null) => {
       if (!documentItem?.id || documentItem.id === spreadsheetId()) return;
+      if (hasSheetViewChanges || sheetViewSaving) {
+        setError("Guarda o cancela los cambios pendientes antes de cambiar de documento.");
+        return;
+      }
       const gid = targetSheet?.gid ? `#gid=${encodeURIComponent(targetSheet.gid)}` : "";
       location.assign(`https://docs.google.com/spreadsheets/d/${encodeURIComponent(documentItem.id)}/edit${gid}`);
     };
@@ -2138,7 +2256,10 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
       view ? createPortal(
         sheetViewTree(React.createElement(
           "section",
-          { className: "sheet-view-panel", "data-sheet-view-panel": view },
+          {
+            className: `sheet-view-panel ${sheetViewSaving ? "is-saving" : ""}`.trim(),
+            "data-sheet-view-panel": view
+          },
           React.createElement(
             "header",
             { className: "sheet-view-panel-header" },
@@ -2150,15 +2271,45 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
                 ? `Tabla · ${workspaceTarget.name}`
                 : `${view === "kanban" ? "Kanban" : "Calendario"} · ${sheetName}`)
             ),
-            React.createElement(Button, {
-              type: "text",
-              shape: "circle",
-              icon: React.createElement(CloseOutlined),
-              title: "Cerrar",
-              "aria-label": "Cerrar vista",
-              "data-close-sheet-view": view,
-              onClick: () => setView("")
-            })
+            React.createElement(
+              "div",
+              { className: "sheet-view-panel-actions" },
+              React.createElement(Button, {
+                disabled: sheetViewSaving || !hasSheetViewChanges,
+                "data-sheet-view-cancel": "",
+                onClick: cancelSheetViewChanges
+              }, "Cancelar"),
+              React.createElement(Button, {
+                type: "primary",
+                disabled: sheetViewSaving || !hasSheetViewChanges,
+                loading: sheetViewSaving,
+                "data-sheet-view-save": "",
+                onClick: () => void saveSheetViewChanges()
+              }, "Guardar cambios"),
+              React.createElement(
+                "span",
+                {
+                  className: `save-state is-${sheetViewSaveMode}`,
+                  title: sheetViewSaveLabel,
+                  role: "status",
+                  "aria-label": sheetViewSaveLabel,
+                  "aria-live": "polite",
+                  "data-sheet-view-save-state": sheetViewSaveMode
+                },
+                React.createElement("span", { className: "save-state-spinner", "aria-hidden": "true" }),
+                React.createElement(CheckCircleOutlined, { className: "save-state-check", "aria-hidden": "true" }),
+                React.createElement("span", { className: "save-state-error", "aria-hidden": "true" }, "!")
+              ),
+              React.createElement(Button, {
+                type: "text",
+                shape: "circle",
+                icon: React.createElement(CloseOutlined),
+                title: "Cerrar",
+                "aria-label": "Cerrar vista",
+                "data-close-sheet-view": view,
+                onClick: requestSheetViewClose
+              })
+            )
           ),
           React.createElement(
             "div",

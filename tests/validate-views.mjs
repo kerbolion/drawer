@@ -252,10 +252,17 @@ try {
     return {
       allDirect: cells.length > 0 && cells.every(cell => Boolean(cell.querySelector('.workspace-table-cell-editor'))),
       actionsZIndex: Number(getComputedStyle(actions).zIndex),
-      editorZIndex: Number(getComputedStyle(cells[0]).zIndex)
+      editorZIndex: Number(getComputedStyle(cells[0]).zIndex),
+      headerActions: Array.from(view.querySelector('.sheet-view-panel-actions')?.children || [], item =>
+        item.matches('[data-sheet-view-cancel]') ? 'cancel'
+          : item.matches('[data-sheet-view-save]') ? 'save'
+            : item.matches('[data-sheet-view-save-state]') ? 'state'
+              : item.matches('[data-close-sheet-view]') ? 'close'
+                : 'unknown'
+      )
     };
   `));
-  if (!directEditors.allDirect || directEditors.actionsZIndex <= directEditors.editorZIndex) {
+  if (!directEditors.allDirect || directEditors.actionsZIndex <= directEditors.editorZIndex || JSON.stringify(directEditors.headerActions) !== JSON.stringify(["cancel", "save", "state", "close"])) {
     throw new Error(`Tabla no mantuvo los editores directos debajo de sus acciones: ${JSON.stringify(directEditors)}`);
   }
   await cdp.evaluate(viewExpression(`
@@ -268,6 +275,37 @@ try {
     setter.call(input, 'Ana desde Tabla');
     input.dispatchEvent(new Event('input', { bubbles: true }));
   `));
+  await delay(350);
+  const unsavedTable = await cdp.evaluate(viewExpression(`return {
+    paste: (parent.__pastes || []).some((item) => item.reference.endsWith("!B2")),
+    saveDisabled: view.querySelector("[data-sheet-view-save]").disabled,
+    cancelDisabled: view.querySelector("[data-sheet-view-cancel]").disabled,
+    state: view.querySelector("[data-sheet-view-save-state]")?.dataset.sheetViewSaveState || ""
+  };`));
+  if (unsavedTable.paste || unsavedTable.saveDisabled || unsavedTable.cancelDisabled || unsavedTable.state !== "pending") {
+    throw new Error(`Tabla no conservo el cambio como borrador: ${JSON.stringify(unsavedTable)}`);
+  }
+  await cdp.evaluate(viewExpression('view.querySelector("[data-sheet-view-cancel]").click();'));
+  await delay(120);
+  const cancelledTable = await cdp.evaluate(viewExpression(`return {
+    value: view.querySelector('[data-workspace-row="2"] td[data-column-id="column-2"] input')?.value || "",
+    saveDisabled: view.querySelector("[data-sheet-view-save]").disabled,
+    state: view.querySelector("[data-sheet-view-save-state]")?.dataset.sheetViewSaveState || ""
+  };`));
+  if (cancelledTable.value !== "Ana" || !cancelledTable.saveDisabled || cancelledTable.state !== "saved") {
+    throw new Error(`Cancelar no restauro la celda de Tabla: ${JSON.stringify(cancelledTable)}`);
+  }
+  await cdp.evaluate(viewExpression(`
+    const row = view.querySelector('[data-workspace-row="2"]');
+    const input = row.querySelectorAll('td[data-column-id]')[1].querySelector('.workspace-table-cell-editor input');
+    const setter = Object.getOwnPropertyDescriptor(view.defaultView.HTMLInputElement.prototype, 'value').set;
+    setter.call(input, 'Ana desde');
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    setter.call(input, 'Ana desde Tabla');
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  `));
+  await delay(100);
+  await cdp.evaluate(viewExpression('view.querySelector("[data-sheet-view-save]").click();'));
   const inlineEditDeadline = Date.now() + 4_000;
   let inlineEditPaste;
   while (Date.now() < inlineEditDeadline) {
@@ -283,6 +321,19 @@ try {
   }
   sheet.rows[0][1] = "Ana desde Tabla";
   staleVisualizationRows[0][1] = "Ana desde Tabla";
+  const tableSavedDeadline = Date.now() + 5_000;
+  let tableSaved;
+  while (Date.now() < tableSavedDeadline) {
+    tableSaved = await cdp.evaluate(viewExpression(`return {
+      disabled: view.querySelector("[data-sheet-view-save]").disabled,
+      state: view.querySelector("[data-sheet-view-save-state]")?.dataset.sheetViewSaveState || ""
+    };`));
+    if (tableSaved.disabled && tableSaved.state === "saved") break;
+    await delay(80);
+  }
+  if (!tableSaved?.disabled || tableSaved.state !== "saved") {
+    throw new Error(`Tabla no confirmo el guardado manual: ${JSON.stringify(tableSaved)}`);
+  }
 
   await cdp.evaluate(viewExpression('view.querySelector("[data-workspace-open-row=\\"2\\"]").click();'));
   const overlayDeadline = Date.now() + 5_000;
@@ -387,18 +438,40 @@ try {
     throw new Error(`El nuevo registro no permanecio visible en la tabla despues de guardarlo: ${JSON.stringify(diagnostics)}`);
   }
   await cdp.evaluate(viewExpression('view.querySelector("[aria-label=\\"Limpiar fila 5\\"]").click();'));
+  await delay(250);
+  const clearPending = await cdp.evaluate(viewExpression(`return {
+    rowVisible: Boolean(view.querySelector('[data-workspace-row="5"]')),
+    wrote: (parent.__clears || []).some((reference) => reference.endsWith("!B5")),
+    saveDisabled: view.querySelector("[data-sheet-view-save]").disabled
+  };`));
+  if (clearPending.rowVisible || clearPending.wrote || clearPending.saveDisabled) {
+    throw new Error(`Limpiar fila no quedo pendiente antes de guardar: ${JSON.stringify(clearPending)}`);
+  }
+  await cdp.evaluate(viewExpression('view.querySelector("[data-sheet-view-cancel]").click();'));
+  await delay(120);
+  const restoredClearedRow = await cdp.evaluate(viewExpression('return Boolean(view.querySelector(\'[data-workspace-row="5"]\'));'));
+  if (!restoredClearedRow) throw new Error("Cancelar no restauro la fila limpiada en Tabla");
+  await cdp.evaluate(viewExpression('view.querySelector(\'[aria-label="Limpiar fila 5"]\').click();'));
+  await delay(100);
+  await cdp.evaluate(viewExpression('view.querySelector("[data-sheet-view-save]").click();'));
   const clearTableDeadline = Date.now() + 4_000;
   let tableClears;
   while (Date.now() < clearTableDeadline) {
     tableClears = await cdp.evaluate("globalThis.__clears || []");
-    if (tableClears.some((reference) => reference.endsWith("!D5"))) break;
+    if (tableClears.some((reference) => reference.endsWith("!B5"))) break;
     await delay(50);
   }
-  if (!tableClears.some((reference) => reference.endsWith("!D5"))) {
+  if (!tableClears.some((reference) => reference.endsWith("!B5"))) {
     throw new Error(`Limpiar un registro desde Tabla no limpio Sheets: ${JSON.stringify(tableClears)}`);
   }
   sheet.rows.pop();
   staleVisualizationRows.pop();
+  const clearSavedDeadline = Date.now() + 5_000;
+  while (Date.now() < clearSavedDeadline) {
+    const saved = await cdp.evaluate(viewExpression('return view.querySelector("[data-sheet-view-save-state]")?.dataset.sheetViewSaveState === "saved";'));
+    if (saved) break;
+    await delay(80);
+  }
   await cdp.evaluate(viewExpression('view.querySelector("[data-close-sheet-view]")?.click();'));
   await delay(180);
 
@@ -563,6 +636,18 @@ try {
     type: "mouseReleased", x: secondDrag.endX, y: secondDrag.endY, button: "left", buttons: 0, clickCount: 1
   });
   await delay(225);
+  const pendingKanban = await cdp.evaluate(viewExpression(`return {
+    wrote: (parent.__pastes || []).some((paste) => paste.reference.endsWith("!C3") || paste.reference.endsWith("!C4")),
+    saveDisabled: view.querySelector("[data-sheet-view-save]").disabled,
+    cancelDisabled: view.querySelector("[data-sheet-view-cancel]").disabled,
+    state: view.querySelector("[data-sheet-view-save-state]")?.dataset.sheetViewSaveState || "",
+    row3Group: view.querySelector('.kanban-card-shell[data-sheet-row="3"]')?.closest('[data-kanban-group]')?.dataset.kanbanGroup || "",
+    row4Group: view.querySelector('.kanban-card-shell[data-sheet-row="4"]')?.closest('[data-kanban-group]')?.dataset.kanbanGroup || ""
+  };`));
+  if (pendingKanban.wrote || pendingKanban.saveDisabled || pendingKanban.cancelDisabled || pendingKanban.state !== "pending" || pendingKanban.row3Group !== "Nuevo" || pendingKanban.row4Group !== "En proceso") {
+    throw new Error(`Kanban no conservo los movimientos como borrador: ${JSON.stringify(pendingKanban)}`);
+  }
+  await cdp.evaluate(viewExpression('view.querySelector("[data-sheet-view-save]").click();'));
   const pasteDeadline = Date.now() + 4_000;
   let pastes = [];
   while (Date.now() < pasteDeadline) {
@@ -577,8 +662,18 @@ try {
   const serializedWrites = pastes.some((paste) => paste.reference.endsWith("!C4") && paste.value === "En proceso")
     && pastes.some((paste) => paste.reference.endsWith("!C3") && paste.value === "Nuevo");
   if (!batchedWrites && !serializedWrites) {
-    throw new Error(`Kanban no proceso correctamente los cambios rapidos de Estado: ${JSON.stringify(pastes)}`);
+    throw new Error(`Kanban no guardo correctamente los cambios agrupados de Estado: ${JSON.stringify(pastes)}`);
   }
+  sheet.rows[1][2] = "Nuevo";
+  sheet.rows[2][2] = "En proceso";
+  const kanbanSavedDeadline = Date.now() + 5_000;
+  let kanbanSaved = false;
+  while (Date.now() < kanbanSavedDeadline) {
+    kanbanSaved = await cdp.evaluate(viewExpression('return view.querySelector("[data-sheet-view-save-state]")?.dataset.sheetViewSaveState === "saved";'));
+    if (kanbanSaved) break;
+    await delay(80);
+  }
+  if (!kanbanSaved) throw new Error("Kanban no confirmo el guardado manual de los movimientos");
   const editedSelection = await cdp.evaluate('document.getElementById("t-name-box").value');
   if (!editedSelection.endsWith("!C3")) {
     throw new Error(`Kanban restauro la seleccion anterior en lugar de conservar la ultima celda editada: ${editedSelection}`);
@@ -612,6 +707,17 @@ try {
   await cdp.command("Input.dispatchMouseEvent", {
     type: "mouseReleased", x: clearDrag.endX, y: clearDrag.endY, button: "left", buttons: 0, clickCount: 1
   });
+  await delay(225);
+  const pendingClear = await cdp.evaluate(viewExpression(`return {
+    wrote: (parent.__clears || []).includes("'Contactos'!C2"),
+    saveDisabled: view.querySelector("[data-sheet-view-save]").disabled,
+    state: view.querySelector("[data-sheet-view-save-state]")?.dataset.sheetViewSaveState || "",
+    group: view.querySelector('.kanban-card-shell[data-sheet-row="2"]')?.closest('[data-kanban-group]')?.dataset.kanbanGroup || ""
+  };`));
+  if (pendingClear.wrote || pendingClear.saveDisabled || pendingClear.state !== "pending" || pendingClear.group !== "__empty__") {
+    throw new Error(`Kanban no dejo pendiente la limpieza de Estado: ${JSON.stringify(pendingClear)}`);
+  }
+  await cdp.evaluate(viewExpression('view.querySelector("[data-sheet-view-save]").click();'));
   const clearDeadline = Date.now() + 4_000;
   let clears = [];
   while (Date.now() < clearDeadline) {
@@ -623,6 +729,14 @@ try {
     throw new Error(`Mover a Sin seleccion no limpio la celda de Estado: ${JSON.stringify(clears)}`);
   }
   sheet.rows[0][2] = "";
+  const clearKanbanSavedDeadline = Date.now() + 5_000;
+  let clearKanbanSaved = false;
+  while (Date.now() < clearKanbanSavedDeadline) {
+    clearKanbanSaved = await cdp.evaluate(viewExpression('return view.querySelector("[data-sheet-view-save-state]")?.dataset.sheetViewSaveState === "saved";'));
+    if (clearKanbanSaved) break;
+    await delay(80);
+  }
+  if (!clearKanbanSaved) throw new Error("Kanban no confirmo el guardado manual al limpiar Estado");
   const clearedSelection = await cdp.evaluate('document.getElementById("t-name-box").value');
   if (!clearedSelection.endsWith("!C2")) {
     throw new Error(`La limpieza del Kanban no conservo la celda editada: ${clearedSelection}`);
@@ -636,31 +750,6 @@ try {
       button: 0
     }));
   `));
-  sheet.rows[1][2] = "Nuevo";
-  const verificationDeadline = Date.now() + 10_000;
-  let verification;
-  while (Date.now() < verificationDeadline) {
-    verification = await cdp.evaluate('document.getElementById("sheets-session-probe").dataset.writeVerification');
-    if (verification === "unconfirmed") break;
-    if (verification === "failed") throw new Error("La escritura de Kanban no se verifico");
-    await delay(100);
-  }
-  if (verification !== "unconfirmed") {
-    throw new Error(`Kanban no distinguio una lectura atrasada de un error real: ${verification}`);
-  }
-  const falseError = await cdp.evaluate(`(() => {
-    const host = document.getElementById("sheets-session-probe");
-    const panel = host.shadowRoot.querySelector(".panel-frame").contentDocument;
-    return {
-      status: host.dataset.status,
-      hidden: panel.querySelector(".status").hidden,
-      pending: host.dataset.hasPendingChanges
-    };
-  })()`);
-  if (falseError.status === "error" || !falseError.hidden || falseError.pending !== "false") {
-    throw new Error(`Una confirmacion atrasada mostro un error falso: ${JSON.stringify(falseError)}`);
-  }
-  sheet.rows[2][2] = "En proceso";
 
   const rowDeadline = Date.now() + 5_000;
   let selected;
@@ -670,7 +759,7 @@ try {
     await delay(100);
   }
   if (selected?.box !== "A4" || selected.row !== "4") {
-    throw new Error(`La tarjeta no espero el guardado pendiente antes de abrir su fila: ${JSON.stringify(selected)}`);
+    throw new Error(`La tarjeta no abrio su fila despues del guardado manual: ${JSON.stringify(selected)}`);
   }
 
   await delay(250);
