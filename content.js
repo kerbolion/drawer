@@ -61,6 +61,7 @@ import "dayjs/locale/es.js";
 import { CircleDollarSign, Clock3, Hash, ListChecks, Type } from "lucide-react";
 import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
 import { createCloudAccountUi } from "./cloud-account.js";
+import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
 
 (() => {
   "use strict";
@@ -178,7 +179,8 @@ import { createCloudAccountUi } from "./cloud-account.js";
     cloudWorkspaceRevision: 0,
     cloudWorkspaceHydrated: false,
     cloudWorkspaceTimer: null,
-    cloudWorkspaceWriteQueue: Promise.resolve()
+    cloudWorkspaceWriteQueue: Promise.resolve(),
+    workspaceRecordOverlay: false
   };
 
   const host = document.createElement("div");
@@ -369,6 +371,17 @@ import { createCloudAccountUi } from "./cloud-account.js";
       border-left: 1px solid ${antdTokens.colorBorder};
       display: flex; flex-direction: column;
     }
+    .workspace-record-mask {
+      position: fixed; inset: 0; z-index: 1090; background: rgba(0, 0, 0, .28);
+      animation: workspace-record-mask-enter 180ms ease-out;
+    }
+    .workspace-record-mask[hidden] { display: none; }
+    .drawer.is-workspace-record-overlay {
+      position: fixed; z-index: 1100; inset: 0 0 0 auto; width: min(720px, 100%);
+      box-shadow: ${antdTokens.boxShadowSecondary}; animation: workspace-record-enter 180ms cubic-bezier(.2, 0, 0, 1);
+    }
+    @keyframes workspace-record-mask-enter { from { opacity: 0; } }
+    @keyframes workspace-record-enter { from { transform: translateX(100%); } }
     .drawer > header {
       display: flex; align-items: center; justify-content: space-between; gap: 12px;
       padding: 16px 24px; border-bottom: 1px solid ${antdTokens.colorBorderSecondary};
@@ -681,6 +694,81 @@ import { createCloudAccountUi } from "./cloud-account.js";
       min-width: 0; min-height: 0; overflow: hidden; padding: 0; background: var(--workspace-bg);
     }
     .sheet-view-surface { display: flex; width: 100%; height: 100%; min-width: 0; min-height: 0; flex-direction: column; }
+    .workspace-browser { display: grid; width: 100%; height: 100%; min-width: 0; min-height: 0; grid-template-columns: 248px minmax(0, 1fr); background: var(--workspace-bg); }
+    .workspace-browser-sidebar { min-width: 0; overflow: auto; padding: 14px 10px; border-right: 1px solid var(--workspace-border); background: var(--workspace-surface); }
+    .workspace-browser-sidebar-title { padding: 0 10px 10px; color: var(--workspace-text-muted); font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+    .workspace-browser-tree { display: grid; gap: 5px; }
+    .workspace-browser-document { min-width: 0; }
+    .workspace-browser-document-row { display: flex; min-width: 0; align-items: center; border-radius: 6px; }
+    .workspace-browser-document-row:hover, .workspace-browser-document-row.is-current { background: var(--workspace-surface-muted); }
+    .workspace-browser-tree-toggle { flex: 0 0 auto; transition: transform 140ms ease; }
+    .workspace-browser-document-button, .workspace-browser-sheet { display: flex; min-width: 0; align-items: center; gap: 8px; border: 0; background: transparent; color: var(--workspace-text-body); cursor: pointer; text-align: left; }
+    .workspace-browser-document-button { flex: 1; padding: 8px 8px 8px 0; font-weight: 700; }
+    .workspace-browser-document-button span, .workspace-browser-sheet span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .workspace-browser-sheets { display: grid; gap: 3px; padding: 3px 0 5px 34px; }
+    .workspace-browser-sheet { width: 100%; padding: 8px 10px; border-radius: 6px; color: var(--workspace-text-secondary); }
+    .workspace-browser-sheet:hover { background: var(--workspace-surface-muted); color: var(--workspace-primary); }
+    .workspace-browser-sheet.is-active { background: var(--workspace-primary-soft); color: var(--workspace-primary); font-weight: 700; }
+    .workspace-browser-no-sheets { padding: 7px 10px; color: var(--workspace-text-disabled); font-size: 11px; }
+    .workspace-browser-main { position: relative; display: flex; min-width: 0; min-height: 0; flex-direction: column; overflow: hidden; }
+    .workspace-board-header { display: flex; flex: 0 0 auto; min-height: 60px; align-items: center; justify-content: space-between; gap: 18px; padding: 10px 16px; border-bottom: 1px solid var(--workspace-border); background: var(--workspace-surface); }
+    .workspace-board-heading { display: flex; min-width: 0; align-items: baseline; gap: 10px; }
+    .workspace-board-heading h2 { margin: 0; overflow: hidden; color: var(--workspace-text); font-size: 17px; text-overflow: ellipsis; white-space: nowrap; }
+    .workspace-board-heading span { flex: 0 0 auto; color: var(--workspace-text-muted); font-size: 12px; }
+    .workspace-board-tabs { display: flex; flex: 0 0 auto; align-items: center; gap: 4px; }
+    .workspace-board-content { display: flex; flex: 1; min-width: 0; min-height: 0; flex-direction: column; overflow: hidden; }
+    .workspace-browser-error { flex: 0 0 auto; margin: 10px 12px 0; }
+    .workspace-browser-loading { display: flex; flex: 1; align-items: center; justify-content: center; }
+    .workspace-table-view { display: flex; flex: 1; min-width: 0; min-height: 0; flex-direction: column; background: var(--workspace-surface); }
+    .workspace-table-toolbar { display: flex; flex: 0 0 auto; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--workspace-border); background: var(--workspace-surface-raised); }
+    .workspace-table-filters { display: flex; min-width: 0; flex: 1; flex-wrap: wrap; align-items: center; gap: 6px; }
+    .workspace-table-filter { display: flex; align-items: center; gap: 4px; padding: 3px; border: 1px solid var(--workspace-border); border-radius: 6px; background: var(--workspace-surface); }
+    .workspace-table-filter .ant-input-affix-wrapper { width: 150px; }
+    .workspace-table-columns { position: relative; flex: 0 0 auto; }
+    .workspace-table-columns summary { list-style: none; padding: 6px 10px; border: 1px solid var(--workspace-border); border-radius: 6px; color: var(--workspace-text-secondary); cursor: pointer; user-select: none; }
+    .workspace-table-columns summary::-webkit-details-marker { display: none; }
+    .workspace-table-columns-menu { position: absolute; z-index: 8; top: calc(100% + 5px); right: 0; display: grid; width: 220px; max-height: 320px; gap: 8px; overflow: auto; padding: 12px; border: 1px solid var(--workspace-border); border-radius: 8px; background: var(--workspace-surface); box-shadow: 0 12px 32px var(--workspace-shadow); }
+    .workspace-table-scroll { flex: 1; min-width: 0; min-height: 0; overflow: auto; }
+    .workspace-data-table { width: max-content; min-width: 100%; border-collapse: separate; border-spacing: 0; table-layout: fixed; }
+    .workspace-data-table th { position: sticky; z-index: 2; top: 0; min-width: 190px; padding: 9px 10px; border-right: 1px solid var(--workspace-border-subtle); border-bottom: 1px solid var(--workspace-border); background: var(--workspace-surface-muted); color: var(--workspace-text-secondary); font-size: 12px; font-weight: 700; text-align: left; }
+    .workspace-data-table td { min-width: 190px; max-width: 320px; height: 48px; padding: 5px 8px; border-right: 1px solid var(--workspace-border-subtle); border-bottom: 1px solid var(--workspace-border-subtle); background: var(--workspace-surface); vertical-align: middle; }
+    .workspace-data-table tbody tr:hover td { background: var(--workspace-surface-raised); }
+    .workspace-data-table .workspace-table-select { left: 0; width: 44px; min-width: 44px; max-width: 44px; text-align: center; }
+    .workspace-data-table .workspace-table-row-number { width: 54px; min-width: 54px; max-width: 54px; color: var(--workspace-text-muted); text-align: center; }
+    .workspace-data-table .workspace-table-actions { position: sticky; z-index: 1; right: 0; width: 124px; min-width: 124px; max-width: 124px; background: var(--workspace-surface-raised); white-space: nowrap; }
+    .workspace-data-table th.workspace-table-actions { z-index: 3; background: var(--workspace-surface-muted); }
+    .workspace-table-column-heading { display: grid; min-width: 0; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 1px 7px; }
+    .workspace-table-column-heading .property-type-icon { grid-row: 1 / span 2; width: 26px; min-height: 26px; }
+    .workspace-table-column-heading > span:nth-child(2) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .workspace-table-column-heading small { color: var(--workspace-text-muted); font-size: 10px; font-weight: 400; }
+    .workspace-table-cell-value { display: block; width: 100%; overflow: hidden; border: 0; padding: 7px 6px; background: transparent; color: var(--workspace-text); cursor: pointer; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
+    .workspace-table-cell-value:hover { border-radius: 5px; background: var(--workspace-primary-soft); color: var(--workspace-primary); }
+    .workspace-table-cell-value.is-protected { color: var(--workspace-text-secondary); cursor: default; }
+    .workspace-table-cell-value.is-protected:hover { background: transparent; color: var(--workspace-text-secondary); }
+    .workspace-table-inline-editor { display: flex; min-width: 280px; align-items: center; gap: 3px; }
+    .workspace-table-inline-control { flex: 1; min-width: 180px; }
+    .workspace-table-inline-control > .ant-input-number, .workspace-table-inline-control > .ant-picker, .workspace-table-inline-control > .ant-select, .workspace-table-inline-control > .ant-input, .workspace-table-inline-control > .ant-space-compact { width: 100%; }
+    .workspace-table-footer { display: flex; flex: 0 0 auto; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 14px; border-top: 1px solid var(--workspace-border); background: var(--workspace-surface); color: var(--workspace-text-muted); font-size: 12px; }
+    .workspace-deck-view { display: flex; flex: 1; min-width: 0; min-height: 0; flex-direction: column; background: var(--workspace-surface-muted); }
+    .workspace-deck-toolbar { display: flex; flex: 0 0 auto; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 12px; border-bottom: 1px solid var(--workspace-border); background: var(--workspace-surface-raised); }
+    .workspace-deck-scroll { flex: 1; min-width: 0; min-height: 0; overflow: auto; padding: 12px; }
+    .workspace-deck-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); align-content: start; gap: 10px; }
+    .workspace-deck-card { min-width: 0; border: 1px solid var(--workspace-border); border-radius: 8px; padding: 12px; background: var(--workspace-surface); box-shadow: 0 6px 18px var(--workspace-shadow-soft); cursor: pointer; }
+    .workspace-deck-card:hover, .workspace-deck-card:focus-visible { border-color: var(--workspace-primary-border); outline: 0; box-shadow: 0 8px 22px var(--workspace-shadow); }
+    .workspace-deck-card-head { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 8px; }
+    .workspace-deck-card-head > strong { overflow: hidden; color: var(--workspace-text); font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }
+    .workspace-deck-fields { display: grid; gap: 7px; margin-top: 10px; }
+    .workspace-deck-field { display: grid; min-width: 0; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 2px 10px; }
+    .workspace-deck-field-icon { grid-row: 1 / span 2; width: 34px; min-height: 34px; }
+    .workspace-deck-field-icon svg { width: 12px; height: 12px; }
+    .workspace-deck-field > span:not(.property-type-icon), .workspace-deck-empty { color: var(--workspace-text-muted); font-size: 11px; }
+    .workspace-deck-field strong { overflow: hidden; color: var(--workspace-text); font-size: 13px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+    @media (max-width: 820px) {
+      .workspace-browser { grid-template-columns: 190px minmax(0, 1fr); }
+      .workspace-board-header { align-items: flex-start; flex-direction: column; }
+      .workspace-deck-toolbar { align-items: stretch; flex-direction: column; }
+      .workspace-deck-toolbar .ant-input-affix-wrapper { width: 100% !important; }
+    }
     .sheet-view-loading, .sheet-view-empty {
       display: flex; flex: 1; min-height: 320px; align-items: center; justify-content: center; padding: 32px;
       background: var(--workspace-surface);
@@ -1560,12 +1648,47 @@ import { createCloudAccountUi } from "./cloud-account.js";
     );
   }
 
+  function workspaceDocumentName() {
+    const title = String(document.title || "").replace(/\s+-\s+Hojas de c[aá]lculo de Google.*$/i, "").trim();
+    return title || "Documento actual";
+  }
+
+  function workspaceSheetList() {
+    const configured = state.workspace?.sheets || {};
+    const result = [];
+    const used = new Set();
+    for (const visible of visibleSheets()) {
+      const configuredEntry = Object.entries(configured).find(([, sheet]) => normalizedColumn(sheet.name) === normalizedColumn(visible.name));
+      const gid = String(visible.gid || configuredEntry?.[0] || "");
+      const key = gid || normalizedColumn(visible.name);
+      if (!key || used.has(key)) continue;
+      used.add(key);
+      result.push({ gid, name: visible.name });
+    }
+    if (!result.length) {
+      for (const [gid, sheet] of Object.entries(configured)) {
+        const key = String(gid);
+        if (!sheet?.name || used.has(key)) continue;
+        used.add(key);
+        result.push({ gid: key, name: sheet.name });
+      }
+    }
+    return result;
+  }
+
   function SheetViewActions({ sheetKey, sheetName, columns, settings, refreshKey }) {
     const [view, setView] = React.useState("");
     const [table, setTable] = React.useState(null);
     const [loading, setLoading] = React.useState(false);
     const [error, setError] = React.useState("");
     const [movingRows, setMovingRows] = React.useState([]);
+    const [workspaceTarget, setWorkspaceTarget] = React.useState(() => ({ gid: drawerGid(), name: sheetName }));
+    const [workspaceColumns, setWorkspaceColumns] = React.useState(columns);
+    const [documents, setDocuments] = React.useState(() => [{
+      id: spreadsheetId(),
+      name: workspaceDocumentName(),
+      sheets: workspaceSheetList()
+    }]);
     const movingRowsRef = React.useRef(new Set());
     const [kanbanExpanded, setKanbanExpanded] = React.useState(() => settings.kanbanExpanded === true);
     const [calendarExpanded, setCalendarExpanded] = React.useState(() => settings.calendarExpanded === true);
@@ -1578,13 +1701,22 @@ import { createCloudAccountUi } from "./cloud-account.js";
       setError("");
       movingRowsRef.current.clear();
       setMovingRows([]);
+      setWorkspaceTarget({ gid: drawerGid(), name: sheetName });
+      setWorkspaceColumns(columns);
+      setDocuments((current) => [{
+        id: spreadsheetId(),
+        name: current.find((item) => item.id === spreadsheetId())?.name || workspaceDocumentName(),
+        sheets: workspaceSheetList()
+      }, ...current.filter((item) => item.id !== spreadsheetId())]);
       setKanbanExpanded(settings.kanbanExpanded === true);
       setCalendarExpanded(settings.calendarExpanded === true);
     }, [sheetKey]);
 
     const expandedKanban = view === "kanban" && kanbanExpanded;
     const expandedCalendar = view === "calendar" && calendarExpanded;
-    const expandedSheetView = expandedKanban || expandedCalendar;
+    const expandedWorkspace = view === "table";
+    const expandedSheetView = expandedWorkspace || expandedKanban || expandedCalendar;
+    const activeTarget = view === "table" ? workspaceTarget : { gid: drawerGid(), name: sheetName };
 
     React.useEffect(() => {
       panelFrame.classList.toggle("is-sheet-view-expanded", expandedSheetView);
@@ -1598,8 +1730,13 @@ import { createCloudAccountUi } from "./cloud-account.js";
       setLoading(true);
       setError("");
       setActivity("views", true);
-      cachedSheetTable(sheetName, true, controller.signal).then((nextTable) => {
-        if (active) setTable(nextTable);
+      cachedSheetTable(activeTarget.name, true, controller.signal).then((nextTable) => {
+        if (!active) return;
+        if (view === "table") {
+          const configured = reconcileSheetConfiguration(activeTarget.gid, activeTarget.name, nextTable.headers);
+          setWorkspaceColumns((configured.columns || []).filter((column) => String(column.sourceHeader || "").trim()));
+        }
+        setTable(nextTable);
       }).catch((loadError) => {
         if (active && loadError.name !== "AbortError") setError(loadError.message);
       }).finally(() => {
@@ -1613,11 +1750,40 @@ import { createCloudAccountUi } from "./cloud-account.js";
         controller.abort();
         setActivity("views", false);
       };
-    }, [view, sheetKey, refreshKey]);
+    }, [view, sheetKey, refreshKey, activeTarget.gid, activeTarget.name]);
+
+    React.useEffect(() => {
+      if (view !== "table") return undefined;
+      let active = true;
+      const currentId = spreadsheetId();
+      const currentDocument = { id: currentId, name: workspaceDocumentName(), sheets: workspaceSheetList() };
+      setDocuments((items) => [currentDocument, ...items.filter((item) => item.id !== currentId)]);
+      void (async () => {
+        const result = await cloudMessage("workspace.list");
+        if (!active || !result?.ok || !Array.isArray(result.workspaces)) return;
+        const remoteDocuments = await Promise.all(result.workspaces.map(async (item) => {
+          const id = String(item.spreadsheet_id || item.spreadsheetId || "");
+          if (!id || id === currentId) return currentDocument;
+          const detail = await cloudMessage("workspace.get", { spreadsheetId: id });
+          const remoteWorkspace = detail?.ok && detail.found ? normalizeWorkspace(detail.workspace) : null;
+          return {
+            id,
+            name: String(item.name || detail?.name || "Documento sin nombre"),
+            sheets: Object.entries(remoteWorkspace?.sheets || {}).map(([gid, sheet]) => ({ gid, name: sheet.name }))
+          };
+        }));
+        if (!active) return;
+        const unique = new Map([[currentId, currentDocument]]);
+        for (const item of remoteDocuments) if (item?.id) unique.set(item.id, item.id === currentId ? currentDocument : item);
+        setDocuments([...unique.values()]);
+      })();
+      return () => { active = false; };
+    }, [view, sheetKey]);
 
     React.useEffect(() => {
       if (view === "kanban" && !statusColumns.length) setView("");
       if (view === "calendar" && !dateColumns.length) setView("");
+      if (view !== "table" && state.workspaceRecordOverlay) closeWorkspaceRecordOverlay();
     }, [view, statusColumns.length, dateColumns.length]);
 
     const toggleKanbanExpanded = () => {
@@ -1646,6 +1812,39 @@ import { createCloudAccountUi } from "./cloud-account.js";
       }
     };
 
+    const openWorkspaceRow = async (rowNumber) => {
+      if (state.primaryDrafts.size || state.relatedDrafts.size) {
+        setError("Guarda o cancela los cambios pendientes antes de abrir otra fila.");
+        return;
+      }
+      try {
+        await drainSheetViewMutations();
+        setError("");
+        await focusSheetRange(qualifiedReference(workspaceTarget.name, `A${rowNumber}`));
+        openWorkspaceRecordOverlay();
+        setStatus(`Leyendo la fila ${rowNumber} desde tu sesiÃ³n de Googleâ€¦`, "busy");
+        ui.fields.inert = true;
+        ui.fields.setAttribute("aria-busy", "true");
+        const deadline = Date.now() + 2_500;
+        while (
+          Date.now() < deadline
+          && (
+            selectedRow(nameBoxValue()) !== Number(rowNumber)
+            || normalizedColumn(activeSheetName()) !== normalizedColumn(workspaceTarget.name)
+          )
+        ) await wait(50);
+        state.lastSelection = "";
+        if (
+          selectedRow(nameBoxValue()) === Number(rowNumber)
+          && normalizedColumn(activeSheetName()) === normalizedColumn(workspaceTarget.name)
+        ) await loadRow(Number(rowNumber), true);
+        else pollSelection();
+      } catch (focusError) {
+        closeWorkspaceRecordOverlay();
+        setError(focusError.message);
+      }
+    };
+
     const moveRow = async (row, property, nextValue) => {
       if (property.protected) return;
       if (movingRowsRef.current.has(row.number)) return;
@@ -1665,7 +1864,7 @@ import { createCloudAccountUi } from "./cloud-account.js";
           : item)
       }));
       try {
-        await writeSheetViewValue(row.number, property, nextValue, optimisticCells);
+        await writeSheetViewValue(row.number, property, nextValue, optimisticCells, activeTarget);
       } catch (writeError) {
         setTable((current) => ({
           ...current,
@@ -1680,11 +1879,136 @@ import { createCloudAccountUi } from "./cloud-account.js";
       }
     };
 
-    const content = loading
-      ? React.createElement("div", { className: "sheet-view-loading" }, React.createElement(Spin, { size: "large" }))
-      : error && !table
-        ? React.createElement(SheetViewEmpty, { description: error })
-        : view === "kanban"
+    const updateTableRow = (rowNumber, cells) => {
+      setTable((current) => current ? ({
+        ...current,
+        rows: current.rows.map((item) => item.number === rowNumber ? { ...item, cells } : item)
+      }) : current);
+    };
+
+    const editWorkspaceCell = async (row, property, nextEditorValue) => {
+      if (property.protected) return;
+      const nextValue = serializeEditorValue(nextEditorValue, property);
+      const previousValue = String(row.cells[property.index] || "");
+      if (valuesEqualForProperty(nextValue, previousValue, property)) return;
+      const optimisticCells = [...row.cells];
+      optimisticCells[property.index] = nextValue;
+      updateTableRow(row.number, optimisticCells);
+      setError("");
+      try {
+        await writeSheetViewValue(row.number, property, nextValue, optimisticCells, workspaceTarget);
+      } catch (writeError) {
+        const restored = [...optimisticCells];
+        restored[property.index] = previousValue;
+        updateTableRow(row.number, restored);
+        setError(writeError.message);
+        throw writeError;
+      }
+    };
+
+    const addWorkspaceRow = async () => {
+      if (!table) return;
+      if (state.primaryDrafts.size || state.relatedDrafts.size) {
+        setError("Guarda o cancela los cambios pendientes antes de agregar un registro.");
+        return;
+      }
+      try {
+        await drainSheetViewMutations();
+        await focusSheetRange(qualifiedReference(workspaceTarget.name, "A1"));
+        const deadline = Date.now() + 2_500;
+        while (Date.now() < deadline && normalizedColumn(activeSheetName()) !== normalizedColumn(workspaceTarget.name)) {
+          await wait(50);
+        }
+        if (normalizedColumn(activeSheetName()) !== normalizedColumn(workspaceTarget.name)) {
+          throw new Error(`Sheets no activÃ³ la hoja ${workspaceTarget.name}`);
+        }
+        openWorkspaceRecordOverlay();
+        await beginPrimaryRecordCreation();
+      } catch (creationError) {
+        closeWorkspaceRecordOverlay();
+        setError(creationError.message);
+      }
+    };
+
+    const clearWorkspaceRows = async (rowNumbers) => {
+      if (!table) return;
+      const targets = new Set(rowNumbers.map(Number));
+      const previousRows = table.rows.filter((row) => targets.has(row.number));
+      setTable((current) => current
+        ? ({ ...current, rows: current.rows.filter((row) => !targets.has(row.number)) })
+        : current);
+      setError("");
+      try {
+        await Promise.all(previousRows.flatMap((row) => workspaceColumns.map((property) =>
+          writeSheetViewValue(row.number, property, "", row.cells.map(() => ""), workspaceTarget)
+        )));
+      } catch (writeError) {
+        setTable((current) => current ? ({
+          ...current,
+          rows: [...current.rows, ...previousRows].sort((left, right) => left.number - right.number)
+        }) : current);
+        setError(writeError.message);
+        throw writeError;
+      }
+    };
+
+    const selectWorkspaceSheet = (sheet) => {
+      if (!sheet?.name) return;
+      const gid = String(sheet.gid || "");
+      const configured = state.workspace?.sheets?.[gid];
+      setWorkspaceTarget({ gid, name: sheet.name });
+      setWorkspaceColumns((configured?.columns || []).filter((column) => String(column.sourceHeader || "").trim()));
+      setTable(null);
+      setError("");
+    };
+
+    const selectWorkspaceDocument = (documentItem, targetSheet = null) => {
+      if (!documentItem?.id || documentItem.id === spreadsheetId()) return;
+      const gid = targetSheet?.gid ? `#gid=${encodeURIComponent(targetSheet.gid)}` : "";
+      location.assign(`https://docs.google.com/spreadsheets/d/${encodeURIComponent(documentItem.id)}/edit${gid}`);
+    };
+
+    const content = view === "table"
+      ? React.createElement(WorkspaceSheetView, {
+        columns: workspaceColumns,
+        currentDocumentId: spreadsheetId(),
+        documents,
+        error,
+        loading,
+        onAddRow: addWorkspaceRow,
+        onCellChange: editWorkspaceCell,
+        onClearRows: clearWorkspaceRows,
+        onDocumentSelect: selectWorkspaceDocument,
+        onOpenRow: openWorkspaceRow,
+        onSheetSelect: selectWorkspaceSheet,
+        renderCalendar: (openWorkspaceRow) => React.createElement(SheetCalendar, {
+          table,
+          columns: workspaceColumns,
+          initialColumnId: state.workspace?.sheetViews?.[workspaceTarget.gid]?.calendarColumnId,
+          onColumnChange: (columnId) => setSheetViewSetting(workspaceTarget.gid, "calendarColumnId", columnId),
+          onOpenRow: openWorkspaceRow
+        }),
+        renderEditor: (property, value, onChange) => React.createElement(PropertyEditorControl, { property, value, onChange }),
+        renderTypeIcon: (property) => typeBadge(property.type, 12),
+        renderKanban: (openWorkspaceRow) => React.createElement(SheetKanban, {
+          table,
+          columns: workspaceColumns,
+          initialColumnId: state.workspace?.sheetViews?.[workspaceTarget.gid]?.kanbanColumnId,
+          movingRows,
+          onColumnChange: (columnId) => setSheetViewSetting(workspaceTarget.gid, "kanbanColumnId", columnId),
+          onMoveRow: moveRow,
+          onOpenRow: openWorkspaceRow
+        }),
+        selectedSheetGid: workspaceTarget.gid,
+        sheetName: workspaceTarget.name,
+        table,
+        toEditorValue: editorValueFromRaw
+      })
+      : loading
+        ? React.createElement("div", { className: "sheet-view-loading" }, React.createElement(Spin, { size: "large" }))
+        : error && !table
+          ? React.createElement(SheetViewEmpty, { description: error })
+          : view === "kanban"
           ? React.createElement(SheetKanban, {
             table,
             columns,
@@ -1717,6 +2041,16 @@ import { createCloudAccountUi } from "./cloud-account.js";
         "data-add-record": "current",
         onClick: () => void beginPrimaryRecordCreation()
       }),
+      React.createElement(Button, {
+        type: "text",
+        shape: "circle",
+        size: "small",
+        icon: React.createElement(TableOutlined),
+        title: "Abrir vista Tabla",
+        "aria-label": "Abrir vista Tabla",
+        "data-sheet-view": "table",
+        onClick: () => setView("table")
+      }),
       statusColumns.length ? React.createElement(Button, {
         type: "text",
         shape: "circle",
@@ -1747,8 +2081,8 @@ import { createCloudAccountUi } from "./cloud-account.js";
           className: "sheet-view-drawer",
           rootClassName: `sheet-view-drawer-root ${expandedSheetView ? "is-expanded" : ""}`.trim(),
           getContainer: () => panelDocument.body,
-          title: `${view === "kanban" ? "Kanban" : "Calendario"} · ${sheetName}`,
-          extra: view ? React.createElement(Button, {
+          title: view === "table" ? `Tabla · ${workspaceTarget.name}` : `${view === "kanban" ? "Kanban" : "Calendario"} · ${sheetName}`,
+          extra: view && view !== "table" ? React.createElement(Button, {
             type: "default",
             shape: "circle",
             size: "small",
@@ -1764,7 +2098,7 @@ import { createCloudAccountUi } from "./cloud-account.js";
         React.createElement(
           "div",
           { className: "sheet-view-surface", "data-active-sheet-view": view },
-          error && table ? React.createElement("div", { className: "status error" }, error) : null,
+          error && table && view !== "table" ? React.createElement("div", { className: "status error" }, error) : null,
           content
         )
       )
@@ -1776,7 +2110,7 @@ import { createCloudAccountUi } from "./cloud-account.js";
     const sheet = currentSheetConfiguration();
     const columns = (sheet?.columns || []).filter((column) => String(column.sourceHeader || "").trim());
     flushSync(() => ui.sheetViewActions._reactRoot.render(antdTree(React.createElement(SheetViewActions, {
-      sheetKey: `${drawerGid()}:${sheet?.updatedAt || 0}`,
+      sheetKey: `${drawerGid()}:${normalizedColumn(sheet?.name || state.sheetName || activeSheetName())}`,
       sheetName: sheet?.name || state.sheetName || activeSheetName() || `Hoja ${drawerGid()}`,
       columns,
       settings: { ...currentSheetViewSettings() },
@@ -1972,6 +2306,9 @@ import { createCloudAccountUi } from "./cloud-account.js";
     });
   }
 
+  const workspaceRecordMask = element("div", "workspace-record-mask");
+  workspaceRecordMask.hidden = true;
+  workspaceRecordMask.setAttribute("aria-hidden", "true");
   const drawer = element("aside", "drawer");
   drawer.setAttribute("aria-label", "Detalles de la fila");
   const panelHeader = element("header");
@@ -2120,12 +2457,13 @@ import { createCloudAccountUi } from "./cloud-account.js";
     onBlockedClose: () => { panelFrame.hidden = true; },
     createFormControl: createCloudFormControl
   }) : null;
-  panelDocument.body.append(drawer, propertyDrawer);
+  panelDocument.body.append(workspaceRecordMask, drawer, propertyDrawer);
   if (cloudAccountUi) panelDocument.body.appendChild(cloudAccountUi.element);
 
   const ui = {
     frame: panelFrame,
     drawer,
+    workspaceRecordMask,
     close,
     reopen,
     accountButton,
@@ -2161,9 +2499,46 @@ import { createCloudAccountUi } from "./cloud-account.js";
   )));
   sheetViewActions._reactRoot = createRoot(sheetViewActions);
 
+  function openWorkspaceRecordOverlay() {
+    state.workspaceRecordOverlay = true;
+    ui.workspaceRecordMask.hidden = false;
+    ui.drawer.classList.add("is-workspace-record-overlay");
+    ui.close.title = "Cerrar detalles";
+    ui.close.setAttribute("aria-label", "Cerrar detalles");
+  }
+
+  function closeWorkspaceRecordOverlay() {
+    state.workspaceRecordOverlay = false;
+    ui.workspaceRecordMask.hidden = true;
+    ui.drawer.classList.remove("is-workspace-record-overlay");
+    ui.close.title = "Cerrar";
+    ui.close.setAttribute("aria-label", "Cerrar");
+  }
+
+  async function requestWorkspaceRecordOverlayClose() {
+    if (!state.workspaceRecordOverlay) return;
+    if (state.primaryCreation) await cancelPrimaryRecordCreation();
+    if (state.primaryDrafts.size || state.relatedDrafts.size) {
+      setStatus("Guarda o cancela los cambios pendientes antes de cerrar los detalles.", "error");
+      return;
+    }
+    closeWorkspaceRecordOverlay();
+  }
+
   ui.close.addEventListener("click", () => {
+    if (state.workspaceRecordOverlay) {
+      void requestWorkspaceRecordOverlayClose();
+      return;
+    }
     ui.frame.hidden = true;
   });
+  ui.workspaceRecordMask.addEventListener("click", () => void requestWorkspaceRecordOverlayClose());
+  panelDocument.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape" || !state.workspaceRecordOverlay) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    void requestWorkspaceRecordOverlayClose();
+  }, true);
   ui.reopen.addEventListener("click", async () => {
     ui.frame.hidden = false;
     if (state.cloudRequired) {
@@ -2744,9 +3119,13 @@ import { createCloudAccountUi } from "./cloud-account.js";
   }
 
   function setCurrentSheetViewSetting(name, value) {
+    setSheetViewSetting(drawerGid(), name, value);
+  }
+
+  function setSheetViewSetting(gid, name, value) {
     if (!state.workspace) state.workspace = createWorkspace();
     if (!state.workspace.sheetViews) state.workspace.sheetViews = {};
-    const key = drawerGid();
+    const key = String(gid);
     const previous = state.workspace.sheetViews[key] || {};
     if (previous[name] === value) return;
     state.workspace.sheetViews[key] = {
@@ -4926,9 +5305,9 @@ import { createCloudAccountUi } from "./cloud-account.js";
     }
   }
 
-  function writeSheetViewValue(row, property, value, rowValues = []) {
-    const gid = currentGid();
-    const sheetName = activeSheetName() || state.sheetName || `Hoja ${gid}`;
+  function writeSheetViewValue(row, property, value, rowValues = [], target = {}) {
+    const gid = String(target.gid ?? currentGid());
+    const sheetName = String(target.sheetName || target.name || activeSheetName() || state.sheetName || `Hoja ${gid}`);
     return new Promise((resolve, reject) => {
       state.sheetViewMutationQueue.push({
         gid,

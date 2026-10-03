@@ -199,8 +199,168 @@ try {
     throw new Error(`No cargaron los campos para probar vistas: ${JSON.stringify(diagnostics)}`);
   }
 
-  const initialButtons = await cdp.evaluate(panelExpression('return panel.querySelectorAll("[data-sheet-view]").length;'));
-  if (initialButtons !== 0) throw new Error(`Las vistas aparecieron sin tipos compatibles: ${initialButtons}`);
+  const initialViews = await cdp.evaluate(panelExpression('return Array.from(panel.querySelectorAll("[data-sheet-view]"), button => button.dataset.sheetView);'));
+  if (JSON.stringify(initialViews) !== JSON.stringify(["table"])) {
+    throw new Error(`La tabla no quedo disponible como vista base: ${JSON.stringify(initialViews)}`);
+  }
+
+  await cdp.evaluate(panelExpression('panel.querySelector("[data-sheet-view=table]").click();'));
+  const tableDeadline = Date.now() + 5_000;
+  let workspaceTable;
+  while (Date.now() < tableDeadline) {
+    workspaceTable = await cdp.evaluate(`(() => {
+      const root = document.getElementById("sheets-session-probe").shadowRoot;
+      const panel = root.querySelector(".panel-frame").contentDocument;
+      return {
+        expanded: root.querySelector(".panel-frame").classList.contains("is-sheet-view-expanded"),
+        browser: Boolean(panel.querySelector("[data-workspace-browser]")),
+        documents: Array.from(panel.querySelectorAll(".workspace-browser-document-button"), item => item.textContent.trim()),
+        sheets: Array.from(panel.querySelectorAll(".workspace-browser-sheet"), item => item.textContent.trim()),
+        activeView: panel.querySelector("[data-workspace-view].ant-btn-primary")?.dataset.workspaceView || "",
+        deckRows: Array.from(panel.querySelectorAll("[data-workspace-deck-row]"), row => row.dataset.workspaceDeckRow)
+      };
+    })()`);
+    if (workspaceTable.deckRows?.length === 3) break;
+    await delay(100);
+  }
+  if (!workspaceTable.expanded || !workspaceTable.browser || workspaceTable.documents.length !== 1 || !workspaceTable.sheets.includes("Contactos") || workspaceTable.activeView !== "deck" || JSON.stringify(workspaceTable.deckRows) !== JSON.stringify(["2", "3", "4"])) {
+    throw new Error(`La vista Deck no cargo el documento, la hoja y sus registros: ${JSON.stringify(workspaceTable)}`);
+  }
+
+  await cdp.evaluate(panelExpression('panel.querySelector("[data-workspace-view=table]").click();'));
+  const workspaceRowsDeadline = Date.now() + 3_000;
+  while (Date.now() < workspaceRowsDeadline) {
+    if (await cdp.evaluate(panelExpression('return panel.querySelectorAll("[data-workspace-row]").length === 3;'))) break;
+    await delay(80);
+  }
+  await cdp.evaluate(panelExpression(`
+    const row = panel.querySelector('[data-workspace-row="2"]');
+    const cell = row.querySelectorAll('td[data-column-id]')[1];
+    cell.querySelector('.workspace-table-cell-value').click();
+  `));
+  await delay(80);
+  await cdp.evaluate(panelExpression(`
+    const row = panel.querySelector('[data-workspace-row="2"]');
+    const cell = row.querySelectorAll('td[data-column-id]')[1];
+    const input = cell.querySelector('input');
+    const setter = Object.getOwnPropertyDescriptor(panel.defaultView.HTMLInputElement.prototype, 'value').set;
+    setter.call(input, 'Ana desde Tabla');
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    cell.querySelector('[aria-label="Guardar celda"]').click();
+  `));
+  const inlineEditDeadline = Date.now() + 4_000;
+  let inlineEditPaste;
+  while (Date.now() < inlineEditDeadline) {
+    inlineEditPaste = (await cdp.evaluate("globalThis.__pastes || []")).find((paste) => paste.reference.endsWith("!B2") && paste.value === "Ana desde Tabla");
+    if (inlineEditPaste) break;
+    await delay(50);
+  }
+  if (!inlineEditPaste) throw new Error("La edicion directa de Tabla no escribio el campo en Sheets");
+  sheet.rows[0][1] = "Ana desde Tabla";
+  staleVisualizationRows[0][1] = "Ana desde Tabla";
+
+  await cdp.evaluate(panelExpression('panel.querySelector("[data-workspace-open-row=\\"2\\"]").click();'));
+  const overlayDeadline = Date.now() + 5_000;
+  let originalRecord;
+  while (Date.now() < overlayDeadline) {
+    originalRecord = await cdp.evaluate(panelExpression(`return {
+      tableVisible: Boolean(panel.querySelector('[data-workspace-browser]')),
+      originalDrawer: panel.querySelector('.drawer')?.classList.contains('is-workspace-record-overlay') || false,
+      oldDrawer: Boolean(panel.querySelector('.workspace-record-drawer')),
+      mask: !panel.querySelector('.workspace-record-mask')?.hidden,
+      fields: panel.querySelectorAll('.drawer > main .field').length,
+      row: panel.defaultView.frameElement.getRootNode().host?.dataset?.row || ''
+    };`));
+    if (originalRecord.originalDrawer && originalRecord.fields === 4 && originalRecord.row === "2") break;
+    await delay(80);
+  }
+  if (!originalRecord.tableVisible || !originalRecord.originalDrawer || originalRecord.oldDrawer || !originalRecord.mask || originalRecord.fields !== 4 || originalRecord.row !== "2") {
+    throw new Error(`Abrir no reutilizo el drawer original encima de Tabla: ${JSON.stringify(originalRecord)}`);
+  }
+
+  await cdp.evaluate(panelExpression('panel.querySelector(".drawer > header .close").click();'));
+  await delay(150);
+  const restoredTable = await cdp.evaluate(panelExpression(`return {
+    table: Boolean(panel.querySelector('[data-workspace-row="2"]')),
+    activeView: panel.querySelector('[data-workspace-view].ant-btn-primary')?.dataset.workspaceView || '',
+    overlay: panel.querySelector('.drawer')?.classList.contains('is-workspace-record-overlay') || false
+  };`));
+  if (!restoredTable.table || restoredTable.activeView !== "table" || restoredTable.overlay) {
+    throw new Error(`Cerrar detalles no devolvio a la misma vista Tabla: ${JSON.stringify(restoredTable)}`);
+  }
+
+  await cdp.evaluate(panelExpression('panel.querySelector("[data-workspace-add-row]").click();'));
+  const newRowDeadline = Date.now() + 4_000;
+  let newRowDrawer;
+  while (Date.now() < newRowDeadline) {
+    newRowDrawer = await cdp.evaluate(panelExpression(`return {
+      open: panel.querySelector('.drawer')?.classList.contains('is-workspace-record-overlay') || false,
+      fields: panel.querySelectorAll('.drawer > main .field').length,
+      creating: panel.defaultView.frameElement.getRootNode().host?.dataset?.creatingRecord || '',
+      row: panel.defaultView.frameElement.getRootNode().host?.dataset?.row || '',
+      save: Boolean(panel.querySelector('.drawer > footer .save'))
+    };`));
+    if (newRowDrawer.open && newRowDrawer.creating === "true" && newRowDrawer.row === "5") break;
+    await delay(80);
+  }
+  if (!newRowDrawer.open || newRowDrawer.fields !== 4 || newRowDrawer.creating !== "true" || newRowDrawer.row !== "5" || !newRowDrawer.save) {
+    throw new Error(`Nuevo registro no uso el formulario original sobre Tabla: ${JSON.stringify(newRowDrawer)}`);
+  }
+  await cdp.evaluate(panelExpression(`
+    const input = panel.querySelector('[data-column="2"] input');
+    const setter = Object.getOwnPropertyDescriptor(panel.defaultView.HTMLInputElement.prototype, "value").set;
+    setter.call(input, "Registro desde Tabla");
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    panel.querySelector('.drawer > footer .save').click();
+  `));
+  const createDeadline = Date.now() + 4_000;
+  let createPaste;
+  while (Date.now() < createDeadline) {
+    createPaste = (await cdp.evaluate("globalThis.__pastes || []")).find((paste) => paste.reference.endsWith("!B5") && paste.value === "Registro desde Tabla");
+    if (createPaste) break;
+    await delay(50);
+  }
+  if (!createPaste) throw new Error("Nuevo registro de Tabla no se escribio en Sheets");
+  sheet.rows.push(["", "Registro desde Tabla", "", "", "", ""]);
+  staleVisualizationRows.push(["", "Registro desde Tabla", "", "", "", ""]);
+  const createdDeadline = Date.now() + 5_000;
+  while (Date.now() < createdDeadline) {
+    const creating = await cdp.evaluate('document.getElementById("sheets-session-probe")?.dataset?.creatingRecord || ""');
+    if (!creating) break;
+    await delay(100);
+  }
+  await cdp.evaluate(panelExpression('panel.querySelector(".drawer > header .close").click();'));
+  await delay(200);
+  const clearButtonDeadline = Date.now() + 4_000;
+  while (Date.now() < clearButtonDeadline) {
+    if (await cdp.evaluate(panelExpression('return Boolean(panel.querySelector("[aria-label=\\"Limpiar fila 5\\"]"));'))) break;
+    await delay(80);
+  }
+  const clearButtonReady = await cdp.evaluate(panelExpression('return Boolean(panel.querySelector("[aria-label=\\"Limpiar fila 5\\"]"));'));
+  if (!clearButtonReady) {
+    const diagnostics = await cdp.evaluate(panelExpression(`return {
+      browser: Boolean(panel.querySelector("[data-workspace-browser]")),
+      overlay: panel.querySelector('.drawer')?.classList.contains('is-workspace-record-overlay') || false,
+      rows: Array.from(panel.querySelectorAll("[data-workspace-row]"), row => row.dataset.workspaceRow),
+      clearLabels: Array.from(panel.querySelectorAll("[aria-label^=\\"Limpiar fila\\"]"), button => button.getAttribute("aria-label"))
+    };`));
+    throw new Error(`El nuevo registro no permanecio visible en la tabla despues de guardarlo: ${JSON.stringify(diagnostics)}`);
+  }
+  await cdp.evaluate(panelExpression('panel.querySelector("[aria-label=\\"Limpiar fila 5\\"]").click();'));
+  const clearTableDeadline = Date.now() + 4_000;
+  let tableClears;
+  while (Date.now() < clearTableDeadline) {
+    tableClears = await cdp.evaluate("globalThis.__clears || []");
+    if (tableClears.some((reference) => reference.endsWith("!D5"))) break;
+    await delay(50);
+  }
+  if (!tableClears.some((reference) => reference.endsWith("!D5"))) {
+    throw new Error(`Limpiar un registro desde Tabla no limpio Sheets: ${JSON.stringify(tableClears)}`);
+  }
+  sheet.rows.pop();
+  staleVisualizationRows.pop();
+  await cdp.evaluate(panelExpression('panel.querySelector(".sheet-view-drawer > .ant-drawer-content-wrapper .ant-drawer-close")?.click();'));
+  await delay(180);
 
   async function configureColumn(column, type, options = "") {
     await cdp.evaluate(panelExpression(`
@@ -217,7 +377,7 @@ try {
 
   await configureColumn(3, "status", "Nuevo\nEn proceso\nCerrado");
   const statusButtons = await cdp.evaluate(panelExpression(`return Array.from(panel.querySelectorAll("[data-sheet-view]"), button => button.dataset.sheetView);`));
-  if (JSON.stringify(statusButtons) !== JSON.stringify(["kanban"])) {
+  if (JSON.stringify(statusButtons) !== JSON.stringify(["table", "kanban"])) {
     throw new Error(`La condicion de Kanban no se aplico: ${JSON.stringify(statusButtons)}`);
   }
 
@@ -228,7 +388,7 @@ try {
       beforeCheck: panel.querySelector(".sheet-view-actions")?.nextElementSibling?.classList.contains("save-state") || false
     };
   `));
-  if (JSON.stringify(viewButtons.views) !== JSON.stringify(["kanban", "calendar"]) || !viewButtons.beforeCheck) {
+  if (JSON.stringify(viewButtons.views) !== JSON.stringify(["table", "kanban", "calendar"]) || !viewButtons.beforeCheck) {
     throw new Error(`Los botones no quedaron antes de la validacion: ${JSON.stringify(viewButtons)}`);
   }
 
@@ -586,7 +746,7 @@ try {
     throw new Error(`El evento no abrio su fila: ${JSON.stringify(selected)}`);
   }
 
-  console.log("VISTAS_OK: Kanban y Calendario amplian con persistencia independiente y abren fichas con doble clic.");
+  console.log("VISTAS_OK: Deck y Tabla navegan, editan, crean y limpian; detalles reutiliza el drawer original; Kanban y Calendario conservan sus flujos.");
 } finally {
   cdp?.close();
   if (browser.pid) spawnSync("taskkill", ["/PID", String(browser.pid), "/T", "/F"], { stdio: "ignore", windowsHide: true });
