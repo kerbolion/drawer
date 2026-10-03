@@ -257,12 +257,13 @@ try {
         item.matches('[data-sheet-view-cancel]') ? 'cancel'
           : item.matches('[data-sheet-view-save]') ? 'save'
             : item.matches('[data-sheet-view-save-state]') ? 'state'
+              : item.matches('[data-theme-toggle]') ? 'theme'
               : item.matches('[data-close-sheet-view]') ? 'close'
                 : 'unknown'
       )
     };
   `));
-  if (!directEditors.allDirect || directEditors.actionsZIndex <= directEditors.editorZIndex || JSON.stringify(directEditors.headerActions) !== JSON.stringify(["cancel", "save", "state", "close"])) {
+  if (!directEditors.allDirect || directEditors.actionsZIndex <= directEditors.editorZIndex || JSON.stringify(directEditors.headerActions) !== JSON.stringify(["cancel", "save", "state", "theme", "close"])) {
     throw new Error(`Tabla no mantuvo los editores directos debajo de sus acciones: ${JSON.stringify(directEditors)}`);
   }
   await cdp.evaluate(viewExpression(`

@@ -16,6 +16,7 @@ import Segmented from "antd/es/segmented/index.js";
 import Select from "antd/es/select/index.js";
 import Space from "antd/es/space/index.js";
 import Spin from "antd/es/spin/index.js";
+import Switch from "antd/es/switch/index.js";
 import Tag from "antd/es/tag/index.js";
 import TimePicker from "antd/es/time-picker/index.js";
 import {
@@ -31,10 +32,12 @@ import {
   LeftOutlined,
   LinkOutlined,
   MailOutlined,
+  MoonOutlined,
   PhoneOutlined,
   PlusOutlined,
   RightOutlined,
   SearchOutlined,
+  SunOutlined,
   TableOutlined,
   UnorderedListOutlined
 } from "@ant-design/icons";
@@ -59,7 +62,13 @@ import esES from "antd/es/locale/es_ES.js";
 import dayjs from "dayjs";
 import "dayjs/locale/es.js";
 import { CircleDollarSign, Clock3, Hash, ListChecks, Type } from "lucide-react";
-import { antdTokens, workspaceThemeConfig, workspaceTokens } from "./theme.js";
+import {
+  antdTokens,
+  darkAntdTokens,
+  getWorkspaceThemeConfig,
+  workspaceDarkTokens,
+  workspaceTokens
+} from "./theme.js";
 import { createCloudAccountUi } from "./cloud-account.js";
 import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
 
@@ -105,6 +114,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
   const CACHE_PREFIX = "srd:v2";
   const CACHE_INDEX_KEY = `${CACHE_PREFIX}:index`;
   const WORKSPACE_PREFIX = "srd:workspace:v1";
+  const THEME_STORAGE_KEY = "srd:theme-mode";
   const MAX_PERSISTENT_ENTRIES = 120;
   const SHEET_MEMORY_TTL = 5_000;
   const FIELD_TYPES = [
@@ -134,6 +144,23 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     "#d3adf7",
     "#d9d9d9"
   ];
+
+  function locallyStoredThemeMode() {
+    try {
+      return globalThis.localStorage?.getItem(THEME_STORAGE_KEY) === "dark" ? "dark" : "light";
+    } catch {
+      return "light";
+    }
+  }
+
+  let activeThemeMode = locallyStoredThemeMode();
+  const themeListeners = new Set();
+  const themeSnapshot = () => activeThemeMode;
+  const subscribeToTheme = (listener) => {
+    themeListeners.add(listener);
+    return () => themeListeners.delete(listener);
+  };
+
   const state = {
     row: null,
     gid: null,
@@ -189,21 +216,48 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
   host.id = "sheets-session-probe";
   host.dataset.status = "starting";
   host.dataset.themeSource = "workspace-antd";
+  host.dataset.theme = activeThemeMode;
   host.dataset.writeVerification = "idle";
   document.documentElement.appendChild(host);
+
+  const googleThemeStyles = document.createElement("style");
+  googleThemeStyles.id = "sheets-row-drawer-google-theme";
+  googleThemeStyles.textContent = `
+    html[data-srd-theme="dark"] { background: #202124 !important; color-scheme: dark; }
+    html[data-srd-theme="dark"] > body {
+      background: #ffffff !important;
+      filter: invert(90%) hue-rotate(180deg);
+    }
+    html[data-srd-theme="dark"] > body img,
+    html[data-srd-theme="dark"] > body video {
+      filter: invert(100%) hue-rotate(180deg);
+    }
+  `;
+  (document.head || document.documentElement).appendChild(googleThemeStyles);
+  document.documentElement.dataset.srdTheme = activeThemeMode;
 
   const shadow = host.attachShadow({ mode: "open" });
   const shellStyles = new CSSStyleSheet();
   shellStyles.replaceSync(`
-    :host { all: initial; }
+    :host {
+      all: initial;
+      --srd-frame-bg: ${antdTokens.colorBgElevated};
+      --srd-view-bg: ${antdTokens.colorBgContainer};
+      --srd-frame-shadow: ${antdTokens.boxShadowSecondary};
+    }
+    :host([data-theme="dark"]) {
+      --srd-frame-bg: ${darkAntdTokens.colorBgElevated};
+      --srd-view-bg: ${darkAntdTokens.colorBgContainer};
+      --srd-frame-shadow: ${darkAntdTokens.boxShadowSecondary};
+    }
     .panel-frame {
       position: fixed; inset: 0 0 0 auto; z-index: 2147483647;
-      width: min(720px, 94vw); height: 100vh; border: 0; background: ${antdTokens.colorBgElevated};
-      box-shadow: ${antdTokens.boxShadowSecondary};
+      width: min(720px, 94vw); height: 100vh; border: 0; background: var(--srd-frame-bg);
+      box-shadow: var(--srd-frame-shadow);
     }
     .sheet-view-frame {
       position: fixed; inset: 0; z-index: 2147483646;
-      width: 100vw; height: 100vh; border: 0; background: ${antdTokens.colorBgContainer};
+      width: 100vw; height: 100vh; border: 0; background: var(--srd-view-bg);
     }
     .panel-frame[hidden], .sheet-view-frame[hidden], .reopen[hidden] { display: none; }
     .reopen {
@@ -341,6 +395,61 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
   window.addEventListener("scroll", scheduleLauncherPlacement, { capture: true, passive: true });
   scheduleLauncherPlacement();
 
+  function panelThemeVariables(tokens, surfaces) {
+    return `
+      --workspace-bg: ${surfaces.bg};
+      --workspace-surface: ${surfaces.surface};
+      --workspace-surface-muted: ${surfaces.surfaceMuted};
+      --workspace-surface-subtle: ${surfaces.surfaceSubtle};
+      --workspace-surface-raised: ${surfaces.surfaceRaised};
+      --workspace-border: ${surfaces.border};
+      --workspace-border-soft: ${surfaces.borderSoft};
+      --workspace-border-subtle: ${surfaces.borderSubtle};
+      --workspace-text: ${surfaces.text};
+      --workspace-text-body: ${surfaces.textBody};
+      --workspace-text-secondary: ${surfaces.textSecondary};
+      --workspace-text-muted: ${surfaces.textMuted};
+      --workspace-text-disabled: ${surfaces.textDisabled};
+      --workspace-primary: ${surfaces.primary};
+      --workspace-primary-border: ${surfaces.primaryBorder};
+      --workspace-primary-soft: ${surfaces.primarySoft};
+      --workspace-primary-hover: ${surfaces.primaryHover};
+      --workspace-shadow: ${surfaces.shadow};
+      --workspace-shadow-soft: ${surfaces.shadowSoft};
+      --antd-bg-container: ${tokens.colorBgContainer};
+      --antd-bg-container-disabled: ${tokens.colorBgContainerDisabled};
+      --antd-bg-elevated: ${tokens.colorBgElevated};
+      --antd-border: ${tokens.colorBorder};
+      --antd-border-secondary: ${tokens.colorBorderSecondary};
+      --antd-error: ${tokens.colorError};
+      --antd-error-bg: ${tokens.colorErrorBg};
+      --antd-error-border: ${tokens.colorErrorBorder};
+      --antd-error-text: ${tokens.colorErrorText};
+      --antd-fill-quaternary: ${tokens.colorFillQuaternary};
+      --antd-fill-tertiary: ${tokens.colorFillTertiary};
+      --antd-info-bg: ${tokens.colorInfoBg};
+      --antd-info-border: ${tokens.colorInfoBorder};
+      --antd-info-text: ${tokens.colorInfoText};
+      --antd-primary: ${tokens.colorPrimary};
+      --antd-primary-bg: ${tokens.colorPrimaryBg};
+      --antd-primary-bg-hover: ${tokens.colorPrimaryBgHover};
+      --antd-primary-hover: ${tokens.colorPrimaryHover};
+      --antd-success: ${tokens.colorSuccess};
+      --antd-success-bg: ${tokens.colorSuccessBg};
+      --antd-success-border: ${tokens.colorSuccessBorder};
+      --antd-success-text: ${tokens.colorSuccessText};
+      --antd-text: ${tokens.colorText};
+      --antd-text-disabled: ${tokens.colorTextDisabled};
+      --antd-text-heading: ${tokens.colorTextHeading};
+      --antd-text-secondary: ${tokens.colorTextSecondary};
+      --antd-text-tertiary: ${tokens.colorTextTertiary};
+      --antd-white: ${tokens.colorWhite};
+      --antd-control-outline: ${tokens.controlOutline};
+      --antd-shadow-secondary: ${tokens.boxShadowSecondary};
+      --antd-shadow-tertiary: ${tokens.boxShadowTertiary};
+    `;
+  }
+
   const panelDocument = panelFrame.contentDocument;
   installTrustedHtmlBridge(panelFrame.contentWindow);
   panelDocument.documentElement.lang = "es";
@@ -349,36 +458,22 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
   panelStyles.textContent = `
     :root {
       color-scheme: light;
-      --workspace-bg: ${workspaceTokens.bg};
-      --workspace-surface: ${workspaceTokens.surface};
-      --workspace-surface-muted: ${workspaceTokens.surfaceMuted};
-      --workspace-surface-subtle: ${workspaceTokens.surfaceSubtle};
-      --workspace-surface-raised: ${workspaceTokens.surfaceRaised};
-      --workspace-border: ${workspaceTokens.border};
-      --workspace-border-soft: ${workspaceTokens.borderSoft};
-      --workspace-border-subtle: ${workspaceTokens.borderSubtle};
-      --workspace-text: ${workspaceTokens.text};
-      --workspace-text-body: ${workspaceTokens.textBody};
-      --workspace-text-secondary: ${workspaceTokens.textSecondary};
-      --workspace-text-muted: ${workspaceTokens.textMuted};
-      --workspace-text-disabled: ${workspaceTokens.textDisabled};
-      --workspace-primary: ${workspaceTokens.primary};
-      --workspace-primary-border: ${workspaceTokens.primaryBorder};
-      --workspace-primary-soft: ${workspaceTokens.primarySoft};
-      --workspace-primary-hover: ${workspaceTokens.primaryHover};
-      --workspace-shadow: ${workspaceTokens.shadow};
-      --workspace-shadow-soft: ${workspaceTokens.shadowSoft};
+      ${panelThemeVariables(antdTokens, workspaceTokens)}
+    }
+    :root[data-theme="dark"] {
+      color-scheme: dark;
+      ${panelThemeVariables(darkAntdTokens, workspaceDarkTokens)}
     }
     *, *::before, *::after { box-sizing: border-box; }
     html, body {
       width: 100%; height: 100%; margin: 0; overflow: hidden;
-      background: ${antdTokens.colorBgContainer}; color: ${antdTokens.colorText};
+      background: var(--antd-bg-container); color: var(--antd-text);
       font: ${antdTokens.fontSize}px/${antdTokens.lineHeight} ${antdTokens.fontFamily};
     }
     button, input, textarea, select { font: inherit; }
     .drawer {
-      width: 100%; height: 100%; background: ${antdTokens.colorBgContainer}; color: ${antdTokens.colorText};
-      border-left: 1px solid ${antdTokens.colorBorder};
+      width: 100%; height: 100%; background: var(--antd-bg-container); color: var(--antd-text);
+      border-left: 1px solid var(--antd-border);
       display: flex; flex-direction: column;
     }
     .workspace-record-mask {
@@ -388,18 +483,18 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     .workspace-record-mask[hidden] { display: none; }
     .drawer.is-workspace-record-overlay {
       position: fixed; z-index: 1100; inset: 0 0 0 auto; width: min(720px, 100%);
-      box-shadow: ${antdTokens.boxShadowSecondary}; animation: workspace-record-enter 180ms cubic-bezier(.2, 0, 0, 1);
+      box-shadow: var(--antd-shadow-secondary); animation: workspace-record-enter 180ms cubic-bezier(.2, 0, 0, 1);
     }
     @keyframes workspace-record-mask-enter { from { opacity: 0; } }
     @keyframes workspace-record-enter { from { transform: translateX(100%); } }
     .drawer > header {
       display: flex; align-items: center; justify-content: space-between; gap: 12px;
-      padding: 16px 24px; border-bottom: 1px solid ${antdTokens.colorBorderSecondary};
+      padding: 16px 24px; border-bottom: 1px solid var(--antd-border-secondary);
     }
     .drawer-title { min-width: 0; }
-    .drawer-title h1 { margin: 0; color: ${antdTokens.colorTextHeading}; font-size: 18px; line-height: 1.25; }
-    .drawer-title p { margin: 3px 0 0; color: ${antdTokens.colorTextTertiary}; font-size: 12px; line-height: 1.35; }
-    .drawer-title a { color: ${antdTokens.colorText}; font-weight: 700; text-decoration: none; }
+    .drawer-title h1 { margin: 0; color: var(--antd-text-heading); font-size: 18px; line-height: 1.25; }
+    .drawer-title p { margin: 3px 0 0; color: var(--antd-text-tertiary); font-size: 12px; line-height: 1.35; }
+    .drawer-title a { color: var(--antd-text); font-weight: 700; text-decoration: none; }
     .drawer-title a:hover { text-decoration: underline; text-underline-offset: 3px; }
     .header-actions {
       display: flex; flex: 0 0 auto; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px;
@@ -407,20 +502,21 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     .sheet-view-actions { display: inline-flex; align-items: center; gap: 2px; }
     .sheet-view-actions .ant-btn { color: var(--workspace-text-muted); }
     .sheet-view-actions .ant-btn:hover { color: var(--workspace-primary); }
+    .theme-toggle { display: inline-flex; align-items: center; justify-content: center; }
     .icon-button {
       width: ${antdTokens.controlHeight}px; height: ${antdTokens.controlHeight}px;
       border: 0; border-radius: ${antdTokens.borderRadius}px; background: transparent;
-      color: ${antdTokens.colorTextSecondary}; font-size: 20px; cursor: pointer;
+      color: var(--antd-text-secondary); font-size: 20px; cursor: pointer;
     }
-    .icon-button:hover { background: ${antdTokens.colorFillTertiary}; color: ${antdTokens.colorText}; }
+    .icon-button:hover { background: var(--antd-fill-tertiary); color: var(--antd-text); }
     .save-state {
       align-items: center; display: inline-flex; width: 28px; height: 28px; justify-content: center;
       font-size: 17px; line-height: 1; transition: color ${antdTokens.motionDurationMid};
     }
-    .save-state.is-saving { color: ${antdTokens.colorPrimary}; }
+    .save-state.is-saving { color: var(--antd-primary); }
     .save-state.is-saved { color: #22c55e; }
-    .save-state.is-pending { color: ${antdTokens.colorTextDisabled}; }
-    .save-state.is-error { color: ${antdTokens.colorError}; }
+    .save-state.is-pending { color: var(--antd-text-disabled); }
+    .save-state.is-error { color: var(--antd-error); }
     .save-state-check, .save-state-spinner, .save-state-error { display: none; }
     .save-state.is-saving .save-state-spinner {
       display: block; width: 16px; height: 16px; border: 2px solid currentColor;
@@ -443,12 +539,12 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
       padding: 20px 28px 32px; background: var(--workspace-bg);
     }
     .status {
-      margin-bottom: 14px; padding: 9px 12px; border: 1px solid ${antdTokens.colorSuccessBorder};
-      border-radius: ${antdTokens.borderRadiusLG}px; background: ${antdTokens.colorSuccessBg}; color: ${antdTokens.colorSuccessText};
+      margin-bottom: 14px; padding: 9px 12px; border: 1px solid var(--antd-success-border);
+      border-radius: ${antdTokens.borderRadiusLG}px; background: var(--antd-success-bg); color: var(--antd-success-text);
       font-size: 12px;
     }
-    .status.error { border-color: ${antdTokens.colorErrorBorder}; background: ${antdTokens.colorErrorBg}; color: ${antdTokens.colorErrorText}; }
-    .status.busy { border-color: ${antdTokens.colorInfoBorder}; background: ${antdTokens.colorInfoBg}; color: ${antdTokens.colorInfoText}; }
+    .status.error { border-color: var(--antd-error-border); background: var(--antd-error-bg); color: var(--antd-error-text); }
+    .status.busy { border-color: var(--antd-info-border); background: var(--antd-info-bg); color: var(--antd-info-text); }
     .status[hidden], .related-status[hidden] { display: none; }
     .empty-state {
       min-height: 340px; padding: 64px 20px; display: flex; align-items: center; justify-content: center;
@@ -483,11 +579,11 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     .field-configure {
       display: inline-flex; flex: 0 0 auto; align-items: center; justify-content: center;
       width: 30px; height: 30px; border: 0; border-radius: 999px;
-      background: ${antdTokens.colorPrimaryBg}; color: ${antdTokens.colorPrimary}; cursor: pointer;
+      background: var(--antd-primary-bg); color: var(--antd-primary); cursor: pointer;
       line-height: 1; opacity: 1; transition: color ${antdTokens.motionDurationMid}, background ${antdTokens.motionDurationMid};
     }
     .field-configure svg { display: block; width: 14px; height: 14px; }
-    .field-configure:hover, .field-configure:focus-visible { background: ${antdTokens.colorPrimaryBgHover}; color: ${antdTokens.colorPrimaryHover}; }
+    .field-configure:hover, .field-configure:focus-visible { background: var(--antd-primary-bg-hover); color: var(--antd-primary-hover); }
     .header-type { display: inline-flex; align-items: center; justify-content: center; }
     .field-editor { min-width: 0; padding-top: 0; }
     .antd-field-control { width: 100%; min-width: 0; }
@@ -499,12 +595,12 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     .fields[aria-busy="true"] { cursor: progress; }
     .property-drawer {
       position: fixed; inset: 0; z-index: 20; display: flex; flex-direction: column;
-      background: ${antdTokens.colorBgContainer}; animation: property-enter ${antdTokens.motionDurationMid} ease-out;
+      background: var(--antd-bg-container); animation: property-enter ${antdTokens.motionDurationMid} ease-out;
     }
     .property-drawer[hidden] { display: none; }
     .account-drawer {
       position: fixed; inset: 0; z-index: 30; display: flex; flex-direction: column;
-      background: ${antdTokens.colorBgContainer}; animation: property-enter ${antdTokens.motionDurationMid} ease-out;
+      background: var(--antd-bg-container); animation: property-enter ${antdTokens.motionDurationMid} ease-out;
     }
     .account-drawer[hidden] { display: none; }
     .cloud-account-body { max-width: 820px; width: 100%; margin: 0 auto; }
@@ -520,8 +616,8 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     .cloud-control-host { width: 100%; min-width: 0; font-weight: 400; }
     .cloud-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 4px; }
     .cloud-message { margin-bottom: 14px; padding: 9px 12px; border: 1px solid; border-radius: 6px; font-size: 12px; }
-    .cloud-message.error { border-color: ${antdTokens.colorErrorBorder}; background: ${antdTokens.colorErrorBg}; color: ${antdTokens.colorErrorText}; }
-    .cloud-message.success { border-color: ${antdTokens.colorSuccessBorder}; background: ${antdTokens.colorSuccessBg}; color: ${antdTokens.colorSuccessText}; }
+    .cloud-message.error { border-color: var(--antd-error-border); background: var(--antd-error-bg); color: var(--antd-error-text); }
+    .cloud-message.success { border-color: var(--antd-success-border); background: var(--antd-success-bg); color: var(--antd-success-text); }
     .cloud-account-summary {
       display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 12px;
       margin-bottom: 14px; padding: 14px 16px; border: 1px solid var(--workspace-border); border-radius: 8px;
@@ -532,10 +628,10 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     .cloud-account-summary > div span { color: var(--workspace-text-muted); font-size: 12px; }
     .cloud-avatar {
       display: inline-flex; width: 38px; height: 38px; align-items: center; justify-content: center;
-      border-radius: 50%; background: ${antdTokens.colorPrimaryBg}; color: ${antdTokens.colorPrimary}; font-weight: 700;
+      border-radius: 50%; background: var(--antd-primary-bg); color: var(--antd-primary); font-weight: 700;
     }
-    .cloud-status { padding: 3px 8px; border-radius: 999px; background: ${antdTokens.colorSuccessBg}; color: ${antdTokens.colorSuccessText}; font-size: 11px; }
-    .cloud-status.suspended { background: ${antdTokens.colorErrorBg}; color: ${antdTokens.colorErrorText}; }
+    .cloud-status { padding: 3px 8px; border-radius: 999px; background: var(--antd-success-bg); color: var(--antd-success-text); font-size: 11px; }
+    .cloud-status.suspended { background: var(--antd-error-bg); color: var(--antd-error-text); }
     .cloud-tabs { display: flex; gap: 4px; margin-bottom: 14px; border-bottom: 1px solid var(--workspace-border); }
     .cloud-tabs button { border: 0; border-bottom: 2px solid transparent; padding: 8px 10px; background: transparent; color: var(--workspace-text-muted); cursor: pointer; }
     .cloud-tabs button.is-active { border-bottom-color: var(--workspace-primary); color: var(--workspace-primary); font-weight: 600; }
@@ -549,11 +645,11 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     .account-button svg { width: 17px; height: 17px; }
     .account-button[data-authenticated="true"]::after {
       content: ""; position: absolute; right: 4px; bottom: 4px; width: 6px; height: 6px;
-      border: 1px solid ${antdTokens.colorBgContainer}; border-radius: 50%; background: ${antdTokens.colorSuccess};
+      border: 1px solid var(--antd-bg-container); border-radius: 50%; background: var(--antd-success);
     }
     .property-header {
       display: flex; align-items: center; justify-content: space-between; gap: 16px;
-      padding: 16px 24px; border-bottom: 1px solid ${antdTokens.colorBorderSecondary};
+      padding: 16px 24px; border-bottom: 1px solid var(--antd-border-secondary);
     }
     .property-header h2 { margin: 0; font-size: 16px; }
     .property-actions { display: flex; gap: 8px; }
@@ -561,45 +657,45 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
       min-height: ${antdTokens.controlHeight}px; border-radius: ${antdTokens.borderRadius}px;
       padding: 4px 15px; font-weight: 500; cursor: pointer;
     }
-    .secondary-button { border: 1px solid ${antdTokens.colorBorder}; background: ${antdTokens.colorBgContainer}; color: ${antdTokens.colorText}; }
-    .secondary-button:hover { border-color: ${antdTokens.colorPrimary}; color: ${antdTokens.colorPrimary}; }
-    .primary-button { border: 1px solid ${antdTokens.colorPrimary}; background: ${antdTokens.colorPrimary}; color: ${antdTokens.colorWhite}; }
-    .primary-button:hover { border-color: ${antdTokens.colorPrimaryHover}; background: ${antdTokens.colorPrimaryHover}; }
-    .property-body { flex: 1; overflow: auto; padding: 24px; background: ${antdTokens.colorBgContainer}; }
+    .secondary-button { border: 1px solid var(--antd-border); background: var(--antd-bg-container); color: var(--antd-text); }
+    .secondary-button:hover { border-color: var(--antd-primary); color: var(--antd-primary); }
+    .primary-button { border: 1px solid var(--antd-primary); background: var(--antd-primary); color: var(--antd-white); }
+    .primary-button:hover { border-color: var(--antd-primary-hover); background: var(--antd-primary-hover); }
+    .property-body { flex: 1; overflow: auto; padding: 24px; background: var(--antd-bg-container); }
     .property-form-item { margin-bottom: 22px; }
-    .property-form-item > label { display: block; margin-bottom: 8px; color: ${antdTokens.colorText}; font-weight: 600; }
+    .property-form-item > label { display: block; margin-bottom: 8px; color: var(--antd-text); font-weight: 600; }
     .property-input {
-      width: 100%; min-height: ${antdTokens.controlHeightLG}px; border: 1px solid ${antdTokens.colorBorder};
-      border-radius: ${antdTokens.borderRadius}px; padding: 7px 11px; background: ${antdTokens.colorBgContainer};
-      color: ${antdTokens.colorText};
+      width: 100%; min-height: ${antdTokens.controlHeightLG}px; border: 1px solid var(--antd-border);
+      border-radius: ${antdTokens.borderRadius}px; padding: 7px 11px; background: var(--antd-bg-container);
+      color: var(--antd-text);
     }
     textarea.property-input { min-height: 116px; resize: vertical; line-height: 1.5; }
-    .property-input:hover { border-color: ${antdTokens.colorPrimaryHover}; }
-    .property-input:focus { border-color: ${antdTokens.colorPrimary}; outline: 0; box-shadow: 0 0 0 ${antdTokens.controlOutlineWidth}px ${antdTokens.controlOutline}; }
+    .property-input:hover { border-color: var(--antd-primary-hover); }
+    .property-input:focus { border-color: var(--antd-primary); outline: 0; box-shadow: 0 0 0 ${antdTokens.controlOutlineWidth}px var(--antd-control-outline); }
     .property-type-host { width: 100%; }
     .property-type-option { display: inline-flex; align-items: center; gap: 8px; }
     .property-type-option-icon {
       display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px;
-      border-radius: 50%; background: ${antdTokens.colorPrimaryBg}; color: ${antdTokens.colorPrimary};
+      border-radius: 50%; background: var(--antd-primary-bg); color: var(--antd-primary);
     }
     .property-type-option-icon svg { display: block; width: 14px; height: 14px; }
-    .property-help { margin-top: 6px; color: ${antdTokens.colorTextTertiary}; font-size: 12px; }
+    .property-help { margin-top: 6px; color: var(--antd-text-tertiary); font-size: 12px; }
     .property-protection {
-      padding: 10px 12px; border: 1px solid ${antdTokens.colorBorder}; border-radius: ${antdTokens.borderRadius}px;
-      background: ${antdTokens.colorFillQuaternary};
+      padding: 10px 12px; border: 1px solid var(--antd-border); border-radius: ${antdTokens.borderRadius}px;
+      background: var(--antd-fill-quaternary);
     }
     .property-protection .property-help { margin: 4px 0 0 24px; }
     .property-random-id {
       display: grid; gap: 12px; margin-bottom: 22px; padding: 12px;
-      border: 1px solid ${antdTokens.colorBorder}; border-radius: ${antdTokens.borderRadius}px;
-      background: ${antdTokens.colorFillQuaternary};
+      border: 1px solid var(--antd-border); border-radius: ${antdTokens.borderRadius}px;
+      background: var(--antd-fill-quaternary);
     }
     .property-random-id-length { display: grid; grid-template-columns: minmax(0, 1fr) 120px; align-items: center; gap: 12px; }
-    .property-random-id-length > span { color: ${antdTokens.colorText}; font-weight: 600; }
+    .property-random-id-length > span { color: var(--antd-text); font-weight: 600; }
     .property-random-id-length .ant-input-number { width: 100%; }
     .property-random-id .property-help { margin: -4px 0 0 24px; }
     .property-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
-    .option-editor { border: 1px solid ${antdTokens.colorBorder}; border-radius: ${antdTokens.borderRadius}px; padding: 10px; }
+    .option-editor { border: 1px solid var(--antd-border); border-radius: ${antdTokens.borderRadius}px; padding: 10px; }
     .option-editor-header {
       display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; font-weight: 700;
     }
@@ -615,7 +711,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     .option-tag.ant-tag { margin-inline-end: 0; }
     .property-source {
       margin-bottom: 22px; border-radius: ${antdTokens.borderRadius}px; padding: 10px 12px;
-      background: ${antdTokens.colorFillQuaternary}; color: ${antdTokens.colorTextSecondary}; font-size: 12px;
+      background: var(--antd-fill-quaternary); color: var(--antd-text-secondary); font-size: 12px;
     }
     @keyframes property-enter { from { opacity: 0; transform: translateX(18px); } to { opacity: 1; transform: translateX(0); } }
     .related { min-width: 0; max-width: 100%; margin-top: 14px; }
@@ -667,7 +763,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     }
     .property-type-icon {
       display: inline-flex; align-items: center; justify-content: center; border-radius: 999px;
-      background: ${antdTokens.colorPrimaryBg}; color: ${antdTokens.colorPrimary};
+      background: var(--antd-primary-bg); color: var(--antd-primary);
     }
     .related-record-field-icon { grid-row: 1 / span 2; width: 34px; min-height: 34px; }
     .related-record-field-icon svg { width: 12px; height: 12px; }
@@ -695,7 +791,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     .related-drawer-title { margin: 12px 0 22px; color: var(--workspace-text); font-size: 28px; line-height: 1.15; overflow-wrap: anywhere; }
     .related-drawer-fields { width: 100%; }
     .related-field-icon { cursor: default; }
-    .related-field-icon:hover { background: ${antdTokens.colorPrimaryBg}; color: ${antdTokens.colorPrimary}; }
+    .related-field-icon:hover { background: var(--antd-primary-bg); color: var(--antd-primary); }
     .related-drawer-footer { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 8px; }
     .related-drawer-footer .ant-btn { min-height: ${antdTokens.controlHeightLG}px; font-weight: 600; }
     .relation-pagination { display: flex; justify-content: center; padding: 12px 14px 0; }
@@ -876,24 +972,24 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     }
     .calendar-item:hover { background: var(--workspace-primary-hover); }
     .workspace-date-picker-popup .ant-picker-panel-container { max-width: calc(100vw - 16px); }
-    .drawer > footer { min-width: 0; padding: 12px 24px 16px; border-top: 1px solid ${antdTokens.colorBorderSecondary}; background: ${antdTokens.colorBgContainer}; }
-    .meta { margin-bottom: 9px; color: ${antdTokens.colorTextTertiary}; font-size: 11px; }
+    .drawer > footer { min-width: 0; padding: 12px 24px 16px; border-top: 1px solid var(--antd-border-secondary); background: var(--antd-bg-container); }
+    .meta { margin-bottom: 9px; color: var(--antd-text-tertiary); font-size: 11px; }
     .footer-actions { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 8px; }
     .cancel, .save {
       min-height: ${antdTokens.controlHeightLG}px; border-radius: ${antdTokens.borderRadius}px;
       padding: 6px 15px; font-weight: 600; cursor: pointer; transition: color ${antdTokens.motionDurationMid}, border-color ${antdTokens.motionDurationMid}, background ${antdTokens.motionDurationMid};
     }
     .cancel {
-      min-width: 112px; border: 1px solid ${antdTokens.colorBorder}; background: ${antdTokens.colorBgContainer};
-      color: ${antdTokens.colorText};
+      min-width: 112px; border: 1px solid var(--antd-border); background: var(--antd-bg-container);
+      color: var(--antd-text);
     }
-    .cancel:hover { border-color: ${antdTokens.colorPrimary}; color: ${antdTokens.colorPrimary}; }
+    .cancel:hover { border-color: var(--antd-primary); color: var(--antd-primary); }
     .save {
-      width: 100%; border: 1px solid ${antdTokens.colorPrimary};
-      background: ${antdTokens.colorPrimary}; color: ${antdTokens.colorWhite}; box-shadow: ${antdTokens.boxShadowTertiary};
+      width: 100%; border: 1px solid var(--antd-primary);
+      background: var(--antd-primary); color: var(--antd-white); box-shadow: var(--antd-shadow-tertiary);
     }
-    .save:hover { background: ${antdTokens.colorPrimaryHover}; border-color: ${antdTokens.colorPrimaryHover}; }
-    .cancel:disabled, .save:disabled { border-color: ${antdTokens.colorBgContainerDisabled}; background: ${antdTokens.colorBgContainerDisabled}; color: ${antdTokens.colorTextDisabled}; box-shadow: none; cursor: default; }
+    .save:hover { background: var(--antd-primary-hover); border-color: var(--antd-primary-hover); }
+    .cancel:disabled, .save:disabled { border-color: var(--antd-bg-container-disabled); background: var(--antd-bg-container-disabled); color: var(--antd-text-disabled); box-shadow: none; cursor: default; }
     @media (max-width: 640px) {
       .drawer > main { padding: 16px 14px 24px; }
       .drawer > header, .drawer > footer { padding-inline: 16px; }
@@ -936,6 +1032,73 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
   const sheetViewRoot = sheetViewDocument.createElement("div");
   sheetViewRoot.className = "sheet-view-root";
   sheetViewDocument.body.appendChild(sheetViewRoot);
+
+  function persistThemeMode(mode) {
+    try {
+      globalThis.localStorage?.setItem(THEME_STORAGE_KEY, mode);
+    } catch {}
+    try {
+      const area = storageArea();
+      if (area) void area.set({ [THEME_STORAGE_KEY]: mode });
+    } catch {}
+  }
+
+  function applyThemeMode(mode, { persist = false } = {}) {
+    const nextMode = mode === "dark" ? "dark" : "light";
+    const changed = nextMode !== activeThemeMode;
+    activeThemeMode = nextMode;
+    host.dataset.theme = nextMode;
+    document.documentElement.dataset.srdTheme = nextMode;
+    for (const frameDocument of [panelDocument, sheetViewDocument]) {
+      frameDocument.documentElement.dataset.theme = nextMode;
+      frameDocument.body.dataset.theme = nextMode;
+    }
+    if (persist) persistThemeMode(nextMode);
+    if (changed) {
+      for (const listener of themeListeners) listener();
+    }
+  }
+
+  async function hydrateThemeMode() {
+    const area = storageArea();
+    if (!area) return;
+    try {
+      const stored = await area.get(THEME_STORAGE_KEY);
+      const mode = stored?.[THEME_STORAGE_KEY];
+      if (mode === "dark" || mode === "light") applyThemeMode(mode);
+    } catch {}
+  }
+
+  function ThemeScope({ child, targetDocument }) {
+    const mode = React.useSyncExternalStore(subscribeToTheme, themeSnapshot, themeSnapshot);
+    return React.createElement(
+      StyleProvider,
+      { container: targetDocument.head },
+      React.createElement(
+        ConfigProvider,
+        {
+          theme: getWorkspaceThemeConfig(mode === "dark"),
+          locale: workspaceLocale,
+          getPopupContainer: () => targetDocument.body
+        },
+        child
+      )
+    );
+  }
+
+  applyThemeMode(activeThemeMode);
+  void hydrateThemeMode();
+
+  window.addEventListener("storage", (event) => {
+    if (event.key !== THEME_STORAGE_KEY) return;
+    if (event.newValue === "dark" || event.newValue === "light") applyThemeMode(event.newValue);
+  });
+  try {
+    globalThis.chrome?.storage?.onChanged?.addListener((changes, areaName) => {
+      const mode = areaName === "local" ? changes?.[THEME_STORAGE_KEY]?.newValue : null;
+      if (mode === "dark" || mode === "light") applyThemeMode(mode);
+    });
+  } catch {}
 
   function element(tag, className, text) {
     const node = panelDocument.createElement(tag);
@@ -1092,35 +1255,26 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
   }
 
   function antdTree(child) {
-    return React.createElement(
-      StyleProvider,
-      { container: panelDocument.head },
-      React.createElement(
-        ConfigProvider,
-        {
-          theme: workspaceThemeConfig,
-          locale: workspaceLocale,
-          getPopupContainer: () => panelDocument.body
-        },
-        child
-      )
-    );
+    return React.createElement(ThemeScope, { child, targetDocument: panelDocument });
   }
 
   function sheetViewTree(child) {
-    return React.createElement(
-      StyleProvider,
-      { container: sheetViewDocument.head },
-      React.createElement(
-        ConfigProvider,
-        {
-          theme: workspaceThemeConfig,
-          locale: workspaceLocale,
-          getPopupContainer: () => sheetViewDocument.body
-        },
-        child
-      )
-    );
+    return React.createElement(ThemeScope, { child, targetDocument: sheetViewDocument });
+  }
+
+  function ThemeToggleControl() {
+    const mode = React.useSyncExternalStore(subscribeToTheme, themeSnapshot, themeSnapshot);
+    const darkMode = mode === "dark";
+    return React.createElement(Switch, {
+      size: "small",
+      checked: darkMode,
+      checkedChildren: React.createElement(MoonOutlined),
+      unCheckedChildren: React.createElement(SunOutlined),
+      title: darkMode ? "Cambiar a modo claro" : "Cambiar a modo oscuro",
+      "aria-label": darkMode ? "Cambiar a modo claro" : "Cambiar a modo oscuro",
+      "data-theme-toggle": mode,
+      onChange: (checked) => applyThemeMode(checked ? "dark" : "light", { persist: true })
+    });
   }
 
   function setSheetViewHostOpen(open, title = "Vista de la hoja") {
@@ -2302,6 +2456,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
                 React.createElement(CheckCircleOutlined, { className: "save-state-check", "aria-hidden": "true" }),
                 React.createElement("span", { className: "save-state-error", "aria-hidden": "true" }, "!")
               ),
+              React.createElement(ThemeToggleControl),
               React.createElement(Button, {
                 type: "text",
                 shape: "circle",
@@ -2547,6 +2702,9 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
   drawerTitle.append(title, byline);
   const headerActions = element("div", "header-actions");
   const sheetViewActions = element("div", "sheet-view-actions");
+  const themeToggle = element("div", "theme-toggle");
+  themeToggle._reactRoot = createRoot(themeToggle);
+  flushSync(() => themeToggle._reactRoot.render(antdTree(React.createElement(ThemeToggleControl))));
   const accountButton = element("button", "icon-button account-button");
   accountButton.type = "button";
   accountButton.title = "Cuenta";
@@ -2602,7 +2760,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
   close.type = "button";
   close.title = "Cerrar";
   close.setAttribute("aria-label", "Cerrar");
-  headerActions.append(sheetViewActions, saveState, accountButton, close);
+  headerActions.append(sheetViewActions, saveState, themeToggle, accountButton, close);
   panelHeader.append(drawerTitle, headerActions);
 
   const main = element("main");

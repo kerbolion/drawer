@@ -279,6 +279,66 @@ try {
     throw new Error(`El botón lateral no volvió a abrir el drawer: ${JSON.stringify(reopenedDrawer)}`);
   }
 
+  const darkTheme = await cdp.evaluate(`(async () => {
+    const host = document.getElementById("sheets-session-probe");
+    const frame = host.shadowRoot.querySelector(".panel-frame");
+    const sheetViewFrame = host.shadowRoot.querySelector(".sheet-view-frame");
+    const panel = frame.contentDocument;
+    const toggle = panel.querySelector("[data-theme-toggle]");
+    toggle.click();
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    return {
+      hostTheme: host.dataset.theme,
+      googleTheme: document.documentElement.dataset.srdTheme,
+      panelTheme: panel.documentElement.dataset.theme,
+      sheetViewTheme: sheetViewFrame.contentDocument.documentElement.dataset.theme,
+      toggleTheme: panel.querySelector("[data-theme-toggle]")?.dataset.themeToggle || null,
+      panelBackground: getComputedStyle(panel.body).backgroundColor,
+      sheetViewBackground: getComputedStyle(sheetViewFrame.contentDocument.body).backgroundColor,
+      googleFilter: getComputedStyle(document.body).filter,
+      storedTheme: localStorage.getItem("srd:theme-mode")
+    };
+  })()`);
+  if (
+    darkTheme.hostTheme !== "dark"
+    || darkTheme.googleTheme !== "dark"
+    || darkTheme.panelTheme !== "dark"
+    || darkTheme.sheetViewTheme !== "dark"
+    || darkTheme.toggleTheme !== "dark"
+    || darkTheme.panelBackground !== "rgb(31, 31, 31)"
+    || darkTheme.sheetViewBackground !== "rgb(31, 31, 31)"
+    || !darkTheme.googleFilter.includes("invert")
+    || darkTheme.storedTheme !== "dark"
+  ) {
+    throw new Error(`El modo oscuro no se aplico de extremo a extremo: ${JSON.stringify(darkTheme)}`);
+  }
+
+  const lightTheme = await cdp.evaluate(`(async () => {
+    const host = document.getElementById("sheets-session-probe");
+    const frame = host.shadowRoot.querySelector(".panel-frame");
+    const panel = frame.contentDocument;
+    panel.querySelector("[data-theme-toggle]").click();
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    return {
+      hostTheme: host.dataset.theme,
+      googleTheme: document.documentElement.dataset.srdTheme,
+      panelTheme: panel.documentElement.dataset.theme,
+      panelBackground: getComputedStyle(panel.body).backgroundColor,
+      googleFilter: getComputedStyle(document.body).filter,
+      storedTheme: localStorage.getItem("srd:theme-mode")
+    };
+  })()`);
+  if (
+    lightTheme.hostTheme !== "light"
+    || lightTheme.googleTheme !== "light"
+    || lightTheme.panelTheme !== "light"
+    || lightTheme.panelBackground !== "rgb(255, 255, 255)"
+    || lightTheme.googleFilter !== "none"
+    || lightTheme.storedTheme !== "light"
+  ) {
+    throw new Error(`El modo claro no se restauro por completo: ${JSON.stringify(lightTheme)}`);
+  }
+
   const launcherMove = await cdp.evaluate(`(async () => {
     const host = document.getElementById("sheets-session-probe");
     const launcher = host.shadowRoot.querySelector(".reopen");
