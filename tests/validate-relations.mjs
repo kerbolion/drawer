@@ -390,7 +390,7 @@ try {
   }
 
   const setMockSaveState = async (saving) => {
-    const label = saving ? "Guardando…" : "Guardado en Drive";
+    const label = saving ? "Estado temporal desconocido" : "Estado final desconocido";
     const iconClass = saving ? "docs-sync-20" : "docs-save-20";
     await cdp.evaluate(`(() => {
       const badge = document.getElementById("docs-save-indicator-badge");
@@ -411,12 +411,6 @@ try {
     throw new Error(`El drawer leyó el cambio antes de que Sheets iniciara el guardado: ${JSON.stringify(beforeSave)}`);
   }
   await setMockSaveState(true);
-  await delay(200);
-  const whileSaving = await cdp.evaluate(snapshot);
-  if (whileSaving.fields.includes("Ana en vivo")) {
-    throw new Error(`El drawer leyó el cambio mientras Sheets seguía guardando: ${JSON.stringify(whileSaving)}`);
-  }
-  await setMockSaveState(false);
   const liveUpdateDeadline = Date.now() + 6_000;
   let liveUpdate;
   while (Date.now() < liveUpdateDeadline) {
@@ -425,13 +419,13 @@ try {
     await delay(100);
   }
   if (!liveUpdate?.fields.includes("Ana en vivo")) {
-    throw new Error(`El drawer abierto no reflejó una edición de la misma fila: ${JSON.stringify(liveUpdate)}`);
+    throw new Error(`El drawer no leyó el cambio al comenzar el guardado de Sheets: ${JSON.stringify(liveUpdate)}`);
   }
+  await setMockSaveState(false);
 
   sheets.Contactos.rows[0][1] = "Ana";
   await cdp.evaluate(`document.body.dispatchEvent(new Event("input", { bubbles: true }))`);
   await setMockSaveState(true);
-  await setMockSaveState(false);
   const liveRestoreDeadline = Date.now() + 6_000;
   while (Date.now() < liveRestoreDeadline) {
     liveUpdate = await cdp.evaluate(snapshot);
@@ -441,6 +435,7 @@ try {
   if (!liveUpdate?.fields.includes("Ana")) {
     throw new Error(`El drawer no confirmó la segunda edición de la misma fila: ${JSON.stringify(liveUpdate)}`);
   }
+  await setMockSaveState(false);
 
   const relationDeck = await cdp.evaluate(`(() => {
     const panel = document.getElementById("sheets-session-probe").shadowRoot.querySelector(".panel-frame").contentDocument;

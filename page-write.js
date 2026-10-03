@@ -39,17 +39,8 @@
     return document.getElementById("docs-save-indicator-badge");
   }
 
-  function normalizedSaveIndicator(indicator) {
-    return [
-      indicator?.getAttribute("aria-label"),
-      indicator?.getAttribute("data-tooltip"),
-      indicator?.textContent,
-      ...Array.from(indicator?.querySelectorAll("[class]") || [], (node) => node.className)
-    ].join(" ").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
-  }
-
   function saveInProgress(indicator) {
-    return /(?:guardando|saving|sincronizando|syncing|docs-sync)/.test(normalizedSaveIndicator(indicator));
+    return Boolean(indicator?.querySelector("#docs-save-indicator-id [class*='docs-sync-']"));
   }
 
   function emitPendingSheetChange() {
@@ -81,7 +72,7 @@
     saveIndicatorObserver = new MutationObserver(inspectSaveIndicator);
     saveIndicatorObserver.observe(indicator, {
       attributes: true,
-      attributeFilter: ["aria-label", "class", "data-tooltip"],
+      attributeFilter: ["class"],
       childList: true,
       characterData: true,
       subtree: true
