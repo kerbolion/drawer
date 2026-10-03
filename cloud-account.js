@@ -45,6 +45,15 @@ function money(plan) {
   }).format((Number(plan.amountCents) || 0) / 100);
 }
 
+const manageableBillingStatuses = new Set(["active", "trialing", "past_due", "unpaid", "incomplete", "paused"]);
+
+function hasManageableSubscription(account) {
+  return Boolean(
+    account?.hasBillingPortal &&
+    manageableBillingStatuses.has(String(account.billingStatus || "").toLowerCase())
+  );
+}
+
 export function createCloudAccountUi(options) {
   const {
     document,
@@ -82,7 +91,17 @@ export function createCloudAccountUi(options) {
   function setBusy(value) {
     state.busy = Boolean(value);
     root.setAttribute("aria-busy", String(state.busy));
-    for (const control of root.querySelectorAll("button,input,select")) control.disabled = state.busy;
+    for (const control of root.querySelectorAll("button,input,select")) {
+      if (state.busy) {
+        if (!control.hasAttribute("data-cloud-disabled")) {
+          control.setAttribute("data-cloud-disabled", String(control.disabled));
+        }
+        control.disabled = true;
+      } else if (control.hasAttribute("data-cloud-disabled")) {
+        control.disabled = control.getAttribute("data-cloud-disabled") === "true";
+        control.removeAttribute("data-cloud-disabled");
+      }
+    }
   }
 
   function showError(message) {
@@ -155,6 +174,26 @@ export function createCloudAccountUi(options) {
     return row;
   }
 
+  function planInput(selectedCode = "") {
+    const item = el(document, "label", "cloud-form-item");
+    item.appendChild(el(document, "span", "cloud-form-label", "Plan"));
+    const control = el(document, "select", "property-input");
+    for (const plan of state.plans) {
+      const option = el(document, "option", "", `${plan.name} · ${money(plan)} / ${plan.interval === "year" ? "año" : "mes"}`);
+      option.value = plan.code;
+      control.appendChild(option);
+    }
+    if (state.plans.some(plan => plan.code === selectedCode)) control.value = selectedCode;
+    if (!state.plans.length) {
+      const option = el(document, "option", "", "No hay planes disponibles");
+      option.value = "";
+      control.appendChild(option);
+      control.disabled = true;
+    }
+    item.appendChild(control);
+    return { item, control };
+  }
+
   function renderLogin() {
     heading.textContent = "Iniciar sesión";
     const card = el(document, "div", "cloud-card");
@@ -188,17 +227,10 @@ export function createCloudAccountUi(options) {
     const name = input(document, { name: "name", label: "Nombre", autocomplete: "name" });
     const email = input(document, { name: "email", label: "Correo", type: "email", autocomplete: "email" });
     const password = input(document, { name: "password", label: "Contraseña", type: "password", autocomplete: "new-password" });
-    const planItem = el(document, "label", "cloud-form-item");
-    planItem.appendChild(el(document, "span", "cloud-form-label", "Plan"));
-    const plan = el(document, "select", "property-input");
-    for (const item of state.plans) {
-      const option = el(document, "option", "", `${item.name} · ${money(item)} / ${item.interval === "year" ? "año" : "mes"}`);
-      option.value = item.code;
-      plan.appendChild(option);
-    }
-    planItem.appendChild(plan);
+    const plan = planInput();
     const back = button(document, "Volver");
     const checkout = button(document, "Ir a pagar", "primary-button");
+    checkout.disabled = !state.plans.length;
     back.addEventListener("click", () => { state.mode = "login"; state.error = ""; render(); });
     checkout.addEventListener("click", async () => {
       try {
@@ -206,13 +238,13 @@ export function createCloudAccountUi(options) {
           name: name.control.value,
           email: email.control.value,
           password: password.control.value,
-          plan: plan.value
+          plan: plan.control.value
         });
         openExternal(result.url);
         showNotice("Se abrió Stripe en una pestaña nueva. Al completar el pago, vuelve aquí para iniciar sesión.");
       } catch (error) { showError(error.message); }
     });
-    card.append(name.item, email.item, password.item, planItem, actionRow(back, checkout));
+    card.append(name.item, email.item, password.item, plan.item, actionRow(back, checkout));
     body.appendChild(card);
   }
 
@@ -236,7 +268,8 @@ export function createCloudAccountUi(options) {
       ...(state.session.user?.role === "superadmin" ? [["admin", "Administración"], ["plans", "Planes"]] : [])
     ];
     for (const [id, label] of definitions) {
-      const control = button(document, label, state.tab === id ? "is-active" : "");
+      const active = state.tab === id || (id === "profile" && state.tab === "renew");
+      const control = button(document, label, active ? "is-active" : "");
       control.addEventListener("click", async () => {
         state.tab = id;
         state.error = "";
@@ -275,15 +308,19 @@ export function createCloudAccountUi(options) {
         showNotice("Cuenta actualizada.");
       } catch (error) { showError(error.message); }
     });
-    const billing = button(document, account?.expired || account?.status === "suspended" ? "Renovar" : "Administrar pago");
+    const managesSubscription = hasManageableSubscription(account);
+    const billing = button(document, managesSubscription ? "Administrar pago" : account?.billingPlan ? "Renovar" : "Elegir plan");
     billing.addEventListener("click", async () => {
       try {
-        let result;
-        if (account?.expired || account?.status === "suspended" || !account?.hasBillingPortal) {
-          await loadPlans();
-          result = await request("billing.renew", { plan: account?.billingPlan || state.plans[0]?.code });
-        } else result = await request("billing.portal");
-        openExternal(result.url);
+        if (managesSubscription) {
+          const result = await request("billing.portal");
+          openExternal(result.url);
+          return;
+        }
+        await loadPlans();
+        state.tab = "renew";
+        state.error = "";
+        render();
       } catch (error) { showError(error.message); }
     });
     const logout = button(document, "Cerrar sesión");
@@ -295,6 +332,32 @@ export function createCloudAccountUi(options) {
       try { setSession(await request("admin.stopImpersonation")); } catch (error) { showError(error.message); }
     });
     card.append(details, name.item, email.item, password.item, actionRow(stop, billing, logout, save));
+    body.appendChild(card);
+  }
+
+  function renderRenewal() {
+    const { account } = state.session;
+    heading.textContent = "Seleccionar plan";
+    const card = el(document, "div", "cloud-card");
+    card.appendChild(el(document, "h3", "", "Renovar suscripción"));
+    card.appendChild(el(document, "p", "cloud-copy", "Elige el plan que quieres contratar antes de continuar a Stripe."));
+    const plan = planInput(account?.billingPlan || "");
+    const back = button(document, "Volver");
+    const checkout = button(document, "Ir a pagar", "primary-button");
+    checkout.disabled = !state.plans.length;
+    back.addEventListener("click", () => {
+      state.tab = "profile";
+      state.error = "";
+      render();
+    });
+    checkout.addEventListener("click", async () => {
+      try {
+        const result = await request("billing.renew", { plan: plan.control.value });
+        openExternal(result.url);
+        showNotice("Se abrió Stripe en una pestaña nueva. Al completar el pago, vuelve aquí para actualizar tu cuenta.");
+      } catch (error) { showError(error.message); }
+    });
+    card.append(plan.item, actionRow(back, checkout));
     body.appendChild(card);
   }
 
@@ -420,6 +483,7 @@ export function createCloudAccountUi(options) {
     renderTabs();
     if (state.tab === "admin") renderAdmin();
     else if (state.tab === "plans") renderPlans();
+    else if (state.tab === "renew") renderRenewal();
     else renderProfile();
   }
 
