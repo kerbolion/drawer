@@ -1356,7 +1356,7 @@ try {
     if (newRelatedService.open && newRelatedService.id && newRelatedService.relationId) break;
     await delay(100);
   }
-  if (!newRelatedService?.open || !newRelatedService.title.includes("Nuevo registro") || !/^[A-Za-z0-9]{9}$/.test(newRelatedService.id) || newRelatedService.relationId !== "C-1" || !newRelatedService.relationDisabled) {
+  if (!newRelatedService?.open || !newRelatedService.title.includes("Nuevo registro") || !/^[A-Za-z0-9]{9}$/.test(newRelatedService.id) || newRelatedService.relationId !== "C-1" || !newRelatedService.relationDisabled || newRelatedService.buttonLoading) {
     throw new Error(`El alta relacionada no heredó el ID de Contactos: ${JSON.stringify(newRelatedService)}`);
   }
   const relatedServiceId = newRelatedService.id;
@@ -1382,6 +1382,17 @@ try {
     input.dispatchEvent(new panel.defaultView.Event("input", { bubbles: true }));
     Array.from(drawer.querySelectorAll(".ant-drawer-footer button")).find(button => button.textContent.includes("Guardar"))?.click();
   })()`);
+  const relatedCloseDeadline = Date.now() + 400;
+  let relatedDrawerClosing = false;
+  while (Date.now() < relatedCloseDeadline) {
+    relatedDrawerClosing = await cdp.evaluate(`(() => {
+      const panel = document.getElementById("sheets-session-probe").shadowRoot.querySelector(".panel-frame").contentDocument;
+      return !panel.querySelector(".related-record-drawer-root")?.classList.contains("ant-drawer-open");
+    })()`);
+    if (relatedDrawerClosing) break;
+    await delay(25);
+  }
+  if (!relatedDrawerClosing) throw new Error("El drawer relacionado esperó la confirmación de Sheets para comenzar a cerrarse.");
   setTimeout(() => {
     sheets.Servicios.rows.push([relatedServiceId, "C-1", "", "Creado desde relacionados", "", ""]);
   }, 450);

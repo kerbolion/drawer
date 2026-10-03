@@ -4247,7 +4247,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     );
   }
 
-  function RelatedRecordDrawer({ relation, columns, row, open, onClose }) {
+  function RelatedRecordDrawer({ relation, columns, row, open, onClose, onReopen }) {
     useRelatedDraftVersion();
     if (!row) return null;
     const titleColumn = columns[0];
@@ -4258,6 +4258,16 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     const discard = () => {
       discardRelatedDrafts((draft) => draft.sheetName === relation.sheetName && draft.rowNumber === row.number);
       onClose();
+    };
+    const save = () => {
+      const pendingSave = saveRelatedChanges(rowDrafts, { onVerificationFailed: onReopen });
+      onClose();
+      void pendingSave.then((saved) => {
+        if (!saved) onReopen();
+      }).catch((error) => {
+        setStatus(error?.message || "No se pudo guardar el registro relacionado", "error");
+        onReopen();
+      });
     };
 
     return React.createElement(
@@ -4280,7 +4290,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
           React.createElement(Button, {
             type: "primary",
             disabled: state.saving || !rowDrafts.length,
-            onClick: () => void saveRelatedChanges(rowDrafts)
+            onClick: save
           }, "Guardar cambios")
         )
       },
@@ -4414,7 +4424,10 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     const [view, setView] = React.useState(initialView);
     const [page, setPage] = React.useState(1);
     const [openRow, setOpenRow] = React.useState(null);
-    const [creating, setCreating] = React.useState(false);
+    const [recordDrawerOpen, setRecordDrawerOpen] = React.useState(false);
+    const creating = React.useRef(false);
+    const openingFrame = React.useRef(0);
+    const mounted = React.useRef(true);
     const columns = visibleRelationColumns(relation);
     const pageSize = view === "table" ? 10 : 4;
     const totalCount = relation.totalCount ?? relation.rows.length;
@@ -4429,16 +4442,38 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
       setRelationView(relation.sheetName, nextView);
     };
 
+    const closeRecordDrawer = () => {
+      if (openingFrame.current) panelFrame.contentWindow.cancelAnimationFrame(openingFrame.current);
+      openingFrame.current = 0;
+      setRecordDrawerOpen(false);
+    };
+
+    const openRecordDrawer = (row) => {
+      if (!row || !mounted.current) return;
+      if (openingFrame.current) panelFrame.contentWindow.cancelAnimationFrame(openingFrame.current);
+      setRecordDrawerOpen(false);
+      setOpenRow(row);
+      openingFrame.current = panelFrame.contentWindow.requestAnimationFrame(() => {
+        openingFrame.current = 0;
+        setRecordDrawerOpen(true);
+      });
+    };
+
+    React.useEffect(() => () => {
+      mounted.current = false;
+      if (openingFrame.current) panelFrame.contentWindow.cancelAnimationFrame(openingFrame.current);
+    }, []);
+
     const addRelatedRecord = async () => {
-      if (creating) return;
-      setCreating(true);
+      if (creating.current) return;
+      creating.current = true;
       try {
-        setOpenRow(await prepareRelatedRecord(relation));
+        openRecordDrawer(await prepareRelatedRecord(relation));
         setStatus("");
       } catch (error) {
         setStatus(error.message, "error");
       } finally {
-        setCreating(false);
+        creating.current = false;
       }
     };
 
@@ -4473,7 +4508,6 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
             shape: "circle",
             size: "small",
             icon: React.createElement(PlusOutlined),
-            loading: creating,
             title: `Agregar registro en ${relation.sheetName}`,
             "aria-label": `Agregar registro en ${relation.sheetName}`,
             "data-add-related-record": relation.sheetName,
@@ -4505,7 +4539,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
             relation,
             columns,
             row,
-            onOpen: () => setOpenRow(row),
+            onOpen: () => openRecordDrawer(row),
             key: row.number || rowIndex
           }))
         )
@@ -4525,8 +4559,9 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
         relation,
         columns,
         row: openRow,
-        open: Boolean(openRow),
-        onClose: () => setOpenRow(null)
+        open: recordDrawerOpen,
+        onClose: closeRecordDrawer,
+        onReopen: () => openRecordDrawer(openRow)
       })
     );
   }
@@ -6125,7 +6160,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     void verifyPendingWrite(entry);
   }
 
-  function registerRelatedWrites(rowPlans) {
+  function registerRelatedWrites(rowPlans, options = {}) {
     for (const plan of rowPlans) {
       const previousPending = state.pendingWrites.get(plan.key);
       previousPending?.controller.abort();
@@ -6150,6 +6185,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
         isNewRecord: firstDraft.row.isNew === true,
         previousCells: [...previousByIndex.values()],
         writtenCells: [...writtenByIndex.values()].sort((left, right) => left.index - right.index),
+        onVerificationFailed: options.onVerificationFailed,
         controller: new AbortController()
       };
       state.pendingWrites.set(entry.key, entry);
@@ -6210,6 +6246,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
       host.dataset.writeVerification = "failed";
       setStatus(verificationError?.message || `Sheets no confirmó la fila ${entry.rowNumber} de ${entry.sheetName}`, "error");
       notifyRelatedDrafts();
+      entry.onVerificationFailed?.();
     } finally {
       if (state.pendingWrites.get(entry.key) === entry && entry.controller.signal.aborted) {
         state.pendingWrites.delete(entry.key);
@@ -6276,13 +6313,13 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     };
   }
 
-  async function persistChanges(primaryPlan, requestedRelatedDrafts) {
+  async function persistChanges(primaryPlan, requestedRelatedDrafts, options = {}) {
     const relatedPlan = buildRelatedWritePlans(requestedRelatedDrafts);
     const operations = [...(primaryPlan?.operations || []), ...relatedPlan.operations];
     if (!operations.length) {
       setStatus("No hay cambios pendientes");
       syncPendingActions();
-      return;
+      return false;
     }
 
     const changeCount = (primaryPlan?.changes.length || 0) + requestedRelatedDrafts.length;
@@ -6305,12 +6342,14 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
         );
       }
       registerPrimaryWrite(primaryPlan);
-      registerRelatedWrites(relatedPlan.rowPlans);
+      registerRelatedWrites(relatedPlan.rowPlans, options);
       host.dataset.writeVerification = "pending";
       setStatus(changeCount === 1 ? "Cambio guardado" : `${changeCount} cambios guardados`);
+      return true;
     } catch (error) {
       host.dataset.writeVerification = "failed";
       setStatus(error.message, "error");
+      return false;
     } finally {
       state.saving = false;
       notifyRelatedDrafts();
@@ -6318,13 +6357,13 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     }
   }
 
-  async function saveRelatedChanges(drafts = [...state.relatedDrafts.values()]) {
-    if (state.saving || !state.row || !drafts.length) return;
+  async function saveRelatedChanges(drafts = [...state.relatedDrafts.values()], options = {}) {
+    if (state.saving || !state.row || !drafts.length) return false;
     if (state.viewRow !== state.row || state.viewGid !== state.gid) {
       setStatus("Espera a que termine de cargar la fila seleccionada", "busy");
-      return;
+      return false;
     }
-    await persistChanges(null, drafts);
+    return persistChanges(null, drafts, options);
   }
 
   async function saveChanges() {
