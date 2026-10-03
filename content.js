@@ -161,7 +161,7 @@ import { createCloudAccountUi } from "./cloud-account.js";
     sheetViewWrites: new Map(),
     sheetDataRevision: 0,
     sheetChangeTimer: null,
-    sheetChangeFollowupTimer: null,
+    sheetChangeRequest: 0,
     sheetViewMutationQueue: [],
     sheetViewMutationTimer: null,
     sheetViewMutationRunning: false,
@@ -558,6 +558,11 @@ import { createCloudAccountUi } from "./cloud-account.js";
     }
     .property-type-option-icon svg { display: block; width: 14px; height: 14px; }
     .property-help { margin-top: 6px; color: ${antdTokens.colorTextTertiary}; font-size: 12px; }
+    .property-protection {
+      padding: 10px 12px; border: 1px solid ${antdTokens.colorBorder}; border-radius: ${antdTokens.borderRadius}px;
+      background: ${antdTokens.colorFillQuaternary};
+    }
+    .property-protection .property-help { margin: 4px 0 0 24px; }
     .property-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
     .option-editor { border: 1px solid ${antdTokens.colorBorder}; border-radius: ${antdTokens.borderRadius}px; padding: 10px; }
     .option-editor-header {
@@ -694,6 +699,7 @@ import { createCloudAccountUi } from "./cloud-account.js";
       cursor: grab; touch-action: none; user-select: none;
     }
     .kanban-card-shell:active { cursor: grabbing; }
+    .kanban-card-shell.is-protected, .kanban-card-shell.is-protected:active { cursor: default; }
     .kanban-card-shell.is-dragging { opacity: .28; }
     .kanban-card-shell.is-moving { opacity: .55; pointer-events: none; }
     .kanban-card-shell.is-moving:not(.is-dragging) { animation: kanban-card-settle 180ms cubic-bezier(.2, 0, 0, 1); }
@@ -1167,7 +1173,7 @@ import { createCloudAccountUi } from "./cloud-account.js";
     } = useSortable({
       id: kanbanCardDragId(row.number),
       data: { type: "card", row, groupId },
-      disabled: moving
+      disabled: moving || statusColumn.protected === true
     });
 
     return React.createElement(
@@ -1176,7 +1182,7 @@ import { createCloudAccountUi } from "./cloud-account.js";
         ...attributes,
         ...listeners,
         ref: setNodeRef,
-        className: ["kanban-card-shell", isDragging || activeRowNumber === row.number ? "is-dragging" : "", moving ? "is-moving" : ""].filter(Boolean).join(" "),
+        className: ["kanban-card-shell", isDragging || activeRowNumber === row.number ? "is-dragging" : "", moving ? "is-moving" : "", statusColumn.protected ? "is-protected" : ""].filter(Boolean).join(" "),
         "data-sheet-row": String(row.number),
         style: { transform: CSS.Transform.toString(transform), transition },
         onDoubleClick: () => {
@@ -1311,6 +1317,7 @@ import { createCloudAccountUi } from "./cloud-account.js";
     };
 
     const handleDragStart = ({ active }) => {
+      if (statusColumn.protected) return;
       const row = active.data.current?.row || null;
       suppressOpenRef.current = row?.number || null;
       setActiveRow(row);
@@ -1328,6 +1335,7 @@ import { createCloudAccountUi } from "./cloud-account.js";
     };
 
     const handleDragEnd = ({ active, over }) => {
+      if (statusColumn.protected) return;
       const row = active.data.current?.row;
       const groupId = over?.data.current?.groupId || "";
       setActiveRow(null);
@@ -1629,6 +1637,7 @@ import { createCloudAccountUi } from "./cloud-account.js";
     };
 
     const moveRow = async (row, property, nextValue) => {
+      if (property.protected) return;
       if (movingRowsRef.current.has(row.number)) return;
       if (state.primaryDrafts.size || state.relatedDrafts.size) {
         setError("Guarda o cancela los cambios pendientes antes de mover una ficha.");
@@ -1790,12 +1799,14 @@ import { createCloudAccountUi } from "./cloud-account.js";
   }
 
   function PropertyEditorControl({ property, value, onChange }) {
-    const update = onChange;
+    const protectedField = property.protected === true;
+    const update = protectedField ? () => {} : onChange;
     const fullWidth = { width: "100%" };
 
     if (property.type === "longText") {
       return React.createElement(Input.TextArea, {
         value: String(value ?? ""),
+        disabled: protectedField,
         autoSize: { minRows: 2, maxRows: 6 },
         onChange: (event) => update(event.target.value)
       });
@@ -1804,6 +1815,7 @@ import { createCloudAccountUi } from "./cloud-account.js";
     if (property.type === "number") {
       return React.createElement(InputNumber, {
         value: value === "" ? null : value,
+        disabled: protectedField,
         controls: true,
         onChange: update,
         style: fullWidth
@@ -1813,6 +1825,7 @@ import { createCloudAccountUi } from "./cloud-account.js";
     if (property.type === "currency") {
       return React.createElement(InputNumber, {
         value: value === "" ? null : value,
+        disabled: protectedField,
         prefix: property.currencySymbol || "$",
         precision: Number(property.currencyDecimals ?? 2),
         controls: true,
@@ -1828,6 +1841,7 @@ import { createCloudAccountUi } from "./cloud-account.js";
       }
       return React.createElement(Select, {
         allowClear: true,
+        disabled: protectedField,
         value: value || undefined,
         onChange: (nextValue) => update(nextValue || ""),
         options: entries.map((entry) => ({
@@ -1848,6 +1862,7 @@ import { createCloudAccountUi } from "./cloud-account.js";
       return React.createElement(Select, {
         mode: "multiple",
         allowClear: true,
+        disabled: protectedField,
         value: selected,
         onChange: update,
         options: entries.map((entry) => ({ value: entry.label, label: entry.label, title: entry.label })),
@@ -1867,6 +1882,7 @@ import { createCloudAccountUi } from "./cloud-account.js";
       const pickerValue = value && dayjs(value).isValid() ? dayjs(value) : null;
       return React.createElement(DatePicker, {
         value: pickerValue,
+        disabled: protectedField,
         locale: datePickerLocale,
         popupClassName: "workspace-date-picker-popup",
         placement: "bottomRight",
@@ -1883,6 +1899,7 @@ import { createCloudAccountUi } from "./cloud-account.js";
       const pickerValue = value && dayjs(`2000-01-01T${value}`).isValid() ? dayjs(`2000-01-01T${value}`) : null;
       return React.createElement(TimePicker, {
         value: pickerValue,
+        disabled: protectedField,
         locale: datePickerLocale,
         format: timeFormat,
         use12Hours: uses12Hours,
@@ -1894,6 +1911,7 @@ import { createCloudAccountUi } from "./cloud-account.js";
     if (property.type === "checkbox") {
       return React.createElement(Checkbox, {
         checked: Boolean(value),
+        disabled: protectedField,
         onChange: (event) => update(event.target.checked)
       });
     }
@@ -1901,6 +1919,7 @@ import { createCloudAccountUi } from "./cloud-account.js";
     const textValue = String(value ?? "");
     const input = React.createElement(Input, {
       value: textValue,
+      disabled: protectedField,
       type: property.type === "email" ? "email" : property.type === "phone" ? "tel" : "text",
       placeholder: property.type === "url" ? "https://" : property.type === "email" ? "correo@dominio.com" : property.type === "phone" ? "+506" : undefined,
       onChange: (event) => update(event.target.value)
@@ -2403,6 +2422,7 @@ import { createCloudAccountUi } from "./cloud-account.js";
       sourceHeader: header,
       name: header || `Columna ${columnName(index + 1)}`,
       customName: false,
+      protected: false,
       type: "text",
       options: [],
       optionColors: {},
@@ -2437,6 +2457,7 @@ import { createCloudAccountUi } from "./cloud-account.js";
       sourceHeader: String(header || source.sourceHeader || ""),
       name: String(source.name || header || fallback.name),
       customName: Boolean(source.customName),
+      protected: source.protected === true,
       type: FIELD_TYPE_VALUES.has(source.type) ? source.type : "text",
       options,
       optionColors,
@@ -2529,6 +2550,7 @@ import { createCloudAccountUi } from "./cloud-account.js";
     }
     if (state.fields.length) {
       reconcileSheetConfiguration(currentGid(), state.sheetName || activeSheetName() || `Hoja ${currentGid()}`, state.fields);
+      discardProtectedDrafts();
       renderFields(new Map([...state.primaryDrafts.values()].map((draft) => [draft.index, draft.value])));
       renderSheetViewActions();
       if (state.row && state.values.length) startRelationships(state.fields, state.values, state.request?.signal, true);
@@ -3060,6 +3082,7 @@ import { createCloudAccountUi } from "./cloud-account.js";
 
   function setRelatedDraft(relation, row, column, editorValue) {
     const property = relatedProperty(relation, column);
+    if (property.protected) return;
     const key = relatedDraftKey(relation.sheetName, row.number, column.propertyIndex);
     const existing = state.relatedDrafts.get(key);
     const previousValue = existing?.previousValue ?? String(row.cells[column.index] ?? "");
@@ -3110,7 +3133,8 @@ import { createCloudAccountUi } from "./cloud-account.js";
         "data-related-sheet": relation.sheetName,
         "data-related-row": String(row.number),
         "data-related-column": String(column.propertyIndex + 1),
-        "data-field-type": property.type
+        "data-field-type": property.type,
+        "data-protected": property.protected ? "true" : "false"
       },
       React.createElement(PropertyEditorControl, {
         property,
@@ -3744,7 +3768,29 @@ import { createCloudAccountUi } from "./cloud-account.js";
     });
   }
 
+  function discardProtectedDrafts() {
+    let primaryChanged = false;
+    let relatedChanged = false;
+    for (const [index] of state.primaryDrafts) {
+      if (!propertyForColumn(index).protected) continue;
+      state.primaryDrafts.delete(index);
+      primaryChanged = true;
+    }
+    for (const [key, draft] of state.relatedDrafts) {
+      const property = relatedProperty(draft.relation, {
+        propertyIndex: draft.columnIndex,
+        header: draft.property?.sourceHeader || draft.property?.name || ""
+      });
+      if (!property.protected) continue;
+      state.relatedDrafts.delete(key);
+      relatedChanged = true;
+    }
+    if (relatedChanged) notifyRelatedDrafts();
+    else if (primaryChanged) syncPendingActions();
+  }
+
   function collectPendingChanges() {
+    discardProtectedDrafts();
     return [...state.primaryDrafts.values()].sort((left, right) => left.index - right.index);
   }
 
@@ -3993,6 +4039,7 @@ import { createCloudAccountUi } from "./cloud-account.js";
       configure.setAttribute("aria-label", `Configurar ${property.name || sourceLabel}`);
       renderTypeIcon(configure, property.type);
       wrapper.dataset.fieldType = property.type;
+      wrapper.dataset.protected = property.protected ? "true" : "false";
       let control = editor.querySelector("[data-column]");
       if (!control || control.dataset.fieldType !== property.type) {
         if (control?._reactRoot) flushSync(() => control._reactRoot.unmount());
@@ -4000,6 +4047,7 @@ import { createCloudAccountUi } from "./cloud-account.js";
         editor.replaceChildren(control);
       }
       control.dataset.column = String(index + 1);
+      control.dataset.protected = property.protected ? "true" : "false";
       const nextValue = drafts.has(index) ? drafts.get(index) : (state.values[index] || "");
       setControlValue(control, nextValue, property);
     });
@@ -4069,6 +4117,13 @@ import { createCloudAccountUi } from "./cloud-account.js";
     });
   }
 
+  function PropertyProtectionControl({ initialValue }) {
+    return React.createElement(Checkbox, {
+      defaultChecked: initialValue === true,
+      name: "protected"
+    }, "Proteger");
+  }
+
   function renderPropertyTypeSelect() {
     if (!ui.propertyTypeHost._reactRoot) ui.propertyTypeHost._reactRoot = createRoot(ui.propertyTypeHost);
     const selector = React.createElement(PropertyTypeControl, {
@@ -4078,13 +4133,19 @@ import { createCloudAccountUi } from "./cloud-account.js";
     flushSync(() => ui.propertyTypeHost._reactRoot.render(antdTree(selector)));
   }
 
-  function renderPropertySettings() {
+  function renderPropertySettings(reset = false) {
     const index = state.propertyColumn;
     if (index === null) return;
     const property = propertyForColumn(index);
     const type = ui.propertyType.value;
+    const existingProtection = ui.propertyForm.elements.namedItem("protected");
+    const protectedValue = reset || !(existingProtection instanceof panelFrame.contentWindow.HTMLInputElement)
+      ? property.protected
+      : existingProtection.checked;
     ui.propertySettings._optionsRoot?.unmount();
+    ui.propertySettings._protectionRoot?.unmount();
     delete ui.propertySettings._optionsRoot;
+    delete ui.propertySettings._protectionRoot;
     ui.propertySettings.replaceChildren();
 
     if (["select", "multiSelect", "status"].includes(type)) {
@@ -4140,6 +4201,18 @@ import { createCloudAccountUi } from "./cloud-account.js";
       );
       ui.propertySettings.appendChild(grid);
     }
+
+    const protection = element("div", "property-protection");
+    const protectionControl = element("div");
+    protection.append(
+      protectionControl,
+      element("div", "property-help", "Deshabilita la edición de este campo para evitar cambios accidentales.")
+    );
+    ui.propertySettings.appendChild(protection);
+    ui.propertySettings._protectionRoot = createRoot(protectionControl);
+    flushSync(() => ui.propertySettings._protectionRoot.render(antdTree(
+      React.createElement(PropertyProtectionControl, { initialValue: protectedValue })
+    )));
   }
 
   function openPropertyEditor(index) {
@@ -4149,7 +4222,7 @@ import { createCloudAccountUi } from "./cloud-account.js";
     ui.propertyName.value = property.name;
     ui.propertyType.value = property.type;
     renderPropertyTypeSelect();
-    renderPropertySettings();
+    renderPropertySettings(true);
     ui.propertyDrawer.hidden = false;
     requestAnimationFrame(() => ui.propertyName.focus());
   }
@@ -4187,6 +4260,7 @@ import { createCloudAccountUi } from "./cloud-account.js";
       ...previous,
       name,
       customName: name !== previous.sourceHeader,
+      protected: formData.has("protected"),
       type,
       options,
       optionColors,
@@ -4198,6 +4272,10 @@ import { createCloudAccountUi } from "./cloud-account.js";
       uncheckedValue: formData.get("uncheckedValue") ?? previous.uncheckedValue
     }, index, previous.sourceHeader);
     const drafts = new Map(currentInputValues().map((value, columnIndex) => [columnIndex, value]));
+    if (next.protected) {
+      state.primaryDrafts.delete(index);
+      drafts.set(index, state.values[index] || "");
+    }
     sheet.columns[index] = next;
     sheet.updatedAt = Date.now();
     state.activity.config = true;
@@ -4622,6 +4700,7 @@ import { createCloudAccountUi } from "./cloud-account.js";
   }
 
   function buildRelatedWritePlans(drafts) {
+    discardProtectedDrafts();
     const groupedRows = new Map();
     for (const requestedDraft of drafts) {
       const draft = state.relatedDrafts.get(requestedDraft.key);
@@ -5168,8 +5247,9 @@ import { createCloudAccountUi } from "./cloud-account.js";
     setTimeout(pollCodexBridge, CODEX_BRIDGE_POLL_MS);
   }
 
-  function refreshOpenSheetData() {
-    if (panelFrame.hidden || state.saving || state.writeInteractionDepth > 0 || !cloudAccessAllowed()) return;
+  async function refreshOpenSheetData() {
+    if (panelFrame.hidden || state.saving || state.writeInteractionDepth > 0 || !cloudAccessAllowed()) return true;
+    const previousValues = [...state.values];
     state.sheetCache.clear();
     state.sheetDataRevision += 1;
     renderSheetViewActions();
@@ -5184,21 +5264,24 @@ import { createCloudAccountUi } from "./cloud-account.js";
       && gid === state.gid
       && normalizedColumn(sheetName) === normalizedColumn(state.sheetName)
     ) {
-      void loadRow(row, true);
+      await loadRow(row, true);
+      return !sameValues(previousValues, state.values);
     }
+    return true;
   }
 
   function scheduleOpenSheetRefresh() {
+    const request = ++state.sheetChangeRequest;
     clearTimeout(state.sheetChangeTimer);
-    clearTimeout(state.sheetChangeFollowupTimer);
-    state.sheetChangeTimer = setTimeout(() => {
+    state.sheetChangeTimer = setTimeout(async () => {
       state.sheetChangeTimer = null;
-      refreshOpenSheetData();
-    }, 200);
-    state.sheetChangeFollowupTimer = setTimeout(() => {
-      state.sheetChangeFollowupTimer = null;
-      refreshOpenSheetData();
-    }, 2_000);
+      const changed = await refreshOpenSheetData();
+      if (changed || request !== state.sheetChangeRequest) return;
+      state.sheetChangeTimer = setTimeout(() => {
+        state.sheetChangeTimer = null;
+        if (request === state.sheetChangeRequest) void refreshOpenSheetData();
+      }, 650);
+    }, 40);
   }
 
   window.addEventListener("message", (event) => {

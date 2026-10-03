@@ -39,7 +39,7 @@
       sheetChangeTimer = null;
       if (bridgeInteractionDepth > 0) return;
       window.postMessage({ source: SOURCE, type: "sheet-change", reason }, location.origin);
-    }, 450);
+    }, reason === "input" || reason === "composition" ? 160 : 60);
   }
 
   document.addEventListener("input", (event) => {

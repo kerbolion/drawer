@@ -601,14 +601,16 @@ try {
   const configuredTypes = await cdp.evaluate(`(() => {
     const host = document.getElementById("sheets-session-probe");
     const panel = host.shadowRoot.querySelector(".panel-frame").contentDocument;
-    const configure = (column, type) => {
+    const configure = (column, type, protect = false) => {
       panel.querySelector('[data-configure-column="' + column + '"]').click();
       const typeSelect = panel.querySelector("#srd-property-type");
       typeSelect.value = type;
       typeSelect.dispatchEvent(new Event("change", { bubbles: true }));
+      const protectedInput = panel.querySelector('[name="protected"]');
+      if (protect && !protectedInput.checked) protectedInput.click();
       panel.querySelector("#srd-property-form").requestSubmit();
     };
-    configure(2, "longText");
+    configure(2, "longText", true);
     configure(3, "number");
     const nameControl = panel.querySelector('[data-column="2"]');
     const ageControl = panel.querySelector('[data-column="3"]');
@@ -616,6 +618,8 @@ try {
       nameTag: nameControl?.querySelector("textarea")?.tagName,
       nameType: nameControl?.dataset.fieldType,
       nameValue: nameControl?.dataset.serializedValue,
+      nameDisabled: nameControl?.querySelector("textarea")?.disabled,
+      nameProtected: nameControl?.dataset.protected,
       ageTag: ageControl?.querySelector("input")?.tagName,
       ageInputType: ageControl?.querySelector("input")?.getAttribute("role"),
       ageFieldType: ageControl?.dataset.fieldType,
@@ -632,6 +636,8 @@ try {
     configuredTypes.nameTag !== "TEXTAREA" ||
     configuredTypes.nameType !== "longText" ||
     configuredTypes.nameValue !== "Ana" ||
+    configuredTypes.nameDisabled !== true ||
+    configuredTypes.nameProtected !== "true" ||
     configuredTypes.ageTag !== "INPUT" ||
     configuredTypes.ageInputType !== "spinbutton" ||
     configuredTypes.ageFieldType !== "number" ||
@@ -882,10 +888,12 @@ try {
     const panel = host.shadowRoot.querySelector(".panel-frame").contentDocument;
     return {
       nameType: panel.querySelector('[data-column="2"]')?.dataset.fieldType,
+      nameDisabled: panel.querySelector('[data-column="2"] textarea')?.disabled,
+      nameProtected: panel.querySelector('[data-column="2"]')?.dataset.protected,
       ageType: panel.querySelector('[data-column="3"]')?.dataset.fieldType
     };
   })()`);
-  if (persistentTypes.nameType !== "longText" || persistentTypes.ageType !== "number") {
+  if (persistentTypes.nameType !== "longText" || !persistentTypes.nameDisabled || persistentTypes.nameProtected !== "true" || persistentTypes.ageType !== "number") {
     throw new Error(`Los tipos no se conservaron al cambiar de hoja: ${JSON.stringify(persistentTypes)}`);
   }
 
