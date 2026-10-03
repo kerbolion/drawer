@@ -222,6 +222,8 @@ try {
         viewOpen: !viewFrame.hidden,
         viewWidth: viewFrame.getBoundingClientRect().width,
         viewportWidth: innerWidth,
+        viewZIndex: Number(getComputedStyle(viewFrame).zIndex),
+        launcherZIndex: Number(getComputedStyle(root.querySelector(".reopen")).zIndex),
         browser: Boolean(view.querySelector("[data-workspace-browser]")),
         documents: Array.from(view.querySelectorAll(".workspace-browser-document-button"), item => item.textContent.trim()),
         sheets: Array.from(view.querySelectorAll(".workspace-browser-sheet"), item => item.textContent.trim()),
@@ -233,7 +235,7 @@ try {
     if (workspaceTable.deckRows?.length === 3) break;
     await delay(100);
   }
-  if (!workspaceTable.mainHidden || !workspaceTable.viewOpen || workspaceTable.viewWidth !== workspaceTable.viewportWidth || workspaceTable.antDrawer || !workspaceTable.browser || workspaceTable.documents.length !== 1 || !workspaceTable.sheets.includes("Contactos") || workspaceTable.activeView !== "deck" || JSON.stringify(workspaceTable.deckRows) !== JSON.stringify(["2", "3", "4"])) {
+  if (!workspaceTable.mainHidden || !workspaceTable.viewOpen || workspaceTable.viewWidth !== workspaceTable.viewportWidth || workspaceTable.launcherZIndex >= workspaceTable.viewZIndex || workspaceTable.antDrawer || !workspaceTable.browser || workspaceTable.documents.length !== 1 || !workspaceTable.sheets.includes("Contactos") || workspaceTable.activeView !== "deck" || JSON.stringify(workspaceTable.deckRows) !== JSON.stringify(["2", "3", "4"])) {
     throw new Error(`La vista Deck no cargo el documento, la hoja y sus registros: ${JSON.stringify(workspaceTable)}`);
   }
 
@@ -246,9 +248,16 @@ try {
   const directEditors = await cdp.evaluate(viewExpression(`
     const row = view.querySelector('[data-workspace-row="2"]');
     const cells = Array.from(row.querySelectorAll('td[data-column-id]'));
-    return cells.length > 0 && cells.every(cell => Boolean(cell.querySelector('.workspace-table-cell-editor')));
+    const actions = row.querySelector('.workspace-table-actions');
+    return {
+      allDirect: cells.length > 0 && cells.every(cell => Boolean(cell.querySelector('.workspace-table-cell-editor'))),
+      actionsZIndex: Number(getComputedStyle(actions).zIndex),
+      editorZIndex: Number(getComputedStyle(cells[0]).zIndex)
+    };
   `));
-  if (!directEditors) throw new Error("Tabla no mostro los editores tipados directamente en sus celdas");
+  if (!directEditors.allDirect || directEditors.actionsZIndex <= directEditors.editorZIndex) {
+    throw new Error(`Tabla no mantuvo los editores directos debajo de sus acciones: ${JSON.stringify(directEditors)}`);
+  }
   await cdp.evaluate(viewExpression(`
     const row = view.querySelector('[data-workspace-row="2"]');
     const cell = row.querySelectorAll('td[data-column-id]')[1];

@@ -206,7 +206,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     }
     .panel-frame[hidden], .sheet-view-frame[hidden], .reopen[hidden] { display: none; }
     .reopen {
-      box-sizing: border-box; position: fixed; z-index: 2147483646;
+      box-sizing: border-box; position: fixed; z-index: 2147483645;
       display: inline-flex; align-items: center; justify-content: center;
       width: 40px; height: 40px; min-width: 40px; min-height: 40px;
       margin: 0; padding: 0; border: 0; border-radius: 50%;
@@ -740,22 +740,25 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     .workspace-table-scroll { flex: 1; min-width: 0; min-height: 0; overflow: auto; }
     .workspace-data-table { width: max-content; min-width: 100%; border-collapse: separate; border-spacing: 0; table-layout: fixed; }
     .workspace-data-table th { position: sticky; z-index: 2; top: 0; min-width: 190px; padding: 9px 10px; border-right: 1px solid var(--workspace-border-subtle); border-bottom: 1px solid var(--workspace-border); background: var(--workspace-surface-muted); color: var(--workspace-text-secondary); font-size: 12px; font-weight: 700; text-align: left; }
-    .workspace-data-table td { min-width: 190px; max-width: 320px; height: 48px; padding: 5px 8px; border-right: 1px solid var(--workspace-border-subtle); border-bottom: 1px solid var(--workspace-border-subtle); background: var(--workspace-surface); vertical-align: middle; }
+    .workspace-data-table td { position: relative; z-index: 0; min-width: 190px; max-width: 320px; height: 48px; overflow: hidden; padding: 5px 8px; border-right: 1px solid var(--workspace-border-subtle); border-bottom: 1px solid var(--workspace-border-subtle); background: var(--workspace-surface); vertical-align: middle; }
     .workspace-data-table tbody tr:hover td { background: var(--workspace-surface-raised); }
     .workspace-data-table .workspace-table-select { left: 0; width: 44px; min-width: 44px; max-width: 44px; text-align: center; }
     .workspace-data-table .workspace-table-row-number { width: 54px; min-width: 54px; max-width: 54px; color: var(--workspace-text-muted); text-align: center; }
-    .workspace-data-table .workspace-table-actions { position: sticky; z-index: 1; right: 0; width: 124px; min-width: 124px; max-width: 124px; background: var(--workspace-surface-raised); white-space: nowrap; }
-    .workspace-data-table th.workspace-table-actions { z-index: 3; background: var(--workspace-surface-muted); }
+    .workspace-data-table .workspace-table-actions { position: sticky; z-index: 5; right: 0; width: 124px; min-width: 124px; max-width: 124px; overflow: visible; background: var(--workspace-surface-raised); box-shadow: -5px 0 8px -8px var(--workspace-shadow); white-space: nowrap; }
+    .workspace-data-table th.workspace-table-actions { z-index: 6; background: var(--workspace-surface-muted); }
+    .workspace-data-table tbody tr:hover td.workspace-table-actions { background: var(--workspace-surface-raised); }
     .workspace-table-column-heading { display: grid; min-width: 0; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 1px 7px; }
     .workspace-table-column-heading .property-type-icon { grid-row: 1 / span 2; width: 26px; min-height: 26px; }
     .workspace-table-column-heading > span:nth-child(2) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .workspace-table-column-heading small { color: var(--workspace-text-muted); font-size: 10px; font-weight: 400; }
-    .workspace-table-cell-editor { min-width: 0; width: 100%; }
+    .workspace-table-cell-editor { min-width: 0; width: 100%; max-width: 100%; overflow: hidden; }
     .workspace-table-cell-editor > .ant-input-number,
     .workspace-table-cell-editor > .ant-picker,
     .workspace-table-cell-editor > .ant-select,
     .workspace-table-cell-editor > .ant-input,
-    .workspace-table-cell-editor > .ant-space-compact { width: 100%; }
+    .workspace-table-cell-editor > .ant-space-compact { width: 100%; min-width: 0; max-width: 100%; }
+    .workspace-table-cell-editor > .ant-space-compact > * { min-width: 0; }
+    .workspace-table-cell-editor > .ant-space-compact > .ant-btn { flex: 0 0 auto; }
     .workspace-table-footer { display: flex; flex: 0 0 auto; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 14px; border-top: 1px solid var(--workspace-border); background: var(--workspace-surface); color: var(--workspace-text-muted); font-size: 12px; }
     .workspace-deck-view { display: flex; flex: 1; min-width: 0; min-height: 0; flex-direction: column; background: var(--workspace-surface-muted); }
     .workspace-deck-toolbar { display: flex; flex: 0 0 auto; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 12px; border-bottom: 1px solid var(--workspace-border); background: var(--workspace-surface-raised); }
