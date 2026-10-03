@@ -157,6 +157,7 @@ import { createCloudAccountUi } from "./cloud-account.js";
     workspacePromise: null,
     workspaceWriteQueue: Promise.resolve(),
     propertyColumn: null,
+    primaryCreation: null,
     pendingWrites: new Map(),
     sheetViewWrites: new Map(),
     sheetDataRevision: 0,
@@ -563,6 +564,15 @@ import { createCloudAccountUi } from "./cloud-account.js";
       background: ${antdTokens.colorFillQuaternary};
     }
     .property-protection .property-help { margin: 4px 0 0 24px; }
+    .property-random-id {
+      display: grid; gap: 12px; margin-bottom: 22px; padding: 12px;
+      border: 1px solid ${antdTokens.colorBorder}; border-radius: ${antdTokens.borderRadius}px;
+      background: ${antdTokens.colorFillQuaternary};
+    }
+    .property-random-id-length { display: grid; grid-template-columns: minmax(0, 1fr) 120px; align-items: center; gap: 12px; }
+    .property-random-id-length > span { color: ${antdTokens.colorText}; font-weight: 600; }
+    .property-random-id-length .ant-input-number { width: 100%; }
+    .property-random-id .property-help { margin: -4px 0 0 24px; }
     .property-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
     .option-editor { border: 1px solid ${antdTokens.colorBorder}; border-radius: ${antdTokens.borderRadius}px; padding: 10px; }
     .option-editor-header {
@@ -1697,6 +1707,16 @@ import { createCloudAccountUi } from "./cloud-account.js";
     return React.createElement(
       React.Fragment,
       null,
+      React.createElement(Button, {
+        type: "text",
+        shape: "circle",
+        size: "small",
+        icon: React.createElement(PlusOutlined),
+        title: "Agregar registro",
+        "aria-label": "Agregar registro",
+        "data-add-record": "current",
+        onClick: () => void beginPrimaryRecordCreation()
+      }),
       statusColumns.length ? React.createElement(Button, {
         type: "text",
         shape: "circle",
@@ -2344,6 +2364,46 @@ import { createCloudAccountUi } from "./cloud-account.js";
     return String(value ?? "").trim();
   }
 
+  const RANDOM_ID_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
+
+  function randomIdValue(length) {
+    const size = Math.min(64, Math.max(1, Number(length) || 12));
+    const values = new Uint32Array(size);
+    crypto.getRandomValues(values);
+    return Array.from(values, (value) => RANDOM_ID_ALPHABET[value % RANDOM_ID_ALPHABET.length]).join("");
+  }
+
+  function randomIdDrafts(properties, rows) {
+    const drafts = new Map();
+    for (const property of properties) {
+      if (property.type !== "text" || !property.randomId) continue;
+      const used = new Set((rows || []).map((row) => comparable(row.cells?.[property.index])).filter(Boolean));
+      let value = "";
+      for (let attempt = 0; attempt < 20 && (!value || used.has(value)); attempt += 1) {
+        value = randomIdValue(property.randomIdLength);
+      }
+      drafts.set(property.index, { index: property.index, value, systemGenerated: true });
+    }
+    return drafts;
+  }
+
+  function nextRecordRowNumber(table) {
+    return Math.max(1, ...(table?.rows || [])
+      .filter((row) => row.cells?.some((value) => comparable(value)))
+      .map((row) => Number(row.number) || 1)) + 1;
+  }
+
+  async function waitForRecordCreationReady() {
+    await drainSheetViewMutations();
+    const deadline = Date.now() + 8_000;
+    while (Date.now() < deadline && (state.loading || state.saving || hasPendingWriteVerification())) {
+      await wait(100);
+    }
+    if (state.loading || state.saving || hasPendingWriteVerification()) {
+      throw new Error("Espera a que termine la operación actual antes de agregar un registro.");
+    }
+  }
+
   function normalizedCheckboxConfiguredValue(value, checked) {
     const fallback = checked ? "TRUE" : "FALSE";
     const text = comparable(value) || fallback;
@@ -2423,6 +2483,8 @@ import { createCloudAccountUi } from "./cloud-account.js";
       name: header || `Columna ${columnName(index + 1)}`,
       customName: false,
       protected: false,
+      randomId: false,
+      randomIdLength: 12,
       type: "text",
       options: [],
       optionColors: {},
@@ -2459,6 +2521,8 @@ import { createCloudAccountUi } from "./cloud-account.js";
       customName: Boolean(source.customName),
       protected: source.protected === true,
       type: FIELD_TYPE_VALUES.has(source.type) ? source.type : "text",
+      randomId: source.type === "text" && source.randomId === true,
+      randomIdLength: Math.min(64, Math.max(1, Number(source.randomIdLength ?? 12) || 12)),
       options,
       optionColors,
       currencySymbol: String(source.currencySymbol || "$"),
@@ -3082,7 +3146,7 @@ import { createCloudAccountUi } from "./cloud-account.js";
 
   function setRelatedDraft(relation, row, column, editorValue) {
     const property = relatedProperty(relation, column);
-    if (property.protected) return;
+    if (property.protected || (row.isNew && column.propertyIndex === Number(relation.matchIndex))) return;
     const key = relatedDraftKey(relation.sheetName, row.number, column.propertyIndex);
     const existing = state.relatedDrafts.get(key);
     const previousValue = existing?.previousValue ?? String(row.cells[column.index] ?? "");
@@ -3125,6 +3189,8 @@ import { createCloudAccountUi } from "./cloud-account.js";
   function RelatedCellEditor({ relation, row, column }) {
     useRelatedDraftVersion();
     const property = relatedProperty(relation, column);
+    const relationKeyLocked = row.isNew && column.propertyIndex === Number(relation.matchIndex);
+    const editorProperty = relationKeyLocked ? { ...property, protected: true } : property;
     const rawValue = relatedDraftValue(relation, row, column);
     return React.createElement(
       "div",
@@ -3134,11 +3200,11 @@ import { createCloudAccountUi } from "./cloud-account.js";
         "data-related-row": String(row.number),
         "data-related-column": String(column.propertyIndex + 1),
         "data-field-type": property.type,
-        "data-protected": property.protected ? "true" : "false"
+        "data-protected": editorProperty.protected ? "true" : "false"
       },
       React.createElement(PropertyEditorControl, {
-        property,
-        value: editorValueFromRaw(rawValue, property),
+        property: editorProperty,
+        value: editorValueFromRaw(rawValue, editorProperty),
         onChange: (nextValue) => setRelatedDraft(relation, row, column, nextValue)
       })
     );
@@ -3242,13 +3308,15 @@ import { createCloudAccountUi } from "./cloud-account.js";
       Drawer,
       {
         open,
-        onClose,
+        onClose: row.isNew ? discard : onClose,
         width: 720,
         destroyOnClose: true,
         className: "record-drawer related-record-drawer",
         rootClassName: "related-record-drawer-root",
         getContainer: () => panelDocument.body,
-        title: `${relation.sheetName} · fila ${row.number}`,
+        title: row.isNew
+          ? `Nuevo registro · ${relation.sheetName}`
+          : `${relation.sheetName} · fila ${row.number}`,
         footer: React.createElement(
           "div",
           { className: "related-drawer-footer" },
@@ -3299,11 +3367,81 @@ import { createCloudAccountUi } from "./cloud-account.js";
     );
   }
 
+  function relationAllowsCreation(relation) {
+    return relation.creationMode === "child" || (
+      !relation.creationMode && String(relation.description || "").startsWith("Lista relacionada")
+    );
+  }
+
+  async function prepareRelatedRecord(relation) {
+    if (!relationAllowsCreation(relation)) {
+      throw new Error("Esta relación apunta a un registro principal existente y no admite altas desde aquí.");
+    }
+    if (state.primaryDrafts.size || state.relatedDrafts.size) {
+      throw new Error("Guarda o cancela los cambios pendientes antes de agregar un registro relacionado.");
+    }
+
+    setActivity("creation", true);
+    try {
+      await waitForRecordCreationReady();
+      const table = await readSheetTable(relation.sheetName, `A1:${MAX_COLUMN}`, undefined);
+      const width = usedCellWidth(table.headers);
+      if (!width) throw new Error(`La hoja ${relation.sheetName} necesita encabezados antes de agregar registros.`);
+      if (relation.sheetGid) reconcileSheetConfiguration(relation.sheetGid, relation.sheetName, fitCells(table.headers, width));
+      const configured = relationSheetConfiguration(relation);
+      const properties = Array.from({ length: width }, (_, index) => (
+        configured?.columns?.[index] || defaultProperty(index, table.headers[index] || "")
+      ));
+      const seeded = randomIdDrafts(properties, table.rows);
+      const matchIndex = Number(relation.matchIndex);
+      if (!Number.isInteger(matchIndex) || matchIndex < 0 || !relation.matchValue) {
+        throw new Error("No pude determinar la columna que vincula este relacionado.");
+      }
+      seeded.set(matchIndex, {
+        index: matchIndex,
+        value: String(relation.matchValue),
+        systemGenerated: true
+      });
+
+      const columns = displayRelationColumns(relation);
+      const row = {
+        number: nextRecordRowNumber(table),
+        cells: Array.from({ length: relation.headers.length }, () => ""),
+        isNew: true
+      };
+      for (const [columnIndex, seed] of seeded) {
+        const column = columns.find((candidate) => candidate.propertyIndex === columnIndex);
+        if (!column) continue;
+        const property = properties[columnIndex];
+        const key = relatedDraftKey(relation.sheetName, row.number, columnIndex);
+        state.relatedDrafts.set(key, {
+          key,
+          sheetName: relation.sheetName,
+          rowNumber: row.number,
+          columnIndex,
+          cellIndex: column.index,
+          value: seed.value,
+          previousValue: "",
+          property,
+          relation,
+          row,
+          systemGenerated: true,
+          isNewRecord: true
+        });
+      }
+      notifyRelatedDrafts();
+      return row;
+    } finally {
+      setActivity("creation", false);
+    }
+  }
+
   function RelationSection({ relation, initialView }) {
     const [expanded, setExpanded] = React.useState(true);
     const [view, setView] = React.useState(initialView);
     const [page, setPage] = React.useState(1);
     const [openRow, setOpenRow] = React.useState(null);
+    const [creating, setCreating] = React.useState(false);
     const columns = displayRelationColumns(relation);
     const pageSize = view === "table" ? 10 : 4;
     const totalCount = relation.totalCount ?? relation.rows.length;
@@ -3316,6 +3454,19 @@ import { createCloudAccountUi } from "./cloud-account.js";
       setView(nextView);
       setPage(1);
       setRelationView(relation.sheetName, nextView);
+    };
+
+    const addRelatedRecord = async () => {
+      if (creating) return;
+      setCreating(true);
+      try {
+        setOpenRow(await prepareRelatedRecord(relation));
+        setStatus("");
+      } catch (error) {
+        setStatus(error.message, "error");
+      } finally {
+        setCreating(false);
+      }
     };
 
     return React.createElement(
@@ -3344,6 +3495,17 @@ import { createCloudAccountUi } from "./cloud-account.js";
         React.createElement(
           "div",
           { className: "relation-actions relation-section-actions" },
+          relationAllowsCreation(relation) ? React.createElement(Button, {
+            type: "text",
+            shape: "circle",
+            size: "small",
+            icon: React.createElement(PlusOutlined),
+            loading: creating,
+            title: `Agregar registro en ${relation.sheetName}`,
+            "aria-label": `Agregar registro en ${relation.sheetName}`,
+            "data-add-related-record": relation.sheetName,
+            onClick: () => void addRelatedRecord()
+          }) : null,
           React.createElement(Segmented, {
             size: "small",
             value: view,
@@ -3413,6 +3575,9 @@ import { createCloudAccountUi } from "./cloud-account.js";
         sheetName: relation.sheetName,
         sheetGid: String(relation.sheetGid || ""),
         description: relation.description,
+        matchIndex: Number(relation.matchIndex),
+        matchValue: String(relation.matchValue || ""),
+        creationMode: relation.creationMode === "reference" ? "reference" : "child",
         headers: columns.map((column) => column.header),
         columnIndexes: columns.map((column, position) => Number(relation.columnIndexes?.[position] ?? column.index)),
         totalCount: relation.totalCount ?? relation.rows.length,
@@ -3511,6 +3676,7 @@ import { createCloudAccountUi } from "./cloud-account.js";
               sheetGid: table.gid,
               matchIndex: foreignIndex,
               matchValue: keyValue,
+              creationMode: "child",
               description: `Lista relacionada por ${currentHeaders[currentPrimary]}`
             });
           }
@@ -3529,6 +3695,7 @@ import { createCloudAccountUi } from "./cloud-account.js";
               sheetGid: table.gid,
               matchIndex: otherPrimary,
               matchValue: keyValue,
+              creationMode: "reference",
               description: `Registro referenciado por ${table.headers[otherPrimary]}`
             });
           }
@@ -3773,6 +3940,7 @@ import { createCloudAccountUi } from "./cloud-account.js";
     let relatedChanged = false;
     for (const [index] of state.primaryDrafts) {
       if (!propertyForColumn(index).protected) continue;
+      if (state.primaryDrafts.get(index)?.systemGenerated) continue;
       state.primaryDrafts.delete(index);
       primaryChanged = true;
     }
@@ -3782,6 +3950,7 @@ import { createCloudAccountUi } from "./cloud-account.js";
         header: draft.property?.sourceHeader || draft.property?.name || ""
       });
       if (!property.protected) continue;
+      if (draft.systemGenerated) continue;
       state.relatedDrafts.delete(key);
       relatedChanged = true;
     }
@@ -3797,13 +3966,17 @@ import { createCloudAccountUi } from "./cloud-account.js";
   function syncPendingActions() {
     const ready = Boolean(state.row && state.viewRow === state.row && state.viewGid === state.gid);
     const hasChanges = ready && (state.primaryDrafts.size > 0 || state.relatedDrafts.size > 0);
-    const disabled = state.saving || !hasChanges;
-    ui.save.disabled = disabled;
-    ui.cancel.disabled = disabled;
+    const blocked = state.saving || hasPendingWriteVerification();
+    ui.save.disabled = blocked || !hasChanges;
+    ui.cancel.disabled = blocked || (!hasChanges && !state.primaryCreation);
     host.dataset.hasPendingChanges = hasChanges ? "true" : "false";
   }
 
   function cancelChanges() {
+    if (state.primaryCreation) {
+      void cancelPrimaryRecordCreation();
+      return;
+    }
     if (state.saving || state.viewRow !== state.row || state.viewGid !== state.gid) return;
     state.primaryDrafts.clear();
     renderFields();
@@ -3868,6 +4041,83 @@ import { createCloudAccountUi } from "./cloud-account.js";
     ui.fields.inert = false;
     ui.fields.removeAttribute("aria-busy");
     syncPendingActions();
+  }
+
+  async function beginPrimaryRecordCreation() {
+    if (state.primaryDrafts.size || state.relatedDrafts.size) {
+      setStatus("Guarda o cancela los cambios pendientes antes de agregar un registro.", "error");
+      return;
+    }
+
+    const gid = currentGid();
+    const sheetName = activeSheetName() || state.sheetName || `Hoja ${gid}`;
+    setActivity("creation", true);
+    try {
+      await waitForRecordCreationReady();
+      const table = await readSheetTable(sheetName, `A1:${MAX_COLUMN}`, undefined);
+      const width = usedCellWidth(table.headers);
+      if (!width) throw new Error("La hoja necesita encabezados antes de agregar registros.");
+      const sourceLabels = fitCells(table.headers, width);
+      reconcileSheetConfiguration(gid, sheetName, sourceLabels);
+      const properties = sourceLabels.map((label, index) => propertyForColumn(index));
+      const drafts = randomIdDrafts(properties, table.rows);
+      const row = nextRecordRowNumber(table);
+
+      state.request?.abort();
+      state.relationRequest?.abort();
+      state.request = null;
+      state.relationRequest = null;
+      state.primaryCreation = {
+        gid,
+        sheetName,
+        row,
+        returnRow: state.row,
+        returnGid: state.gid
+      };
+      state.row = row;
+      state.gid = gid;
+      state.sheetName = sheetName;
+      state.viewRow = row;
+      state.viewGid = gid;
+      state.fields = sourceLabels.map((label, index) => label || `Columna ${columnName(index + 1)}`);
+      state.values = Array.from({ length: width }, () => "");
+      state.primaryDrafts = drafts;
+      host.dataset.row = String(row);
+      host.dataset.creatingRecord = "true";
+      ui.meta.textContent = `${sheetName} · nuevo registro en fila ${row}`;
+      clearRelations();
+      setRelatedStatus("Guarda el registro para buscar sus relaciones.", false);
+      setEmptyState(false);
+      ui.fields.inert = false;
+      ui.fields.removeAttribute("aria-busy");
+      renderFields(new Map([...drafts].map(([index, draft]) => [index, draft.value])));
+      setStatus(`Nuevo registro preparado en la fila ${row}`);
+      syncPendingActions();
+    } catch (error) {
+      setStatus(error.message, "error");
+    } finally {
+      setActivity("creation", false);
+    }
+  }
+
+  async function cancelPrimaryRecordCreation() {
+    if (state.saving) return;
+    const creation = state.primaryCreation;
+    state.primaryCreation = null;
+    delete host.dataset.creatingRecord;
+    state.primaryDrafts.clear();
+    syncPendingActions();
+    const selected = selectedRow(nameBoxValue());
+    const row = creation?.returnGid === currentGid() && creation?.returnRow > 1
+      ? creation.returnRow
+      : selected > 1
+        ? selected
+        : null;
+    if (row) await loadRow(row, true);
+    else {
+      state.lastSelection = "";
+      pollSelection();
+    }
   }
 
   async function loadRow(row, force = false) {
@@ -4124,6 +4374,44 @@ import { createCloudAccountUi } from "./cloud-account.js";
     }, "Proteger");
   }
 
+  function PropertyRandomIdControl({ initialEnabled, initialLength }) {
+    const [enabled, setEnabled] = React.useState(initialEnabled === true);
+    const [length, setLength] = React.useState(Math.min(64, Math.max(1, Number(initialLength) || 12)));
+    return React.createElement(
+      "div",
+      { className: "property-random-id" },
+      React.createElement(Checkbox, {
+        checked: enabled,
+        name: "randomId",
+        onChange: (event) => setEnabled(event.target.checked)
+      }, "Usar como ID aleatorio"),
+      React.createElement(
+        "label",
+        { className: "property-random-id-length" },
+        React.createElement("span", null, "Longitud de caracteres"),
+        React.createElement(InputNumber, {
+          min: 1,
+          max: 64,
+          precision: 0,
+          value: length,
+          disabled: !enabled,
+          onChange: (value) => setLength(Math.min(64, Math.max(1, Number(value) || 12)))
+        })
+      ),
+      React.createElement("input", {
+        type: "hidden",
+        name: "randomIdLength",
+        value: String(length),
+        readOnly: true
+      }),
+      React.createElement(
+        "div",
+        { className: "property-help" },
+        "Al crear un registro, completa este campo con letras y números generados al azar."
+      )
+    );
+  }
+
   function renderPropertyTypeSelect() {
     if (!ui.propertyTypeHost._reactRoot) ui.propertyTypeHost._reactRoot = createRoot(ui.propertyTypeHost);
     const selector = React.createElement(PropertyTypeControl, {
@@ -4142,11 +4430,33 @@ import { createCloudAccountUi } from "./cloud-account.js";
     const protectedValue = reset || !(existingProtection instanceof panelFrame.contentWindow.HTMLInputElement)
       ? property.protected
       : existingProtection.checked;
+    const existingRandomId = ui.propertyForm.elements.namedItem("randomId");
+    const existingRandomIdLength = ui.propertyForm.elements.namedItem("randomIdLength");
+    const randomIdValue = reset || !(existingRandomId instanceof panelFrame.contentWindow.HTMLInputElement)
+      ? property.randomId
+      : existingRandomId.checked;
+    const randomIdLengthValue = reset || !(existingRandomIdLength instanceof panelFrame.contentWindow.HTMLInputElement)
+      ? property.randomIdLength
+      : existingRandomIdLength.value;
     ui.propertySettings._optionsRoot?.unmount();
     ui.propertySettings._protectionRoot?.unmount();
+    ui.propertySettings._randomIdRoot?.unmount();
     delete ui.propertySettings._optionsRoot;
     delete ui.propertySettings._protectionRoot;
+    delete ui.propertySettings._randomIdRoot;
     ui.propertySettings.replaceChildren();
+
+    if (type === "text") {
+      const randomIdHost = element("div");
+      ui.propertySettings.appendChild(randomIdHost);
+      ui.propertySettings._randomIdRoot = createRoot(randomIdHost);
+      flushSync(() => ui.propertySettings._randomIdRoot.render(antdTree(
+        React.createElement(PropertyRandomIdControl, {
+          initialEnabled: randomIdValue,
+          initialLength: randomIdLengthValue
+        })
+      )));
+    }
 
     if (["select", "multiSelect", "status"].includes(type)) {
       const optionsHost = element("div", "property-form-item");
@@ -4262,6 +4572,8 @@ import { createCloudAccountUi } from "./cloud-account.js";
       customName: name !== previous.sourceHeader,
       protected: formData.has("protected"),
       type,
+      randomId: type === "text" && formData.has("randomId"),
+      randomIdLength: formData.get("randomIdLength") ?? previous.randomIdLength,
       options,
       optionColors,
       currencySymbol: formData.get("currencySymbol") ?? previous.currencySymbol,
@@ -4273,8 +4585,8 @@ import { createCloudAccountUi } from "./cloud-account.js";
     }, index, previous.sourceHeader);
     const drafts = new Map(currentInputValues().map((value, columnIndex) => [columnIndex, value]));
     if (next.protected) {
-      state.primaryDrafts.delete(index);
-      drafts.set(index, state.values[index] || "");
+      if (!state.primaryDrafts.get(index)?.systemGenerated) state.primaryDrafts.delete(index);
+      drafts.set(index, state.primaryDrafts.get(index)?.value ?? state.values[index] ?? "");
     }
     sheet.columns[index] = next;
     sheet.updatedAt = Date.now();
@@ -4657,6 +4969,15 @@ import { createCloudAccountUi } from "./cloud-account.js";
             state.values = confirmedValues;
             state.headerCache.delete(`${spreadsheetId()}:${entry.gid}`);
             state.sheetCache.clear();
+            if (entry.creation) {
+              state.primaryCreation = null;
+              delete host.dataset.creatingRecord;
+              state.lastSelection = `${entry.gid}:${normalizedColumn(entry.creation.sheetName)}:row:${entry.row}`;
+              ui.meta.textContent = `${entry.creation.sheetName} · fila ${entry.row}`;
+              setStatus(`Registro creado en la fila ${entry.row}`);
+            }
+            state.sheetDataRevision += 1;
+            renderSheetViewActions();
             host.dataset.writeVerification = hasPendingWriteVerification() ? "pending" : "verified";
             syncPendingActions();
             const relationshipKeyChanged = entry.writtenCells.some(({ index }) => /^id[a-z0-9]*/.test(normalizedColumn(entry.labels[index])));
@@ -4768,6 +5089,7 @@ import { createCloudAccountUi } from "./cloud-account.js";
       previousValues: previousPending?.previousValues || [...state.values],
       writtenCells,
       pendingSince,
+      creation: state.primaryCreation ? { ...state.primaryCreation } : null,
       controller
     };
     state.pendingWrites.set(key, entry);
@@ -4804,6 +5126,8 @@ import { createCloudAccountUi } from "./cloud-account.js";
         rowNumber: firstDraft.rowNumber,
         relation: firstDraft.relation,
         row: firstDraft.row,
+        drafts: [...plan.drafts],
+        isNewRecord: firstDraft.row.isNew === true,
         previousCells: [...previousByIndex.values()],
         writtenCells: [...writtenByIndex.values()].sort((left, right) => left.index - right.index),
         controller: new AbortController()
@@ -4832,9 +5156,19 @@ import { createCloudAccountUi } from "./cloud-account.js";
           for (const column of displayRelationColumns(entry.relation)) {
             entry.row.cells[column.index] = String(values[column.propertyIndex] ?? "");
           }
+          if (entry.isNewRecord && !entry.relation.rows.some((row) => row.number === entry.rowNumber)) {
+            entry.row.isNew = false;
+            entry.relation.rows.push(entry.row);
+            entry.relation.rows.sort((left, right) => left.number - right.number);
+            entry.relation.totalCount = Number(entry.relation.totalCount ?? entry.relation.rows.length - 1) + 1;
+          }
           state.pendingWrites.delete(entry.key);
           state.sheetCache.clear();
           persistVisibleRelations();
+          if (entry.isNewRecord) {
+            showRelations([...state.relations]);
+            startRelationships(state.fields, state.values, undefined, true);
+          }
           host.dataset.writeVerification = hasPendingWriteVerification() ? "pending" : "verified";
           notifyRelatedDrafts();
           return;
@@ -4850,6 +5184,7 @@ import { createCloudAccountUi } from "./cloud-account.js";
         const column = displayRelationColumns(entry.relation).find((item) => item.propertyIndex === previous.index);
         if (column) entry.row.cells[column.index] = previous.value;
       }
+      for (const draft of entry.drafts || []) state.relatedDrafts.set(draft.key, draft);
       state.sheetCache.clear();
       persistVisibleRelations();
       host.dataset.writeVerification = "failed";
@@ -4935,7 +5270,11 @@ import { createCloudAccountUi } from "./cloud-account.js";
     notifyRelatedDrafts();
     setStatus(`Guardando ${changeCount} campo(s)…`, "busy");
     try {
-      await writeRanges(operations);
+      const createsRelatedRecord = relatedPlan.rowPlans.some((plan) => plan.drafts.some((draft) => draft.row.isNew));
+      const selectionReference = createsRelatedRecord
+        ? qualifiedReference(state.sheetName, `A${state.row}`)
+        : "";
+      await writeRanges(operations, selectionReference);
       registerPrimaryWrite(primaryPlan);
       registerRelatedWrites(relatedPlan.rowPlans);
       host.dataset.writeVerification = "pending";
@@ -5248,7 +5587,7 @@ import { createCloudAccountUi } from "./cloud-account.js";
   }
 
   async function refreshOpenSheetData() {
-    if (panelFrame.hidden || state.saving || state.writeInteractionDepth > 0 || !cloudAccessAllowed()) return true;
+    if (panelFrame.hidden || state.saving || state.primaryCreation || state.writeInteractionDepth > 0 || !cloudAccessAllowed()) return true;
     const previousValues = [...state.values];
     state.sheetCache.clear();
     state.sheetDataRevision += 1;
@@ -5297,7 +5636,7 @@ import { createCloudAccountUi } from "./cloud-account.js";
   });
 
   function pollSelection() {
-    if (state.saving || state.writeInteractionDepth > 0) return;
+    if (state.saving || state.primaryCreation || state.writeInteractionDepth > 0) return;
     if (!cloudAccessAllowed()) return;
     const reference = nameBoxValue();
     if (!reference) return;

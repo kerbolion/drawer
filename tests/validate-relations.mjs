@@ -1160,7 +1160,193 @@ try {
   if (!optimisticResult?.checked || optimisticResult.value !== "TRUE" || optimisticResult.saveState !== "saved" || optimisticResult.verification !== "verified" || optimisticResult.pastes.length !== 1) {
     throw new Error(`La casilla no quedó estable después de verificar: ${JSON.stringify(optimisticResult)}`);
   }
-  console.log("RELACIONES_OK: Deck abre drawer, Tabla edita relacionados, guardado entre hojas, tipos persistentes y caché confirmados.");
+
+  await cdp.evaluate(`(() => {
+    const panel = document.getElementById("sheets-session-probe").shadowRoot.querySelector(".panel-frame").contentDocument;
+    panel.querySelector('[data-configure-column="1"]').click();
+    const randomId = panel.querySelector('[name="randomId"]');
+    if (!randomId.checked) randomId.click();
+    const lengthInput = panel.querySelector(".property-random-id .ant-input-number-input");
+    const setter = Object.getOwnPropertyDescriptor(panel.defaultView.HTMLInputElement.prototype, "value").set;
+    setter.call(lengthInput, "9");
+    lengthInput.dispatchEvent(new panel.defaultView.Event("input", { bubbles: true }));
+    lengthInput.dispatchEvent(new panel.defaultView.Event("change", { bubbles: true }));
+  })()`);
+  await delay(100);
+  const randomIdConfiguration = await cdp.evaluate(`(() => {
+    const panel = document.getElementById("sheets-session-probe").shadowRoot.querySelector(".panel-frame").contentDocument;
+    const hiddenLength = panel.querySelector('[name="randomIdLength"]');
+    const configuredLength = hiddenLength?.value || "";
+    panel.querySelector("#srd-property-form").requestSubmit();
+    panel.querySelector('[data-configure-column="1"]').click();
+    const result = {
+      enabled: panel.querySelector('[name="randomId"]')?.checked,
+      length: panel.querySelector('[name="randomIdLength"]')?.value,
+      inputRole: panel.querySelector(".property-random-id .ant-input-number-input")?.getAttribute("role")
+    };
+    panel.querySelector(".property-actions .secondary-button").click();
+    return { configuredLength, ...result };
+  })()`);
+  if (!randomIdConfiguration.enabled || randomIdConfiguration.length !== "9" || randomIdConfiguration.inputRole !== "spinbutton") {
+    throw new Error(`La configuración del ID aleatorio no persistió: ${JSON.stringify(randomIdConfiguration)}`);
+  }
+
+  await cdp.evaluate(`(() => {
+    window.__createRecordPastes = [];
+    document.addEventListener("paste", event => {
+      window.__createRecordPastes.push({
+        reference: document.getElementById("t-name-box")?.value || "",
+        value: event.clipboardData?.getData("text/plain") || ""
+      });
+    }, { capture: true });
+    const panel = document.getElementById("sheets-session-probe").shadowRoot.querySelector(".panel-frame").contentDocument;
+    panel.querySelector('[data-add-record="current"]').click();
+  })()`);
+  const createRecordDeadline = Date.now() + 5_000;
+  let newService;
+  while (Date.now() < createRecordDeadline) {
+    newService = await cdp.evaluate(`(() => {
+      const host = document.getElementById("sheets-session-probe");
+      const panel = host.shadowRoot.querySelector(".panel-frame").contentDocument;
+      return {
+        creating: host.dataset.creatingRecord,
+        row: host.dataset.row,
+        id: panel.querySelector('[data-column="1"]')?.dataset.serializedValue || "",
+        cancelDisabled: panel.querySelector(".cancel")?.disabled
+      };
+    })()`);
+    if (newService.creating === "true" && newService.row === "6" && newService.id) break;
+    await delay(100);
+  }
+  if (newService?.creating !== "true" || newService.row !== "6" || !/^[A-Za-z0-9]{9}$/.test(newService.id) || newService.cancelDisabled) {
+    throw new Error(`El alta principal no preparó la fila ni el ID: ${JSON.stringify(newService)}`);
+  }
+  const createdServiceId = newService.id;
+  await cdp.evaluate(`(() => {
+    const panel = document.getElementById("sheets-session-probe").shadowRoot.querySelector(".panel-frame").contentDocument;
+    const input = panel.querySelector('[data-column="4"] input');
+    const setter = Object.getOwnPropertyDescriptor(panel.defaultView.HTMLInputElement.prototype, "value").set;
+    setter.call(input, "Creado desde la hoja actual");
+    input.dispatchEvent(new panel.defaultView.Event("input", { bubbles: true }));
+    panel.querySelector(".save").click();
+  })()`);
+  setTimeout(() => {
+    sheets.Servicios.rows.push([createdServiceId, "", "FALSE", "Creado desde la hoja actual", "", ""]);
+  }, 450);
+  await waitForWriteVerification();
+  const createdService = await cdp.evaluate(`(() => {
+    const host = document.getElementById("sheets-session-probe");
+    const panel = host.shadowRoot.querySelector(".panel-frame").contentDocument;
+    return {
+      creating: host.dataset.creatingRecord || "",
+      row: host.dataset.row,
+      id: panel.querySelector('[data-column="1"]')?.dataset.serializedValue || "",
+      note: panel.querySelector('[data-column="4"]')?.dataset.serializedValue || "",
+      pastes: window.__createRecordPastes
+    };
+  })()`);
+  if (
+    createdService.creating ||
+    createdService.row !== "6" ||
+    createdService.id !== createdServiceId ||
+    createdService.note !== "Creado desde la hoja actual" ||
+    createdService.pastes.length !== 1 ||
+    createdService.pastes[0].reference !== "'Servicios'!A6" ||
+    createdService.pastes[0].value !== `${createdServiceId}\t\tFALSE\tCreado desde la hoja actual`
+  ) {
+    throw new Error(`El alta principal no escribió solo las celdas nuevas: ${JSON.stringify(createdService)}`);
+  }
+
+  await cdp.evaluate(`(() => {
+    const tabs = Array.from(document.querySelectorAll(".docs-sheet-tab"));
+    tabs.forEach(tab => tab.classList.remove("docs-sheet-active-tab"));
+    tabs.find(tab => tab.textContent.includes("Contactos")).classList.add("docs-sheet-active-tab");
+    location.hash = "gid=0&range=A2";
+    const box = document.getElementById("t-name-box");
+    box.value = "A2";
+    box.dispatchEvent(new Event("input", { bubbles: true }));
+  })()`);
+  await waitForRelation("Servicios");
+  await cdp.evaluate(`(() => {
+    window.__createRelatedPastes = [];
+    document.addEventListener("paste", event => {
+      window.__createRelatedPastes.push({
+        reference: document.getElementById("t-name-box")?.value || "",
+        value: event.clipboardData?.getData("text/plain") || ""
+      });
+    }, { capture: true });
+    const panel = document.getElementById("sheets-session-probe").shadowRoot.querySelector(".panel-frame").contentDocument;
+    panel.querySelector('[data-add-related-record="Servicios"]').click();
+  })()`);
+  const relatedCreateDeadline = Date.now() + 5_000;
+  let newRelatedService;
+  while (Date.now() < relatedCreateDeadline) {
+    newRelatedService = await cdp.evaluate(`(() => {
+      const host = document.getElementById("sheets-session-probe");
+      const panel = document.getElementById("sheets-session-probe").shadowRoot.querySelector(".panel-frame").contentDocument;
+      const drawer = panel.querySelector(".related-record-drawer");
+      const button = panel.querySelector('[data-add-related-record="Servicios"]');
+      return {
+        open: Boolean(drawer),
+        title: drawer?.querySelector(".ant-drawer-title")?.textContent || "",
+        id: drawer?.querySelector('[data-related-column="1"] input')?.value || "",
+        relationId: drawer?.querySelector('[data-related-column="2"] input')?.value || "",
+        relationDisabled: drawer?.querySelector('[data-related-column="2"] input')?.disabled || false,
+        button: Boolean(button),
+        buttonLoading: button?.classList.contains("ant-btn-loading") || false,
+        status: panel.querySelector(".status")?.textContent || "",
+        statusKind: host.dataset.status || "",
+        saveState: host.dataset.saveState || "",
+        pending: host.dataset.hasPendingChanges || ""
+      };
+    })()`);
+    if (newRelatedService.open && newRelatedService.id && newRelatedService.relationId) break;
+    await delay(100);
+  }
+  if (!newRelatedService?.open || !newRelatedService.title.includes("Nuevo registro") || !/^[A-Za-z0-9]{9}$/.test(newRelatedService.id) || newRelatedService.relationId !== "C-1" || !newRelatedService.relationDisabled) {
+    throw new Error(`El alta relacionada no heredó el ID de Contactos: ${JSON.stringify(newRelatedService)}`);
+  }
+  const relatedServiceId = newRelatedService.id;
+  await cdp.evaluate(`(() => {
+    const panel = document.getElementById("sheets-session-probe").shadowRoot.querySelector(".panel-frame").contentDocument;
+    const drawer = panel.querySelector(".related-record-drawer");
+    const input = drawer.querySelector('[data-related-column="4"] input');
+    const setter = Object.getOwnPropertyDescriptor(panel.defaultView.HTMLInputElement.prototype, "value").set;
+    setter.call(input, "Creado desde relacionados");
+    input.dispatchEvent(new panel.defaultView.Event("input", { bubbles: true }));
+    Array.from(drawer.querySelectorAll(".ant-drawer-footer button")).find(button => button.textContent.includes("Guardar"))?.click();
+  })()`);
+  setTimeout(() => {
+    sheets.Servicios.rows.push([relatedServiceId, "C-1", "", "Creado desde relacionados", "", ""]);
+  }, 450);
+  await waitForWriteVerification();
+  const relatedCreatedDeadline = Date.now() + 5_000;
+  let relatedCreated;
+  while (Date.now() < relatedCreatedDeadline) {
+    relatedCreated = await cdp.evaluate(`(() => {
+      const panel = document.getElementById("sheets-session-probe").shadowRoot.querySelector(".panel-frame").contentDocument;
+      const relation = Array.from(panel.querySelectorAll(".relation")).find(item => item.querySelector(".relation-title")?.textContent === "Servicios");
+      return {
+        count: relation?.querySelector(".relation-count")?.textContent || "",
+        drawerOpen: Boolean(panel.querySelector(".related-record-drawer")),
+        pastes: window.__createRelatedPastes
+      };
+    })()`);
+    if (relatedCreated.count === "3" && !relatedCreated.drawerOpen) break;
+    await delay(100);
+  }
+  if (
+    relatedCreated?.count !== "3" ||
+    relatedCreated.drawerOpen ||
+    relatedCreated.pastes.length !== 2 ||
+    relatedCreated.pastes[0].reference !== "'Servicios'!A7" ||
+    relatedCreated.pastes[0].value !== `${relatedServiceId}\tC-1` ||
+    relatedCreated.pastes[1].reference !== "'Servicios'!D7" ||
+    relatedCreated.pastes[1].value !== "Creado desde relacionados"
+  ) {
+    throw new Error(`El alta relacionada no quedó vinculada y confirmada: ${JSON.stringify(relatedCreated)}`);
+  }
+  console.log("RELACIONES_OK: altas principal y relacionada, ID aleatorio, Deck/Tabla, guardado, tipos y caché confirmados.");
 } finally {
   cdp?.close();
   if (browser.pid) spawnSync("taskkill", ["/PID", String(browser.pid), "/T", "/F"], { stdio: "ignore", windowsHide: true });
