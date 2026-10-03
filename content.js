@@ -19,13 +19,16 @@ import Spin from "antd/es/spin/index.js";
 import Switch from "antd/es/switch/index.js";
 import Tag from "antd/es/tag/index.js";
 import TimePicker from "antd/es/time-picker/index.js";
+import Tooltip from "antd/es/tooltip/index.js";
 import {
   CalculatorOutlined,
   AppstoreOutlined,
   CalendarOutlined,
+  CheckOutlined,
   CheckCircleOutlined,
   CheckSquareOutlined,
   CloseOutlined,
+  CopyOutlined,
   DeleteOutlined,
   DownOutlined,
   DragOutlined,
@@ -604,6 +607,15 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     .antd-field-control > .ant-select,
     .antd-field-control > .ant-input,
     .antd-field-control > .ant-space-compact { width: 100%; }
+    .property-value-compact { width: 100%; min-width: 0; }
+    .property-value-compact > :not(.ant-btn) { min-width: 0; flex: 1 1 auto; }
+    .property-value-compact > .ant-btn { flex: 0 0 auto; }
+    .property-value-compact.is-checkbox > .ant-checkbox-wrapper {
+      min-height: ${antdTokens.controlHeight}px; border: 1px solid var(--antd-border); border-radius: ${antdTokens.borderRadius}px 0 0 ${antdTokens.borderRadius}px;
+      padding: 4px 11px; background: var(--antd-bg-container); color: var(--antd-text);
+    }
+    .property-value-compact.is-checkbox > .ant-checkbox-wrapper.ant-checkbox-wrapper-disabled { background: var(--antd-bg-container-disabled); }
+    .field-copy-button.is-copied { border-color: var(--antd-success); color: var(--antd-success); }
     .fields[aria-busy="true"] { cursor: progress; }
     .property-drawer {
       position: fixed; inset: 0; z-index: 1120; display: flex; flex-direction: column;
@@ -2575,32 +2587,111 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     }
   }
 
+  async function writeClipboardText(value) {
+    const text = String(value ?? "");
+    const clipboards = [panelFrame.contentWindow?.navigator?.clipboard, window.navigator?.clipboard].filter(Boolean);
+    for (const clipboard of [...new Set(clipboards)]) {
+      try {
+        await clipboard.writeText(text);
+        return;
+      } catch {}
+    }
+
+    const textarea = panelDocument.createElement("textarea");
+    textarea.value = text;
+    textarea.setAttribute("readonly", "");
+    textarea.style.position = "fixed";
+    textarea.style.left = "-9999px";
+    textarea.style.opacity = "0";
+    panelDocument.body.appendChild(textarea);
+    textarea.focus();
+    textarea.select();
+    const copied = panelDocument.execCommand?.("copy");
+    textarea.remove();
+    if (!copied) throw new Error("El navegador no permitió copiar el valor");
+  }
+
+  function CopyablePropertyControl({ property, value, editor, actions = [] }) {
+    const [copied, setCopied] = React.useState(false);
+    const resetTimer = React.useRef(0);
+    const copyValue = serializeEditorValue(value, property);
+
+    React.useEffect(() => {
+      setCopied(false);
+    }, [copyValue]);
+
+    React.useEffect(() => () => {
+      if (resetTimer.current) panelFrame.contentWindow.clearTimeout(resetTimer.current);
+    }, []);
+
+    const copy = async () => {
+      try {
+        await writeClipboardText(copyValue);
+        setCopied(true);
+        if (resetTimer.current) panelFrame.contentWindow.clearTimeout(resetTimer.current);
+        resetTimer.current = panelFrame.contentWindow.setTimeout(() => setCopied(false), 1_500);
+      } catch (error) {
+        setStatus(error?.message || "No se pudo copiar el valor", "error");
+      }
+    };
+
+    const label = property.name || property.sourceHeader || "valor";
+    const copyButton = React.createElement(
+      Tooltip,
+      { title: copied ? "Copiado" : "Copiar" },
+      React.createElement(Button, {
+        className: `field-copy-button${copied ? " is-copied" : ""}`,
+        disabled: !String(copyValue).length,
+        icon: React.createElement(copied ? CheckOutlined : CopyOutlined),
+        title: copied ? "Copiado" : `Copiar ${label}`,
+        "aria-label": copied ? `${label} copiado` : `Copiar ${label}`,
+        "data-copy-field-value": property.id || property.sourceHeader || label,
+        "data-copy-state": copied ? "copied" : "ready",
+        onClick: copy
+      })
+    );
+
+    return React.createElement(
+      Space.Compact,
+      { block: true, className: `property-value-compact${property.type === "checkbox" ? " is-checkbox" : ""}` },
+      editor,
+      copyButton,
+      ...actions
+    );
+  }
+
   function PropertyEditorControl({ property, value, onChange }) {
     const protectedField = property.protected === true;
     const update = protectedField ? () => {} : onChange;
     const fullWidth = { width: "100%" };
+    const copyable = (editor, actions = []) => React.createElement(CopyablePropertyControl, {
+      property,
+      value,
+      editor,
+      actions
+    });
 
     if (property.type === "longText") {
-      return React.createElement(Input.TextArea, {
+      return copyable(React.createElement(Input.TextArea, {
         value: String(value ?? ""),
         disabled: protectedField,
         autoSize: { minRows: 2, maxRows: 6 },
         onChange: (event) => update(event.target.value)
-      });
+      }));
     }
 
     if (property.type === "number") {
-      return React.createElement(InputNumber, {
+      return copyable(React.createElement(InputNumber, {
         value: value === "" ? null : value,
         disabled: protectedField,
         controls: true,
         onChange: update,
         style: fullWidth
-      });
+      }));
     }
 
     if (property.type === "currency") {
-      return React.createElement(InputNumber, {
+      return copyable(React.createElement(InputNumber, {
         value: value === "" ? null : value,
         disabled: protectedField,
         prefix: property.currencySymbol || "$",
@@ -2608,7 +2699,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
         controls: true,
         onChange: update,
         style: fullWidth
-      });
+      }));
     }
 
     if (["select", "status"].includes(property.type)) {
@@ -2616,7 +2707,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
       if (value && !entries.some((entry) => entry.label === String(value))) {
         entries.push({ label: String(value), color: "" });
       }
-      return React.createElement(Select, {
+      return copyable(React.createElement(Select, {
         allowClear: true,
         disabled: protectedField,
         value: value || undefined,
@@ -2627,7 +2718,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
           label: optionTag(entry.label, entry.color)
         })),
         style: fullWidth
-      });
+      }));
     }
 
     if (property.type === "multiSelect") {
@@ -2636,7 +2727,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
       for (const selectedValue of selected) {
         if (!entries.some((entry) => entry.label === selectedValue)) entries.push({ label: selectedValue, color: "" });
       }
-      return React.createElement(Select, {
+      return copyable(React.createElement(Select, {
         mode: "multiple",
         allowClear: true,
         disabled: protectedField,
@@ -2648,7 +2739,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
           return optionTag(label || selectedValue, entry?.color, { closable, onClose });
         },
         style: fullWidth
-      });
+      }));
     }
 
     if (["date", "datetime"].includes(property.type)) {
@@ -2657,7 +2748,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
       const timeFormat = uses12Hours ? "h:mm A" : "HH:mm";
       const format = usesTime ? `${property.dateFormat} ${timeFormat}` : property.dateFormat;
       const pickerValue = value && dayjs(value).isValid() ? dayjs(value) : null;
-      return React.createElement(DatePicker, {
+      return copyable(React.createElement(DatePicker, {
         value: pickerValue,
         disabled: protectedField,
         locale: datePickerLocale,
@@ -2667,14 +2758,14 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
         format,
         onChange: (date) => update(date ? date.format(usesTime ? "YYYY-MM-DDTHH:mm" : "YYYY-MM-DD") : ""),
         style: fullWidth
-      });
+      }));
     }
 
     if (property.type === "time") {
       const uses12Hours = property.timeFormat === "12";
       const timeFormat = uses12Hours ? "h:mm A" : "HH:mm";
       const pickerValue = value && dayjs(`2000-01-01T${value}`).isValid() ? dayjs(`2000-01-01T${value}`) : null;
-      return React.createElement(TimePicker, {
+      return copyable(React.createElement(TimePicker, {
         value: pickerValue,
         disabled: protectedField,
         locale: datePickerLocale,
@@ -2682,15 +2773,15 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
         use12Hours: uses12Hours,
         onChange: (time) => update(time ? time.format("HH:mm") : ""),
         style: fullWidth
-      });
+      }));
     }
 
     if (property.type === "checkbox") {
-      return React.createElement(Checkbox, {
+      return copyable(React.createElement(Checkbox, {
         checked: Boolean(value),
         disabled: protectedField,
         onChange: (event) => update(event.target.checked)
-      });
+      }));
     }
 
     const textValue = String(value ?? "");
@@ -2702,22 +2793,18 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
       onChange: (event) => update(event.target.value)
     });
 
-    if (!["url", "phone", "email"].includes(property.type)) return input;
+    if (!["url", "phone", "email"].includes(property.type)) return copyable(input);
     const action = {
       url: { label: "Abrir", icon: React.createElement(LinkOutlined), href: /^https?:\/\//i.test(textValue) ? textValue : `https://${textValue}` },
       phone: { label: "Llamar", icon: React.createElement(PhoneOutlined), href: `tel:${textValue}` },
       email: { label: "Enviar", icon: React.createElement(MailOutlined), href: `mailto:${textValue}` }
     }[property.type];
-    return React.createElement(
-      Space.Compact,
-      { block: true },
-      input,
-      React.createElement(Button, {
+    return copyable(input, [React.createElement(Button, {
+        key: "field-action",
         disabled: !textValue.trim(),
         icon: action.icon,
         onClick: () => panelFrame.contentWindow.open(action.href, property.type === "url" ? "_blank" : "_self", "noopener,noreferrer")
-      }, action.label)
-    );
+      }, action.label)]);
   }
 
   function AntFieldControl({ host, property }) {

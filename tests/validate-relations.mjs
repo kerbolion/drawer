@@ -734,6 +734,39 @@ try {
   }
 
   await cdp.evaluate(`(() => {
+    const frame = document.getElementById("sheets-session-probe").shadowRoot.querySelector(".panel-frame");
+    globalThis.__copiedPropertyValues = [];
+    const clipboard = { writeText: async (value) => globalThis.__copiedPropertyValues.push(String(value)) };
+    Object.defineProperty(frame.contentWindow.navigator, "clipboard", { configurable: true, value: clipboard });
+    Object.defineProperty(globalThis.navigator, "clipboard", { configurable: true, value: clipboard });
+  })()`, isolated.executionContextId);
+  await clickPanelNode('[data-column="2"] [data-copy-field-value]');
+  await delay(30);
+  const copiedPropertyValue = await cdp.evaluate(`(() => {
+    const panel = document.getElementById("sheets-session-probe").shadowRoot.querySelector(".panel-frame").contentDocument;
+    const control = panel.querySelector('[data-column="2"]');
+    const button = control.querySelector('[data-copy-field-value]');
+    return {
+      state: button.dataset.copyState,
+      usesCheckIcon: Boolean(button.querySelector('[data-icon="check"]')),
+      disabled: button.disabled,
+      protectedInputDisabled: control.querySelector("textarea")?.disabled,
+      compact: control.querySelector(".property-value-compact")?.classList.contains("ant-space-compact")
+    };
+  })()`);
+  copiedPropertyValue.values = await cdp.evaluate("globalThis.__copiedPropertyValues", isolated.executionContextId);
+  if (
+    copiedPropertyValue.values.join("|") !== "Ana" ||
+    copiedPropertyValue.state !== "copied" ||
+    !copiedPropertyValue.usesCheckIcon ||
+    copiedPropertyValue.disabled ||
+    !copiedPropertyValue.protectedInputDisabled ||
+    !copiedPropertyValue.compact
+  ) {
+    throw new Error(`La copia de valores no siguió el estado esperado: ${JSON.stringify(copiedPropertyValue)}`);
+  }
+
+  await cdp.evaluate(`(() => {
     location.hash = "gid=1&range=A2";
     const box = document.getElementById("t-name-box");
     box.value = "A2";
