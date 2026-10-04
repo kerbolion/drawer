@@ -766,6 +766,47 @@ try {
     throw new Error(`Kanban no represento toda la hoja: ${JSON.stringify(kanban)}`);
   }
 
+  const kanbanLayoutDefaults = await cdp.evaluate(viewExpression(`
+    const board = view.querySelector('.kanban-board');
+    return {
+      columnsInput: view.querySelector('[data-kanban-columns]')?.value || '',
+      heightInput: view.querySelector('[data-kanban-height]')?.value || '',
+      columns: board?.style.getPropertyValue('--kanban-columns') || '',
+      height: board?.style.getPropertyValue('--kanban-height') || '',
+      firstColumnHeight: view.querySelector('.kanban-column') ? getComputedStyle(view.querySelector('.kanban-column')).height : ''
+    };
+  `));
+  if (kanbanLayoutDefaults.columnsInput !== "3" || kanbanLayoutDefaults.heightInput !== "600" || kanbanLayoutDefaults.columns !== "3" || kanbanLayoutDefaults.height !== "600px" || kanbanLayoutDefaults.firstColumnHeight !== "600px") {
+    throw new Error(`Kanban no aplico la configuracion inicial del ejemplo: ${JSON.stringify(kanbanLayoutDefaults)}`);
+  }
+
+  await cdp.evaluate(viewExpression(`
+    const setNumber = (selector, value) => {
+      const input = view.querySelector(selector);
+      const setter = Object.getOwnPropertyDescriptor(view.defaultView.HTMLInputElement.prototype, 'value').set;
+      setter.call(input, String(value));
+      input.dispatchEvent(new view.defaultView.Event('input', { bubbles: true }));
+      input.dispatchEvent(new view.defaultView.Event('change', { bubbles: true }));
+    };
+    setNumber('[data-kanban-columns]', 2);
+    setNumber('[data-kanban-height]', 480);
+  `));
+  await delay(100);
+  const configuredKanbanLayout = await cdp.evaluate(viewExpression(`
+    const board = view.querySelector('.kanban-board');
+    const columns = Array.from(view.querySelectorAll('.kanban-column'));
+    return {
+      columns: board?.style.getPropertyValue('--kanban-columns') || '',
+      height: board?.style.getPropertyValue('--kanban-height') || '',
+      firstColumnHeight: columns[0] ? getComputedStyle(columns[0]).height : '',
+      firstTop: columns[0]?.offsetTop || 0,
+      thirdTop: columns[2]?.offsetTop || 0
+    };
+  `));
+  if (configuredKanbanLayout.columns !== "2" || configuredKanbanLayout.height !== "480px" || configuredKanbanLayout.firstColumnHeight !== "480px" || configuredKanbanLayout.thirdTop <= configuredKanbanLayout.firstTop) {
+    throw new Error(`Kanban no aplico columnas por fila y alto: ${JSON.stringify(configuredKanbanLayout)}`);
+  }
+
   const independentKanban = await cdp.evaluate(`(() => {
     const root = document.getElementById("sheets-session-probe").shadowRoot;
     const panelFrame = root.querySelector(".panel-frame");

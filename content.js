@@ -905,20 +905,23 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
       padding: 12px; border-bottom: 1px solid var(--workspace-border); background: var(--workspace-surface);
     }
     .view-controls .view-search { width: min(280px, 100%); }
+    .kanban-settings { display: flex; align-items: center; justify-content: flex-end; gap: 10px; }
+    .kanban-setting { display: inline-flex; align-items: center; gap: 6px; color: var(--workspace-text-secondary); font-size: 12px; white-space: nowrap; }
+    .kanban-setting .ant-input-number { width: 72px; }
     .kanban-view, .calendar-view { display: flex; min-width: 0; min-height: 0; flex: 1; flex-direction: column; }
     .kanban-board {
-      display: grid; flex: 1; min-height: 0; grid-auto-columns: minmax(260px, 1fr); grid-auto-flow: column;
-      gap: 12px; overflow: auto; padding: 12px; background: var(--workspace-surface-muted);
+      display: grid; flex: 1; min-height: 0; grid-template-columns: repeat(var(--kanban-columns, 3), minmax(0, 1fr));
+      align-content: start; align-items: start; gap: 12px; overflow: auto; padding: 12px; background: var(--workspace-surface-muted);
     }
     .kanban-column {
-      display: flex; min-height: 390px; flex-direction: column; padding: 10px; border: 1px solid var(--workspace-border);
+      display: flex; width: 100%; height: var(--kanban-height, 600px); min-width: 0; min-height: 150px; flex-direction: column; padding: 10px; border: 1px solid var(--workspace-border);
       border-radius: 6px; background: var(--workspace-surface); transition: border-color 120ms ease, box-shadow 120ms ease, background 120ms ease;
     }
     .kanban-column-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
     .kanban-column-title { display: flex; min-width: 0; align-items: center; gap: 6px; color: var(--workspace-text); font-weight: 700; }
     .kanban-column-title .ant-tag { max-width: 190px; margin-inline-end: 0; overflow: hidden; text-overflow: ellipsis; }
     .kanban-count { color: var(--workspace-text-muted); font-size: 12px; }
-    .kanban-cards { display: flex; min-height: 96px; flex: 1; flex-direction: column; gap: 8px; }
+    .kanban-cards { display: flex; min-height: 0; flex: 1; flex-direction: column; gap: 8px; overflow-y: auto; }
     .kanban-card-shell {
       cursor: grab; touch-action: none; user-select: none;
     }
@@ -952,6 +955,10 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     }
     @media (prefers-reduced-motion: reduce) {
       .kanban-card, .kanban-card-shell.is-moving { animation: none !important; transition: none !important; }
+    }
+    @media (max-width: 820px) {
+      .view-controls { align-items: stretch; flex-direction: column; }
+      .kanban-settings { flex-wrap: wrap; justify-content: flex-start; }
     }
     .kanban-footer { display: flex; flex: 0 0 auto; justify-content: flex-end; padding: 10px 12px; border-top: 1px solid var(--workspace-border); background: var(--workspace-surface); }
     .month-controls { display: flex; align-items: center; gap: 8px; }
@@ -1525,7 +1532,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     );
   }
 
-  function SheetKanban({ table, columns, visibleColumnIds, initialColumnId, movingRows, onColumnChange, onMoveRow, onOpenRow }) {
+  function SheetKanban({ table, columns, visibleColumnIds, initialColumnId, initialColumnsPerRow, initialHeight, movingRows, onColumnChange, onLayoutChange, onMoveRow, onOpenRow }) {
     const statusColumns = columns.filter((column) => column.type === "status");
     const visibleIds = Array.isArray(visibleColumnIds) ? new Set(visibleColumnIds) : null;
     const displayColumns = visibleIds ? columns.filter((column) => visibleIds.has(column.id)) : columns;
@@ -1534,6 +1541,8 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     ));
     const [search, setSearch] = React.useState("");
     const [page, setPage] = React.useState(1);
+    const [columnsPerRow, setColumnsPerRow] = React.useState(() => Math.min(10, Math.max(1, Math.round(Number(initialColumnsPerRow) || 3))));
+    const [boardHeight, setBoardHeight] = React.useState(() => Math.max(150, Math.round(Number(initialHeight) || 600)));
     const [rowOrder, setRowOrder] = React.useState([]);
     const [rowGroups, setRowGroups] = React.useState({});
     const [boardRevision, setBoardRevision] = React.useState(0);
@@ -1556,6 +1565,10 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     }, [columnId, statusColumns.map((column) => column.id).join("|")]);
 
     React.useEffect(() => setPage(1), [columnId, search]);
+    React.useEffect(() => {
+      setColumnsPerRow(Math.min(10, Math.max(1, Math.round(Number(initialColumnsPerRow) || 3))));
+      setBoardHeight(Math.max(150, Math.round(Number(initialHeight) || 600)));
+    }, [initialColumnsPerRow, initialHeight]);
     React.useEffect(() => {
       const available = new Set(rows.map((row) => row.number));
       setRowOrder((current) => [
@@ -1626,6 +1639,18 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     const selectColumn = (nextColumnId) => {
       setColumnId(nextColumnId);
       onColumnChange(nextColumnId);
+    };
+
+    const changeColumnsPerRow = (value) => {
+      const next = Math.min(10, Math.max(1, Math.round(Number(value) || 1)));
+      setColumnsPerRow(next);
+      onLayoutChange?.("kanbanColumns", next);
+    };
+
+    const changeBoardHeight = (value) => {
+      const next = Math.max(150, Math.round(Number(value) || 150));
+      setBoardHeight(next);
+      onLayoutChange?.("kanbanHeight", next);
     };
 
     const releaseSuppressedOpen = () => {
@@ -1720,19 +1745,55 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
           value: search,
           onChange: (event) => setSearch(event.target.value)
         }),
-        React.createElement(Select, {
-          value: statusColumn.id,
-          onChange: selectColumn,
-          options: statusColumns.map((column) => ({ value: column.id, label: column.name })),
-          style: { minWidth: 190 }
-        })
+        React.createElement(
+          "div",
+          { className: "kanban-settings" },
+          React.createElement(Select, {
+            value: statusColumn.id,
+            onChange: selectColumn,
+            options: statusColumns.map((column) => ({ value: column.id, label: column.name })),
+            style: { minWidth: 190 }
+          }),
+          React.createElement(
+            "label",
+            { className: "kanban-setting" },
+            React.createElement("span", null, "Columnas por fila"),
+            React.createElement(InputNumber, {
+              min: 1,
+              max: 10,
+              precision: 0,
+              value: columnsPerRow,
+              "aria-label": "Columnas por fila",
+              "data-kanban-columns": "",
+              onChange: changeColumnsPerRow
+            })
+          ),
+          React.createElement(
+            "label",
+            { className: "kanban-setting" },
+            React.createElement("span", null, "Alto"),
+            React.createElement(InputNumber, {
+              min: 150,
+              precision: 0,
+              value: boardHeight,
+              addonAfter: "px",
+              "aria-label": "Alto del tablero",
+              "data-kanban-height": "",
+              onChange: changeBoardHeight
+            })
+          )
+        )
       ),
       React.createElement(
         "div",
         {
           className: "kanban-board kanban",
           key: `${columnId}:${boardRevision}`,
-          ref: boardRef
+          ref: boardRef,
+          style: {
+            "--kanban-columns": columnsPerRow,
+            "--kanban-height": `${boardHeight}px`
+          }
         },
         ...groups.map((group) => {
           const groupRows = groupedRows[group.id] || [];
@@ -2393,8 +2454,11 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
           columns: workspaceColumns,
           visibleColumnIds: visibleColumns.map((column) => column.id),
           initialColumnId: state.workspace?.sheetViews?.[workspaceTarget.gid]?.kanbanColumnId,
+          initialColumnsPerRow: state.workspace?.sheetViews?.[workspaceTarget.gid]?.kanbanColumns,
+          initialHeight: state.workspace?.sheetViews?.[workspaceTarget.gid]?.kanbanHeight,
           movingRows,
           onColumnChange: (columnId) => setSheetViewSetting(workspaceTarget.gid, "kanbanColumnId", columnId),
+          onLayoutChange: (name, value) => setSheetViewSetting(workspaceTarget.gid, name, value),
           onMoveRow: moveRow,
           onOpenRow: openWorkspaceRow
         }),
@@ -2413,8 +2477,11 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
             columns,
             visibleColumnIds: sourceColumns.map((column) => column.id),
             initialColumnId: currentSheetViewSettings().kanbanColumnId || settings.kanbanColumnId,
+            initialColumnsPerRow: currentSheetViewSettings().kanbanColumns || settings.kanbanColumns,
+            initialHeight: currentSheetViewSettings().kanbanHeight || settings.kanbanHeight,
             movingRows,
             onColumnChange: (columnId) => setCurrentSheetViewSetting("kanbanColumnId", columnId),
+            onLayoutChange: (name, value) => setCurrentSheetViewSetting(name, value),
             onMoveRow: moveRow,
             onOpenRow: openRow
           })
@@ -3514,6 +3581,8 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
       clean.sheetViews[String(key)] = {
         calendarColumnId: columns.some((column) => column.id === calendarColumnId && column.type === "date") ? calendarColumnId : "",
         kanbanColumnId: columns.some((column) => column.id === kanbanColumnId && column.type === "status") ? kanbanColumnId : "",
+        kanbanColumns: Math.min(10, Math.max(1, Math.round(Number(view.kanbanColumns) || 3))),
+        kanbanHeight: Math.max(150, Math.round(Number(view.kanbanHeight) || 600)),
         hiddenColumnIds: [...new Set((Array.isArray(view.hiddenColumnIds) ? view.hiddenColumnIds : [])
           .map((id) => String(id || "").trim())
           .filter((id) => ids.has(id)))]
