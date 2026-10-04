@@ -100,7 +100,7 @@ function connect(webSocketUrl) {
       command(method, params = {}) {
         return new Promise((commandResolve, commandReject) => {
           const commandId = ++id;
-          pending.set(commandId, { resolve: commandResolve, reject: commandReject, method });
+          pending.set(commandId, { resolve: commandResolve, reject: commandReject, method, expression: params.expression || "" });
           socket.send(JSON.stringify({ id: commandId, method, params }));
         });
       },
@@ -122,7 +122,7 @@ function connect(webSocketUrl) {
       pending.delete(message.id);
       if (message.error) current.reject(new Error(message.error.message));
       else if (message.result?.exceptionDetails) {
-        current.reject(new Error(message.result.exceptionDetails.exception?.description || message.result.exceptionDetails.text));
+        current.reject(new Error(`${message.result.exceptionDetails.exception?.description || message.result.exceptionDetails.text}\nExpression: ${current.expression.slice(0, 500)}`));
       } else if (current.method === "Runtime.evaluate") current.resolve(message.result?.result);
       else current.resolve(message.result);
     });
@@ -343,6 +343,48 @@ try {
   }
   if (!tableSaved?.disabled || tableSaved.state !== "saved") {
     throw new Error(`Tabla no confirmo el guardado manual: ${JSON.stringify(tableSaved)}`);
+  }
+
+  await cdp.evaluate(viewExpression(`
+    const updates = [
+      [3, 0, '2-M'],
+      [3, 1, 'Luis M'],
+      [4, 0, '3-M'],
+      [4, 1, 'Mia M']
+    ];
+    const setter = Object.getOwnPropertyDescriptor(view.defaultView.HTMLInputElement.prototype, 'value').set;
+    for (const [rowNumber, columnIndex, value] of updates) {
+      const input = view.querySelector('[data-workspace-row="' + rowNumber + '"]')
+        .querySelectorAll('td[data-column-id]')[columnIndex]
+        .querySelector('.workspace-table-cell-editor input');
+      setter.call(input, value);
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+    view.querySelector('[data-sheet-view-save]').click();
+  `));
+  const matrixPasteDeadline = Date.now() + 4_000;
+  let matrixPaste;
+  while (Date.now() < matrixPasteDeadline) {
+    matrixPaste = (await cdp.evaluate("globalThis.__pastes || []")).find((paste) => (
+      paste.reference.endsWith("!A3") && paste.value === "2-M\tLuis M\n3-M\tMia M"
+    ));
+    if (matrixPaste) break;
+    await delay(50);
+  }
+  if (!matrixPaste) throw new Error("Tabla no consolido el bloque de dos filas por dos columnas");
+  sheet.rows[1][0] = "2-M";
+  sheet.rows[1][1] = "Luis M";
+  sheet.rows[2][0] = "3-M";
+  sheet.rows[2][1] = "Mia M";
+  staleVisualizationRows[1][0] = "2-M";
+  staleVisualizationRows[1][1] = "Luis M";
+  staleVisualizationRows[2][0] = "3-M";
+  staleVisualizationRows[2][1] = "Mia M";
+  const matrixSavedDeadline = Date.now() + 5_000;
+  while (Date.now() < matrixSavedDeadline) {
+    const saved = await cdp.evaluate(viewExpression('return view.querySelector("[data-sheet-view-save-state]")?.dataset.sheetViewSaveState === "saved";'));
+    if (saved) break;
+    await delay(80);
   }
 
   await cdp.evaluate(viewExpression('view.querySelector("[data-workspace-open-row=\\"2\\"]").click();'));
@@ -1012,6 +1054,20 @@ try {
     throw new Error(`Kanban no guardo correctamente los cambios agrupados de Estado: ${JSON.stringify(pastes)}`);
   }
   sheet.rows[1][2] = "Nuevo";
+  const pastesBeforeRepair = pastes.length;
+  const repairDeadline = Date.now() + 4_000;
+  let repairedMissingWrite = false;
+  while (Date.now() < repairDeadline) {
+    const repairPastes = await cdp.evaluate("globalThis.__pastes || []");
+    repairedMissingWrite = repairPastes.slice(pastesBeforeRepair).some((paste) => (
+      paste.reference.endsWith("!C4") && paste.value === "En proceso"
+    ));
+    if (repairedMissingWrite) break;
+    await delay(50);
+  }
+  if (!repairedMissingWrite) {
+    throw new Error("Kanban no reintento la celda faltante despues de verificar el lote");
+  }
   sheet.rows[2][2] = "En proceso";
   const kanbanSavedDeadline = Date.now() + 5_000;
   let kanbanSaved = false;
@@ -1264,6 +1320,40 @@ try {
   ) {
     throw new Error(`Los identificadores repetidos desestabilizaron las columnas: ${JSON.stringify(repairedColumns)}`);
   }
+
+  await cdp.evaluate(viewExpression(`
+    for (const rowNumber of [3, 4]) {
+      view.querySelector('[data-workspace-row="' + rowNumber + '"] .workspace-table-select input')?.click();
+    }
+    Array.from(view.querySelectorAll('.workspace-table-toolbar button'))
+      .find((button) => button.textContent.includes('Limpiar (2)'))?.click();
+  `));
+  await delay(120);
+  await cdp.evaluate(viewExpression('view.querySelector("[data-sheet-view-save]").click();'));
+  const rectangularClearDeadline = Date.now() + 4_000;
+  let rectangularClear = false;
+  let rectangularClears = [];
+  while (Date.now() < rectangularClearDeadline) {
+    rectangularClears = await cdp.evaluate("globalThis.__clears || []");
+    rectangularClear = rectangularClears.some((reference) => reference.endsWith("!A3:D4"));
+    if (rectangularClear) break;
+    await delay(50);
+  }
+  if (!rectangularClear) throw new Error(`Tabla no consolido dos filas completas en un unico clear rectangular: ${JSON.stringify(rectangularClears)}`);
+  for (const rowIndex of [1, 2]) {
+    for (let columnIndex = 0; columnIndex < 4; columnIndex += 1) {
+      sheet.rows[rowIndex][columnIndex] = "";
+      staleVisualizationRows[rowIndex][columnIndex] = "";
+    }
+  }
+  const rectangularClearSavedDeadline = Date.now() + 5_000;
+  let rectangularClearSaved = false;
+  while (Date.now() < rectangularClearSavedDeadline) {
+    rectangularClearSaved = await cdp.evaluate(viewExpression('return view.querySelector("[data-sheet-view-save-state]")?.dataset.sheetViewSaveState === "saved";'));
+    if (rectangularClearSaved) break;
+    await delay(80);
+  }
+  if (!rectangularClearSaved) throw new Error("Tabla no verifico el borrado rectangular de varias filas");
 
   console.log("VISTAS_OK: Tabla, Kanban y Calendario usan una superficie independiente; sus registros reutilizan el drawer original.");
 } finally {

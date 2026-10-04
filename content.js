@@ -2300,7 +2300,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     };
 
     const stageSheetViewValue = (row, property, nextValue, target = activeTarget, allowProtected = false) => {
-      if (!row || (property.protected && !allowProtected) || sheetViewSaving) return false;
+      if (!row || (property.protected && !allowProtected)) return false;
       const normalizedValue = String(nextValue ?? "");
       const draftKey = sheetViewDraftKey(target, row.number, property.index);
       const existingDraft = sheetViewDraftsRef.current.get(draftKey);
@@ -2372,12 +2372,15 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
             || (draft.removesRow
               ? draft.originalRow.cells.map(() => "")
               : draft.originalRow.cells);
-          return writeSheetViewValue(draft.row, draft.property, draft.value, rowValues, draft.target);
+          return writeSheetViewValue(draft.row, draft.property, draft.value, rowValues, draft.target, rowsByNumber);
         }));
         const verificationKeys = new Set(drafts.map((draft) => `sheet-view:${draft.target.gid}:${draft.row}:${draft.property.index}`));
         const deadline = Date.now() + 9_000;
         while (Date.now() < deadline && [...verificationKeys].some((key) => state.sheetViewWrites.has(key))) await wait(80);
-        sheetViewDraftsRef.current.clear();
+        for (const draft of drafts) {
+          const draftKey = sheetViewDraftKey(draft.target, draft.row, draft.property.index);
+          if (sheetViewDraftsRef.current.get(draftKey) === draft) sheetViewDraftsRef.current.delete(draftKey);
+        }
         bumpSheetViewDrafts();
       } catch (saveError) {
         setSheetViewSaveError(true);
@@ -6266,44 +6269,86 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     return true;
   }
 
-  async function verifySheetViewWrites(entries) {
-    let remaining = entries.filter(activeSheetViewWrite);
-    for (const delay of [500, 1_000, 2_000, 4_000]) {
-      if (!remaining.length) break;
-      await wait(delay);
-      remaining = remaining.filter(activeSheetViewWrite);
-      const groups = new Map();
-      for (const entry of remaining) {
-        const key = `${entry.gid}:${encodeURIComponent(entry.sheetName)}`;
-        if (!groups.has(key)) groups.set(key, []);
-        groups.get(key).push(entry);
-      }
-      for (const group of groups.values()) {
-        const firstRow = Math.min(...group.map((entry) => entry.row));
-        const lastRow = Math.max(...group.map((entry) => entry.row));
-        try {
-          const rows = await readRange(
-            `A${firstRow}:${MAX_COLUMN}${lastRow}`,
-            undefined,
-            String(group[0].gid),
-            { allowEmpty: true }
-          );
-          const valuesByRow = new Map(rows.map((row) => [row.number, row.cells]));
-          for (const entry of group) {
-            if (!activeSheetViewWrite(entry)) continue;
-            const values = valuesByRow.get(entry.row) || [];
-            if (valuesEqualForProperty(values[entry.property.index], entry.value, entry.property)) {
-              confirmSheetViewWrite(entry, values);
+  async function verifyCellMutations(mutations, options = {}) {
+    const delays = options.delays || [400, 800, 1_200];
+    const isActive = options.isActive || (() => true);
+    const confirmed = new Set();
+    const observedRows = new Map();
+    let verificationError = null;
+    const activeMutations = () => mutations.filter((mutation) => !confirmed.has(mutation) && isActive(mutation));
+
+    const verifyPass = async () => {
+      for (const delay of delays) {
+        let remaining = activeMutations();
+        if (!remaining.length) return;
+        await wait(delay);
+        remaining = activeMutations();
+        const groups = new Map();
+        for (const mutation of remaining) {
+          const key = `${mutation.gid}:${encodeURIComponent(mutation.sheetName)}`;
+          if (!groups.has(key)) groups.set(key, []);
+          groups.get(key).push(mutation);
+        }
+        for (const [groupKey, group] of groups) {
+          const firstRow = Math.min(...group.map((mutation) => mutation.row));
+          const lastRow = Math.max(...group.map((mutation) => mutation.row));
+          try {
+            const valuesByRow = options.readGroup
+              ? await options.readGroup(group, firstRow, lastRow)
+              : new Map((await readRange(
+                `A${firstRow}:${MAX_COLUMN}${lastRow}`,
+                options.signal,
+                String(group[0].gid),
+                { allowEmpty: true }
+              )).map((row) => [row.number, row.cells]));
+            for (const [row, values] of valuesByRow) observedRows.set(`${groupKey}:${row}`, values);
+            for (const mutation of group) {
+              if (!isActive(mutation)) continue;
+              const values = valuesByRow.get(mutation.row) || [];
+              const columnIndex = Number(mutation.columnIndex ?? mutation.property?.index);
+              if (!valuesEqualForProperty(values[columnIndex], mutation.value, mutation.property)) continue;
+              confirmed.add(mutation);
+              options.onConfirm?.(mutation, values);
             }
+          } catch (error) {
+            verificationError = error;
           }
-        } catch {
-          // La vista HTML de Sheets puede tardar en reflejar un pegado ya aceptado.
         }
       }
-      remaining = remaining.filter(activeSheetViewWrite);
+    };
+
+    await verifyPass();
+    const missingBeforeRetry = activeMutations();
+    if (missingBeforeRetry.length && options.retry !== false) {
+      try {
+        await writeRanges(cellMutationOperations(missingBeforeRetry), options.selectionReference || "");
+        await verifyPass();
+      } catch (error) {
+        verificationError = error;
+      }
     }
 
-    const unconfirmed = remaining.filter(settleUnconfirmedSheetViewWrite);
+    return {
+      confirmed: mutations.filter((mutation) => confirmed.has(mutation)),
+      unconfirmed: activeMutations(),
+      observedRows,
+      error: verificationError
+    };
+  }
+
+  async function verifySheetViewWrites(entries, selectionReference = "") {
+    const result = await verifyCellMutations(entries.map((entry) => ({
+      ...entry,
+      columnIndex: entry.property.index,
+      sourceEntry: entry
+    })), {
+      isActive: (mutation) => activeSheetViewWrite(mutation.sourceEntry),
+      onConfirm: (mutation, values) => confirmSheetViewWrite(mutation.sourceEntry, values),
+      selectionReference
+    });
+    const unconfirmed = result.unconfirmed
+      .map((mutation) => mutation.sourceEntry)
+      .filter(settleUnconfirmedSheetViewWrite);
     state.sheetCache.clear();
     host.dataset.writeVerification = hasPendingWriteVerification()
       ? "pending"
@@ -6311,6 +6356,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
         ? "unconfirmed"
         : "verified";
     syncSheetViewMutationState();
+    return unconfirmed;
   }
 
   function registerSheetViewWrites(tasks) {
@@ -6357,50 +6403,189 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
       renderFields();
     }
     syncSheetViewMutationState();
-    void verifySheetViewWrites(entries);
+    return entries;
   }
 
-  function sheetViewBatchOperations(tasks) {
+  function cellMutationOperations(inputMutations) {
+    const mutations = inputMutations.map((mutation) => ({
+      ...mutation,
+      columnIndex: Number(mutation.columnIndex ?? mutation.property?.index),
+      value: String(mutation.value ?? "")
+    })).filter((mutation) => (
+      Number.isInteger(mutation.row)
+      && mutation.row > 0
+      && Number.isInteger(mutation.columnIndex)
+      && mutation.columnIndex >= 0
+    ));
     const groups = new Map();
-    for (const task of tasks) {
-      const key = `${task.gid}:${encodeURIComponent(task.sheetName)}:${task.property.index}`;
+    for (const mutation of mutations) {
+      const key = `${mutation.gid}:${encodeURIComponent(mutation.sheetName)}`;
       if (!groups.has(key)) groups.set(key, []);
-      groups.get(key).push(task);
+      groups.get(key).push(mutation);
     }
 
     const operations = [];
-    for (const group of groups.values()) {
-      group.sort((left, right) => left.row - right.row);
-      let run = [];
-      const flushRun = () => {
-        if (!run.length) return;
-        const first = run[0];
-        const last = run[run.length - 1];
-        const firstCell = `${columnName(first.property.index + 1)}${first.row}`;
-        const lastCell = `${columnName(last.property.index + 1)}${last.row}`;
-        operations.push(first.value === ""
-          ? {
-            action: "clear",
-            reference: qualifiedReference(first.sheetName, firstCell === lastCell ? firstCell : `${firstCell}:${lastCell}`)
-          }
-          : {
-            reference: qualifiedReference(first.sheetName, firstCell),
-            rows: run.map((task) => [task.value])
-          }
-        );
-        run = [];
-      };
-      for (const task of group) {
-        const previous = run[run.length - 1];
-        if (previous && (
-          task.row !== previous.row + 1
-          || (task.value === "") !== (previous.value === "")
-        )) flushRun();
-        run.push(task);
+    const pushClearOperations = (group) => {
+      const rowRuns = [];
+      const byRow = new Map();
+      for (const mutation of group.filter((candidate) => candidate.value === "")) {
+        if (!byRow.has(mutation.row)) byRow.set(mutation.row, []);
+        byRow.get(mutation.row).push(mutation);
       }
-      flushRun();
+      for (const [row, rowMutations] of [...byRow].sort((left, right) => left[0] - right[0])) {
+        const columns = [...new Set(rowMutations.map((mutation) => mutation.columnIndex))].sort((left, right) => left - right);
+        let firstColumn = columns[0];
+        let lastColumn = columns[0];
+        for (const column of columns.slice(1)) {
+          if (column === lastColumn + 1) {
+            lastColumn = column;
+            continue;
+          }
+          rowRuns.push({ row, firstColumn, lastColumn });
+          firstColumn = column;
+          lastColumn = column;
+        }
+        if (columns.length) rowRuns.push({ row, firstColumn, lastColumn });
+      }
+
+      const rectangles = [];
+      for (const run of rowRuns) {
+        const previous = rectangles[rectangles.length - 1];
+        if (
+          previous
+          && run.row === previous.lastRow + 1
+          && run.firstColumn === previous.firstColumn
+          && run.lastColumn === previous.lastColumn
+        ) {
+          previous.lastRow = run.row;
+        } else {
+          rectangles.push({
+            firstRow: run.row,
+            lastRow: run.row,
+            firstColumn: run.firstColumn,
+            lastColumn: run.lastColumn
+          });
+        }
+      }
+      for (const rectangle of rectangles) {
+        const firstCell = `${columnName(rectangle.firstColumn + 1)}${rectangle.firstRow}`;
+        const lastCell = `${columnName(rectangle.lastColumn + 1)}${rectangle.lastRow}`;
+        operations.push({
+          action: "clear",
+          reference: qualifiedReference(group[0].sheetName, firstCell === lastCell ? firstCell : `${firstCell}:${lastCell}`)
+        });
+      }
+    };
+    const pushExactWriteOperations = (group) => {
+      const filled = group.filter((mutation) => mutation.value !== "");
+      const distinctColumns = new Set(filled.map((mutation) => mutation.columnIndex));
+      if (distinctColumns.size === 1) {
+        const ordered = [...filled].sort((left, right) => left.row - right.row);
+        let run = [];
+        const flush = () => {
+          if (!run.length) return;
+          const first = run[0];
+          operations.push({
+            reference: qualifiedReference(first.sheetName, `${columnName(first.columnIndex + 1)}${first.row}`),
+            rows: run.map((mutation) => [mutation.value])
+          });
+          run = [];
+        };
+        for (const mutation of ordered) {
+          const previous = run[run.length - 1];
+          if (previous && mutation.row !== previous.row + 1) flush();
+          run.push(mutation);
+        }
+        flush();
+        return;
+      }
+
+      const byRow = new Map();
+      for (const mutation of filled) {
+        if (!byRow.has(mutation.row)) byRow.set(mutation.row, []);
+        byRow.get(mutation.row).push(mutation);
+      }
+      for (const rowMutations of byRow.values()) {
+        rowMutations.sort((left, right) => left.columnIndex - right.columnIndex);
+        let run = [];
+        const flush = () => {
+          if (!run.length) return;
+          const first = run[0];
+          operations.push({
+            reference: qualifiedReference(first.sheetName, `${columnName(first.columnIndex + 1)}${first.row}`),
+            rows: [run.map((mutation) => mutation.value)]
+          });
+          run = [];
+        };
+        for (const mutation of rowMutations) {
+          const previous = run[run.length - 1];
+          if (previous && mutation.columnIndex !== previous.columnIndex + 1) flush();
+          run.push(mutation);
+        }
+        flush();
+      }
+    };
+    const pushMutationBatch = (group) => {
+      const filled = group.filter((mutation) => mutation.value !== "");
+      if (filled.length) {
+        const firstRow = Math.min(...filled.map((mutation) => mutation.row));
+        const lastRow = Math.max(...filled.map((mutation) => mutation.row));
+        const firstColumn = Math.min(...filled.map((mutation) => mutation.columnIndex));
+        const lastColumn = Math.max(...filled.map((mutation) => mutation.columnIndex));
+        const height = lastRow - firstRow + 1;
+        const width = lastColumn - firstColumn + 1;
+        const mutationsByCell = new Map(group.map((mutation) => [`${mutation.row}:${mutation.columnIndex}`, mutation]));
+        const knownRows = [...group]
+          .sort((left, right) => (right.lastQueuedIndex ?? -1) - (left.lastQueuedIndex ?? -1))
+          .find((mutation) => mutation.knownRows instanceof Map)?.knownRows;
+        let complete = height * width <= 5_000;
+        const rows = [];
+        for (let row = firstRow; complete && row <= lastRow; row += 1) {
+          const knownRow = knownRows?.get(row);
+          const values = [];
+          for (let column = firstColumn; column <= lastColumn; column += 1) {
+            const mutation = mutationsByCell.get(`${row}:${column}`);
+            if (mutation) values.push(mutation.value);
+            else if ((height === 1 || width === 1) && knownRow) values.push(String(knownRow.cells[column] ?? ""));
+            else {
+              complete = false;
+              break;
+            }
+          }
+          if (complete) rows.push(values);
+        }
+        if (complete) {
+          operations.push({
+            reference: qualifiedReference(group[0].sheetName, `${columnName(firstColumn + 1)}${firstRow}`),
+            rows
+          });
+        } else {
+          pushExactWriteOperations(group);
+        }
+      }
+      pushClearOperations(group);
+    };
+
+    for (const group of groups.values()) {
+      group.sort((left, right) => left.row - right.row || left.columnIndex - right.columnIndex);
+      let batch = [];
+      for (const mutation of group) {
+        if (batch.length && mutation.row - batch[0].row >= 500) {
+          pushMutationBatch(batch);
+          batch = [];
+        }
+        batch.push(mutation);
+      }
+      pushMutationBatch(batch);
     }
     return operations;
+  }
+
+  function sheetViewBatchOperations(tasks) {
+    return cellMutationOperations(tasks.map((task) => ({
+      ...task,
+      columnIndex: task.property.index
+    })));
   }
 
   function scheduleSheetViewMutationFlush(delay = 180) {
@@ -6424,6 +6609,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
       current.property = task.property;
       current.value = task.value;
       current.rowValues = task.rowValues;
+      current.knownRows = task.knownRows;
       current.waitingTasks.push(task);
       current.lastQueuedIndex = index;
     });
@@ -6448,11 +6634,21 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     syncSheetViewMutationState();
     try {
       await writeRanges(sheetViewBatchOperations(tasks), selectionReference);
-      registerSheetViewWrites(tasks);
+      const unconfirmed = await verifySheetViewWrites(registerSheetViewWrites(tasks), selectionReference);
+      if (unconfirmed.length) {
+        throw new Error(`Google Sheets no confirmó ${unconfirmed.length} cambio${unconfirmed.length === 1 ? "" : "s"}. Intenta guardar nuevamente.`);
+      }
       for (const task of tasks) {
         for (const waitingTask of task.waitingTasks) waitingTask.resolve();
       }
     } catch (error) {
+      for (const task of tasks) {
+        const key = `sheet-view:${task.gid}:${task.row}:${task.property.index}`;
+        const entry = state.sheetViewWrites.get(key);
+        if (!entry || entry.value !== task.value) continue;
+        entry.controller.abort();
+        state.sheetViewWrites.delete(key);
+      }
       for (const task of tasks) {
         for (const waitingTask of task.waitingTasks) waitingTask.reject(error);
       }
@@ -6481,7 +6677,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     }
   }
 
-  function writeSheetViewValue(row, property, value, rowValues = [], target = {}) {
+  function writeSheetViewValue(row, property, value, rowValues = [], target = {}, knownRows = null) {
     const gid = String(target.gid ?? currentGid());
     const sheetName = String(target.sheetName || target.name || activeSheetName() || state.sheetName || `Hoja ${gid}`);
     return new Promise((resolve, reject) => {
@@ -6492,6 +6688,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
         property,
         value: String(value ?? ""),
         rowValues: rowValues.map((cell) => String(cell ?? "")),
+        knownRows,
         resolve,
         reject
       });
@@ -6501,21 +6698,27 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
   }
 
   async function verifyPendingWrite(entry) {
-    const verificationDelays = [600, 1_200, 2_200, 4_000];
     let verificationError = null;
     try {
-      for (const delay of verificationDelays) {
-        await wait(delay);
-        if (entry.controller.signal.aborted || state.pendingWrites.get(entry.key) !== entry) return;
-        try {
-          const rows = await readRange(`A${entry.row}:${MAX_COLUMN}${entry.row}`, entry.controller.signal, entry.gid);
-          const values = rows.find((item) => item.number === entry.row)?.cells || [];
+      const mutations = entry.writtenCells.map(({ index, value }) => ({
+        gid: entry.gid,
+        sheetName: entry.sheetName,
+        row: entry.row,
+        columnIndex: index,
+        property: entry.properties[index],
+        value
+      }));
+      const verification = await verifyCellMutations(mutations, {
+        signal: entry.controller.signal,
+        isActive: () => !entry.controller.signal.aborted && state.pendingWrites.get(entry.key) === entry
+      });
+      verificationError = verification.error;
+      if (entry.controller.signal.aborted || state.pendingWrites.get(entry.key) !== entry) return;
+      if (!verification.unconfirmed.length) {
+          const groupKey = `${entry.gid}:${encodeURIComponent(entry.sheetName)}:${entry.row}`;
+          const values = verification.observedRows.get(groupKey) || [];
           const width = Math.max(entry.labels.length, usedCellWidth(values));
           const freshValues = Array.from({ length: width }, (_, index) => values[index] || "");
-          const verified = entry.writtenCells.every(({ index, value }) =>
-            valuesEqualForProperty(freshValues[index], value, entry.properties[index])
-          );
-          if (!verified) continue;
           const writtenByIndex = new Map(entry.writtenCells.map((cell) => [cell.index, cell.value]));
           const confirmedValues = freshValues.map((value, index) =>
             writtenByIndex.has(index) ? String(writtenByIndex.get(index) ?? "") : value
@@ -6546,10 +6749,6 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
             if (relationshipKeyChanged) startRelationships(state.fields, state.values, state.request?.signal, true);
           }
           return;
-        } catch (error) {
-          if (error.name === "AbortError") return;
-          verificationError = error;
-        }
       }
 
       if (state.pendingWrites.get(entry.key) !== entry) return;
@@ -6594,39 +6793,27 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     }
 
     const rowPlans = [];
-    const operations = [];
+    const mutations = [];
     for (const [rowKey, rowDrafts] of groupedRows) {
       rowDrafts.sort((left, right) => left.columnIndex - right.columnIndex);
       rowPlans.push({ key: `related:${rowKey}`, drafts: rowDrafts });
-      let run = [];
-      const flushRun = () => {
-        if (!run.length) return;
-        const first = run[0];
-        const last = run[run.length - 1];
-        const firstCell = `${columnName(first.columnIndex + 1)}${first.rowNumber}`;
-        const lastCell = `${columnName(last.columnIndex + 1)}${last.rowNumber}`;
-        operations.push(first.value === ""
-          ? { action: "clear", reference: qualifiedReference(first.sheetName, firstCell === lastCell ? firstCell : `${firstCell}:${lastCell}`) }
-          : { reference: qualifiedReference(first.sheetName, firstCell), values: run.map((draft) => draft.value) }
-        );
-        run = [];
-      };
       for (const draft of rowDrafts) {
-        const previous = run[run.length - 1];
-        if (previous && (
-          draft.columnIndex !== previous.columnIndex + 1
-          || (draft.value === "") !== (previous.value === "")
-        )) flushRun();
-        run.push(draft);
+        mutations.push({
+          gid: draft.relation.sheetGid || "",
+          sheetName: draft.sheetName,
+          row: draft.rowNumber,
+          columnIndex: draft.columnIndex,
+          property: draft.property,
+          value: draft.value
+        });
       }
-      flushRun();
     }
-    return { operations, rowPlans };
+    return { operations: cellMutationOperations(mutations), rowPlans };
   }
 
   function registerPrimaryWrite(plan) {
     if (!plan) return;
-    const { gid, row, labels, properties, changes } = plan;
+    const { gid, sheetName, row, labels, properties, changes } = plan;
     const key = `${gid}:${row}`;
     const previousPending = state.pendingWrites.get(key);
     previousPending?.controller.abort();
@@ -6645,6 +6832,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
       key,
       cacheKey: cacheKey("row", gid, row),
       gid,
+      sheetName,
       row,
       labels,
       properties,
@@ -6704,18 +6892,29 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
   }
 
   async function verifyRelatedWrite(entry) {
-    const verificationDelays = [600, 1_200, 2_200, 4_000];
     let verificationError = null;
     try {
-      for (const delay of verificationDelays) {
-        await wait(delay);
-        if (entry.controller.signal.aborted || state.pendingWrites.get(entry.key) !== entry) return;
-        try {
-          const values = await readNamedSheetRow(entry.sheetName, entry.rowNumber, entry.controller.signal);
-          const verified = entry.writtenCells.every(({ index, value, property }) =>
-            valuesEqualForProperty(values[index], value, property)
-          );
-          if (!verified) continue;
+      const mutations = entry.writtenCells.map(({ index, value, property }) => ({
+        gid: entry.relation.sheetGid || "",
+        sheetName: entry.sheetName,
+        row: entry.rowNumber,
+        columnIndex: index,
+        property,
+        value
+      }));
+      const verification = await verifyCellMutations(mutations, {
+        signal: entry.controller.signal,
+        isActive: () => !entry.controller.signal.aborted && state.pendingWrites.get(entry.key) === entry,
+        readGroup: async () => new Map([[
+          entry.rowNumber,
+          await readNamedSheetRow(entry.sheetName, entry.rowNumber, entry.controller.signal)
+        ]])
+      });
+      verificationError = verification.error;
+      if (entry.controller.signal.aborted || state.pendingWrites.get(entry.key) !== entry) return;
+      if (!verification.unconfirmed.length) {
+          const groupKey = `${entry.relation.sheetGid || ""}:${encodeURIComponent(entry.sheetName)}:${entry.rowNumber}`;
+          const values = verification.observedRows.get(groupKey) || [];
           for (const column of displayRelationColumns(entry.relation)) {
             entry.row.cells[column.index] = String(values[column.propertyIndex] ?? "");
           }
@@ -6735,10 +6934,6 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
           host.dataset.writeVerification = hasPendingWriteVerification() ? "pending" : "verified";
           notifyRelatedDrafts();
           return;
-        } catch (error) {
-          if (error.name === "AbortError") return;
-          verificationError = error;
-        }
       }
 
       if (state.pendingWrites.get(entry.key) !== entry) return;
@@ -6765,53 +6960,22 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     const properties = state.fields.map((_, index) => propertyForColumn(index));
     const changes = collectPendingChanges();
     if (!changes.length) return null;
-    const operations = [];
-    let writeRun = [];
-    let clearRun = [];
-    const flushWrites = () => {
-      if (!writeRun.length) return;
-      const firstIndex = writeRun[0].index;
-      const lastIndex = writeRun[writeRun.length - 1].index;
-      const changedValues = new Map(writeRun.map((change) => [change.index, change.value]));
-      const values = Array.from({ length: lastIndex - firstIndex + 1 }, (_, offset) => {
-        const index = firstIndex + offset;
-        if (changedValues.has(index)) return changedValues.get(index);
-        const property = properties[index];
-        return property.type === "checkbox"
-          ? serializeEditorValue(checkboxEditorValue(state.values[index], property), property)
-          : state.values[index];
-      });
-      operations.push({
-        reference: qualifiedReference(state.sheetName, `${columnName(firstIndex + 1)}${state.row}`),
-        values
-      });
-      writeRun = [];
-    };
-    const flushClears = () => {
-      if (!clearRun.length) return;
-      const firstCell = `${columnName(clearRun[0].index + 1)}${state.row}`;
-      const lastCell = `${columnName(clearRun[clearRun.length - 1].index + 1)}${state.row}`;
-      operations.push({
-        action: "clear",
-        reference: qualifiedReference(state.sheetName, firstCell === lastCell ? firstCell : `${firstCell}:${lastCell}`)
-      });
-      clearRun = [];
-    };
-    for (const change of changes) {
-      if (change.value === "") {
-        flushWrites();
-        const previous = clearRun[clearRun.length - 1];
-        if (previous && change.index !== previous.index + 1) flushClears();
-        clearRun.push(change);
-      } else {
-        flushClears();
-        writeRun.push(change);
-      }
-    }
-    flushWrites();
-    flushClears();
+    const rowValues = properties.map((property, index) => property.type === "checkbox"
+      ? serializeEditorValue(checkboxEditorValue(state.values[index], property), property)
+      : String(state.values[index] ?? ""));
+    const knownRows = new Map([[state.row, { cells: rowValues }]]);
+    const operations = cellMutationOperations(changes.map((change) => ({
+      gid: state.gid,
+      sheetName: state.sheetName,
+      row: state.row,
+      columnIndex: change.index,
+      property: properties[change.index],
+      value: change.value,
+      knownRows
+    })));
     return {
       gid: state.gid,
+      sheetName: state.sheetName,
       row: state.row,
       labels: currentSourceLabels(),
       properties,
@@ -7311,10 +7475,13 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
           value: value === null || value === undefined ? "" : String(value)
         };
       });
-      await writeRanges(cells.map((cell) => ({
-        reference: qualifiedReference(targetSheet, cell.reference),
-        rows: [[cell.value]]
-      })));
+      await writeRanges(cellMutationOperations(cells.map((cell) => ({
+        gid: String(params.gid || currentGid()),
+        sheetName: targetSheet,
+        row: rowNumber,
+        columnIndex: cell.columnIndex,
+        value: cell.value
+      }))));
       state.headerCache.clear();
       state.sheetCache.clear();
       let actualValues = {};
