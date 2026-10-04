@@ -9,14 +9,132 @@
 *{box-sizing:border-box}
 
 :root{
+  color-scheme:light;
+  --site-bg:#fff;
+  --site-text:#444;
+  --site-heading:#30343a;
+  --site-heading-rgb:48,52,58;
+  --site-muted:#666;
+  --site-border:#ddd;
+  --site-button-bg:#fff;
+  --site-button-text:#222;
+  --site-secondary-button-bg:#fff;
+  --site-secondary-button-text:#222;
+  --site-secondary-button-border:#ddd;
+  --site-shadow:#0002;
+  --primary-color:var(--site-heading);
+  --primary-hover:color-mix(in srgb,var(--site-heading) 84%,var(--site-bg));
+  --primary-color-rgb:var(--site-heading-rgb);
+  --site-accent-text:var(--site-bg);
   --real-columns:3;
   --height:600px;
+}
+
+[data-theme="dark"]{
+  color-scheme:dark;
+  --site-bg:#1d1d1d;
+  --site-text:#ededed;
+  --site-heading:#f5f5f5;
+  --site-heading-rgb:245,245,245;
+  --site-muted:#c2c2c2;
+  --site-border:#393939;
+  --site-button-bg:#111;
+  --site-button-text:#f5f5f5;
+  --site-secondary-button-bg:var(--site-button-bg);
+  --site-secondary-button-text:var(--site-button-text);
+  --site-secondary-button-border:var(--site-border);
+  --site-shadow:#0008;
 }
 
 body{
   margin:0;
   font-family:Arial,sans-serif;
-  background:#f5f5f5;
+  background:var(--site-bg);
+  color:var(--site-text);
+}
+
+.workspace-bar{
+  display:flex;
+  gap:10px;
+  align-items:flex-start;
+  padding:10px 20px 0;
+  background:var(--site-bg);
+}
+
+.workspace-tabs{
+  display:flex;
+  flex:1;
+  min-width:0;
+  gap:8px;
+  overflow-x:auto;
+  padding-bottom:8px;
+}
+
+.workspace-tab{
+  display:flex;
+  flex:none;
+  gap:8px;
+  align-items:center;
+  padding:6px 12px;
+  border:1px solid var(--site-border);
+  border-radius:20px;
+  background:var(--site-button-bg);
+  color:var(--site-button-text);
+  white-space:nowrap;
+}
+
+.workspace-tab.active{
+  border-color:var(--primary-color);
+  background:color-mix(in srgb,var(--primary-color) 10%,var(--site-bg));
+}
+
+.workspace-count{
+  min-width:22px;
+  padding:2px 6px;
+  border-radius:10px;
+  background:color-mix(in srgb,var(--site-heading) 12%,var(--site-bg));
+  color:var(--site-muted);
+  font-size:11px;
+  text-align:center;
+}
+
+.workspace-tab.active .workspace-count{
+  background:var(--primary-color);
+  color:var(--site-accent-text);
+}
+
+.add-workspace{
+  flex:none;
+  padding:7px 10px;
+}
+
+.add-workspace,
+.add-column{
+  border:1px solid var(--site-secondary-button-border);
+  background:var(--site-secondary-button-bg);
+  color:var(--site-secondary-button-text);
+}
+
+[data-theme-toggle]{
+  flex:0 0 auto;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  width:38px;
+  height:34px;
+  border:1px solid var(--site-border);
+  border-radius:999px;
+  background:var(--site-button-bg);
+  color:var(--site-button-text);
+  font-size:14px;
+  font-weight:800;
+  cursor:pointer;
+}
+
+[data-theme-toggle] svg{
+  display:block;
+  width:20px;
+  height:20px;
 }
 
 .settings{
@@ -25,8 +143,8 @@ body{
   gap:10px 20px;
   align-items:center;
   padding:12px 20px;
-  background:white;
-  border-bottom:1px solid #ddd;
+  background:var(--site-bg);
+  border-bottom:1px solid var(--site-border);
 }
 
 .settings label{
@@ -46,7 +164,16 @@ body{
 
 button{
   border:0;
+  color:inherit;
+  font:inherit;
   cursor:pointer;
+}
+
+input,
+select{
+  border:1px solid var(--site-border);
+  background:var(--site-button-bg);
+  color:var(--site-button-text);
 }
 
 .add-column{
@@ -74,7 +201,7 @@ button{
 }
 
 .column{
-  background:#e9e9e9;
+  background:color-mix(in srgb,var(--site-button-bg) 82%,var(--site-border));
   width:100%;
   min-width:0;
   height:var(--height);
@@ -99,12 +226,12 @@ button{
 }
 
 .card{
-  background:white;
+  background:var(--site-bg);
   padding:12px;
   margin-bottom:8px;
   border-radius:6px;
   cursor:grab;
-  box-shadow:0 1px 3px #0002;
+  box-shadow:0 1px 3px var(--site-shadow);
 }
 
 .add-card{
@@ -121,13 +248,26 @@ button{
 
 [contenteditable="true"]{
   cursor:text;
-  outline:2px solid #999;
-  background:white;
+  outline:2px solid var(--site-muted);
+  background:var(--site-bg);
 }
 </style>
 </head>
 
 <body>
+
+<nav class="workspace-bar">
+  <div
+    class="workspace-tabs"
+    id="workspaceTabs">
+  </div>
+
+  <button class="add-workspace">
+    + Tablero
+  </button>
+
+  <button type="button" data-theme-toggle title="Modo Oscuro"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><g fill="currentColor"><path d="M8 4a4 4 0 1 1 0 8a4 4 0 0 1 0-8"></path><path d="M10 3h3v3l2 2l-2 2v3h-3l-2 2l-2-2H3v-3L1 8l2-2V3h3l2-2zM8 3a5 5 0 1 0 0 10A5 5 0 0 0 8 3"></path></g></svg></button>
+</nav>
 
 <div class="settings">
 
@@ -230,8 +370,48 @@ button{
 
 <script>
 const STORAGE='kanban-data'
+const THEME_STORAGE='minimal-builder-theme'
+
+const themeToggle=
+  document.querySelector('[data-theme-toggle]')
+
+const sunIcon=themeToggle.innerHTML
+const moonIcon='<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><g fill="currentColor"><path d="M6 .278a.77.77 0 0 1 .08.858a7.2 7.2 0 0 0-.878 3.46c0 4.021 3.278 7.277 7.318 7.277q.792-.001 1.533-.16a.79.79 0 0 1 .81.316a.73.73 0 0 1-.031.893A8.35 8.35 0 0 1 8.344 16C3.734 16 0 12.286 0 7.71C0 4.266 2.114 1.312 5.124.06A.75.75 0 0 1 6 .278"></path><path d="M10.794 3.148a.217.217 0 0 1 .412 0l.387 1.162c.173.518.579.924 1.097 1.097l1.162.387a.217.217 0 0 1 0 .412l-1.162.387a1.73 1.73 0 0 0-1.097 1.097l-.387 1.162a.217.217 0 0 1-.412 0l-.387-1.162A1.73 1.73 0 0 0 9.31 6.593l-1.162-.387a.217.217 0 0 1 0-.412l1.162-.387a1.73 1.73 0 0 0 1.097-1.097zM13.863.099a.145.145 0 0 1 .274 0l.258.774c.115.346.386.617.732.732l.774.258a.145.145 0 0 1 0 .274l-.774.258a1.16 1.16 0 0 0-.732.732l-.258.774a.145.145 0 0 1-.274 0l-.258-.774a1.16 1.16 0 0 0-.732-.732l-.774-.258a.145.145 0 0 1 0-.274l.774-.258c.346-.115.617-.386.732-.732z"></path></g></svg>'
+
+function aplicarTema(theme){
+
+  document.documentElement.dataset.theme=theme
+
+  let dark=theme==='dark'
+
+  themeToggle.innerHTML=dark ? moonIcon : sunIcon
+  themeToggle.title=`Modo ${dark ? 'Claro' : 'Oscuro'}`
+}
+
+let storedTheme=localStorage.getItem(THEME_STORAGE)
+
+aplicarTema(
+  storedTheme==='dark' || storedTheme==='light'
+    ? storedTheme
+    : matchMedia('(prefers-color-scheme: dark)').matches
+      ? 'dark'
+      : 'light'
+)
+
+themeToggle.onclick=()=>{
+
+  let next=
+    document.documentElement.dataset.theme==='dark'
+      ? 'light'
+      : 'dark'
+
+  localStorage.setItem(THEME_STORAGE,next)
+  aplicarTema(next)
+}
 
 let drag
+let workspaces=[]
+let activeWorkspace=''
 
 
 function ajustarColumnas(){
@@ -286,7 +466,126 @@ function ajustarColumnas(){
 }
 
 
+function leerTablero(){
+
+  return [
+    ...kanban.querySelectorAll('.column')
+  ].map(column=>({
+
+    title:
+      column.querySelector('h3').innerHTML,
+
+    cards:[
+      ...column.querySelectorAll('.card')
+    ].map(card=>card.innerHTML)
+  }))
+}
+
+
+function crearColumna(item={}){
+
+  let column=
+    document.createElement('section')
+
+  column.className='column'
+
+  column.innerHTML=`
+    <h3 draggable="true"></h3>
+    <div class="cards"></div>
+    <button class="add-card">
+      + Agregar tarjeta
+    </button>
+  `
+
+  column.querySelector('h3')
+    .innerHTML=item.title || 'Nueva columna'
+
+  let cards=
+    column.querySelector('.cards')
+
+  ;(item.cards || []).forEach(text=>{
+
+    let card=
+      document.createElement('div')
+
+    card.className='card'
+    card.draggable=true
+    card.innerHTML=text
+
+    cards.append(card)
+  })
+
+  return column
+}
+
+
+function dibujarTablero(board){
+
+  kanban.replaceChildren(
+    ...(board || []).map(crearColumna)
+  )
+}
+
+
+function dibujarWorkspaces(){
+
+  workspaceTabs.replaceChildren(
+    ...workspaces.map(workspace=>{
+
+      let button=
+        document.createElement('button')
+
+      let name=
+        document.createElement('span')
+
+      let count=
+        document.createElement('span')
+
+      button.className=
+        'workspace-tab' +
+        (workspace.id===activeWorkspace
+          ? ' active'
+          : '')
+
+      button.dataset.workspace=workspace.id
+      button.type='button'
+
+      name.textContent=workspace.title
+      count.className='workspace-count'
+      count.textContent=(workspace.board || [])
+        .reduce(
+          (total,column)=>
+            total+(column.cards || []).length,
+          0
+        )
+
+      button.append(name,count)
+
+      return button
+    })
+  )
+
+  requestAnimationFrame(()=>{
+
+    workspaceTabs
+      .querySelector('.workspace-tab.active')
+      ?.scrollIntoView({
+        block:'nearest',
+        inline:'nearest'
+      })
+  })
+}
+
+
 function guardar(){
+
+  let current=
+    workspaces.find(
+      workspace=>workspace.id===activeWorkspace
+    )
+
+  if(current)
+    current.board=leerTablero()
 
   let data={
 
@@ -294,44 +593,35 @@ function guardar(){
     height:height.value,
     minWidth:minWidth.value,
     view:view.value,
-
-    board:[
-      ...kanban.querySelectorAll('.column')
-    ].map(column=>({
-
-      title:
-        column.querySelector('h3').innerHTML,
-
-      cards:[
-        ...column.querySelectorAll('.card')
-      ].map(card=>card.innerHTML)
-
-    }))
+    activeWorkspace,
+    workspaces
   }
 
   localStorage.setItem(
     STORAGE,
     JSON.stringify(data)
   )
+
+  dibujarWorkspaces()
 }
 
 
 function cargar(){
 
+  let initialBoard=
+    leerTablero()
+
   let raw=
     localStorage.getItem(STORAGE)
 
-  if(!raw){
-    ajustarColumnas()
-    return
-  }
+  let data={}
 
-  let data
-
-  try{
-    data=JSON.parse(raw)
-  }catch{
-    return
+  if(raw){
+    try{
+      data=JSON.parse(raw)
+    }catch{
+      data={}
+    }
   }
 
 
@@ -355,48 +645,37 @@ function cargar(){
     )
 
 
-  if(Array.isArray(data.board)){
+  workspaces=Array.isArray(data.workspaces) &&
+    data.workspaces.length
+      ? data.workspaces.map((workspace,index)=>({
+          id:String(workspace.id || `workspace-${index+1}`),
+          title:String(workspace.title || `Tablero ${index+1}`),
+          board:Array.isArray(workspace.board)
+            ? workspace.board
+            : []
+        }))
+      : [{
+          id:'workspace-1',
+          title:'Tablero 1',
+          board:Array.isArray(data.board)
+            ? data.board
+            : initialBoard
+        }]
 
-    kanban.innerHTML=''
+  activeWorkspace=workspaces.some(
+    workspace=>workspace.id===data.activeWorkspace
+  )
+    ? data.activeWorkspace
+    : workspaces[0].id
 
-    data.board.forEach(item=>{
-
-      let column=
-        document.createElement('section')
-
-      column.className='column'
-
-      column.innerHTML=`
-        <h3 draggable="true"></h3>
-        <div class="cards"></div>
-        <button class="add-card">
-          + Agregar tarjeta
-        </button>
-      `
-
-      column.querySelector('h3')
-        .innerHTML=item.title || ''
-
-      let cards=
-        column.querySelector('.cards')
-
-      ;(item.cards || []).forEach(text=>{
-
-        let card=
-          document.createElement('div')
-
-        card.className='card'
-        card.draggable=true
-        card.innerHTML=text
-
-        cards.append(card)
-      })
-
-      kanban.append(column)
-    })
-  }
+  dibujarTablero(
+    workspaces.find(
+      workspace=>workspace.id===activeWorkspace
+    ).board
+  )
 
   ajustarColumnas()
+  guardar()
 }
 
 
@@ -706,25 +985,125 @@ document.addEventListener(
 )
 
 
+workspaceTabs.addEventListener(
+  'click',
+  e=>{
+
+    let tab=
+      e.target.closest('.workspace-tab')
+
+    if(
+      !tab ||
+      tab.dataset.workspace===activeWorkspace
+    )
+      return
+
+    guardar()
+
+    activeWorkspace=
+      tab.dataset.workspace
+
+    dibujarTablero(
+      workspaces.find(
+        workspace=>workspace.id===activeWorkspace
+      ).board
+    )
+
+    ajustarColumnas()
+    guardar()
+  }
+)
+
+
+workspaceTabs.addEventListener(
+  'dblclick',
+  e=>{
+
+    let tab=
+      e.target.closest('.workspace-tab')
+
+    if(!tab)
+      return
+
+    let workspace=
+      workspaces.find(
+        item=>item.id===tab.dataset.workspace
+      )
+
+    let title=prompt(
+      'Nombre del tablero',
+      workspace.title
+    )
+
+    if(!title?.trim())
+      return
+
+    workspace.title=title.trim()
+    guardar()
+  }
+)
+
+
+workspaceTabs.addEventListener(
+  'wheel',
+  e=>{
+
+    if(
+      workspaceTabs.scrollWidth <=
+      workspaceTabs.clientWidth
+    )
+      return
+
+    e.preventDefault()
+    workspaceTabs.scrollLeft+=
+      e.deltaY || e.deltaX
+  },
+  {passive:false}
+)
+
+
+document.querySelector('.add-workspace')
+.onclick=()=>{
+
+  let suggested=
+    `Tablero ${workspaces.length+1}`
+
+  let title=
+    prompt('Nombre del tablero',suggested)
+
+  if(title===null)
+    return
+
+  guardar()
+
+  let id=
+    crypto.randomUUID?.() ||
+    `workspace-${Date.now()}`
+
+  workspaces.push({
+    id,
+    title:title.trim() || suggested,
+    board:[{
+      title:'Nueva columna',
+      cards:[]
+    }]
+  })
+
+  activeWorkspace=id
+
+  dibujarTablero(
+    workspaces.at(-1).board
+  )
+
+  ajustarColumnas()
+  guardar()
+}
+
+
 document.querySelector('.add-column')
 .onclick=()=>{
 
-  let column=
-    document.createElement('section')
-
-  column.className='column'
-
-  column.innerHTML=`
-    <h3 draggable="true">
-      Nueva columna
-    </h3>
-
-    <div class="cards"></div>
-
-    <button class="add-card">
-      + Agregar tarjeta
-    </button>
-  `
+  let column=crearColumna()
 
   kanban.append(column)
 
