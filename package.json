@@ -7,7 +7,7 @@
     "build": "vite build",
     "build:extension": "npm run build && node scripts/build-extension.mjs",
     "sheets": "node .codex/skills/google-sheets-browser/scripts/sheets.mjs",
-    "test": "npm run build:extension && node tests/validate-package.mjs && node tests/validate-cloud.mjs && node tests/validate-bridge.mjs && node tests/validate-public-sheet.mjs && node tests/validate-relations.mjs && node tests/validate-views.mjs"
+    "test": "npm run build:extension && node tests/validate-package.mjs && node tests/validate-cloud.mjs && node tests/validate-bridge.mjs && node tests/validate-sheet-operations.mjs && node tests/validate-public-sheet.mjs && node tests/validate-relations.mjs && node tests/validate-views.mjs"
   },
   "dependencies": {
     "@ant-design/cssinjs": "1.24.0",

@@ -290,6 +290,29 @@ try {
       throw new Error(`El CLI alteró la limpieza: ${JSON.stringify(command)}`);
     }
   });
+  await runBridgeCase([
+    "create-sheet", "--url", url, "--name", "Proyectos",
+    "--header", "ID", "--header", "Nombre", "--header", "Estado", "--timeout", "5"
+  ], "create-sheet", (command) => {
+    if (command.params.name !== "Proyectos" || command.params.headers?.join("|") !== "ID|Nombre|Estado") {
+      throw new Error(`El CLI alteró la creación de la hoja: ${JSON.stringify(command)}`);
+    }
+  });
+  await runBridgeCase([
+    "rename-sheet", "--url", url, "--sheet", "Proyectos", "--name", "Oportunidades", "--timeout", "5"
+  ], "rename-sheet", (command) => {
+    if (command.params.sheet !== "Proyectos" || command.params.name !== "Oportunidades") {
+      throw new Error(`El CLI alteró el cambio de nombre: ${JSON.stringify(command)}`);
+    }
+  });
+  await runBridgeCase([
+    "delete-sheet", "--url", url, "--sheet", "Oportunidades",
+    "--confirm", "ELIMINAR Oportunidades", "--timeout", "5"
+  ], "delete-sheet", (command) => {
+    if (command.params.sheet !== "Oportunidades" || command.params.confirmation !== "ELIMINAR Oportunidades") {
+      throw new Error(`El CLI alteró la eliminación de la hoja: ${JSON.stringify(command)}`);
+    }
+  });
 
   await runBlockedBridgeCase("La sesión cerrada", () => {
     stored.delete("srd:cloud:auth-token");
@@ -304,4 +327,4 @@ try {
   await rm(tempDirectory, { recursive: true, force: true });
 }
 
-console.log("BRIDGE_OK: descubrimiento activo, documento aislado, sesión obligatoria, consultas, lotes, actualización, escritura y limpieza confirmados.");
+console.log("BRIDGE_OK: descubrimiento activo, documento aislado, sesión obligatoria, consultas, lotes, actualización, escritura, limpieza y administración de hojas confirmados.");

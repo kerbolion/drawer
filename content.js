@@ -3871,6 +3871,58 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     void writeWorkspace();
   }
 
+  async function renameWorkspaceSheet(previousName, nextName) {
+    await ensureWorkspaceLoaded();
+    const previousKey = normalizedColumn(previousName);
+    const nextKey = normalizedColumn(nextName);
+    let changed = false;
+    for (const sheet of Object.values(state.workspace.sheets || {})) {
+      if (normalizedColumn(sheet?.name) !== previousKey) continue;
+      sheet.name = nextName;
+      sheet.updatedAt = Date.now();
+      changed = true;
+    }
+    const relationViews = state.workspace.relationViews || {};
+    for (const [key, view] of Object.entries({ ...relationViews })) {
+      const separator = key.indexOf(":");
+      if (separator < 0 || key.slice(separator + 1) !== previousKey) continue;
+      delete relationViews[key];
+      relationViews[`${key.slice(0, separator)}:${nextKey}`] = view;
+      changed = true;
+    }
+    if (normalizedColumn(state.sheetName) === previousKey) state.sheetName = nextName;
+    if (state.propertyTarget && normalizedColumn(state.propertyTarget.sheetName) === previousKey) {
+      state.propertyTarget.sheetName = nextName;
+    }
+    for (const draft of state.relatedDrafts.values()) {
+      if (normalizedColumn(draft.sheetName) === previousKey) draft.sheetName = nextName;
+    }
+    if (changed) await writeWorkspace();
+  }
+
+  async function removeWorkspaceSheet(sheetName) {
+    await ensureWorkspaceLoaded();
+    const nameKey = normalizedColumn(sheetName);
+    const removedGids = new Set();
+    let changed = false;
+    for (const [gid, sheet] of Object.entries({ ...(state.workspace.sheets || {}) })) {
+      if (normalizedColumn(sheet?.name) !== nameKey) continue;
+      removedGids.add(String(gid));
+      delete state.workspace.sheets[gid];
+      delete state.workspace.sheetViews?.[gid];
+      changed = true;
+    }
+    for (const key of Object.keys(state.workspace.relationViews || {})) {
+      const separator = key.indexOf(":");
+      const sourceGid = separator < 0 ? "" : key.slice(0, separator);
+      const targetName = separator < 0 ? "" : key.slice(separator + 1);
+      if (!removedGids.has(sourceGid) && targetName !== nameKey) continue;
+      delete state.workspace.relationViews[key];
+      changed = true;
+    }
+    if (changed) await writeWorkspace();
+  }
+
   function propertyForColumn(index) {
     return currentSheetConfiguration()?.columns?.[index] || defaultProperty(index, state.fields[index] || "");
   }
@@ -5982,6 +6034,49 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     });
   }
 
+  function manageSheet(operation, payload = {}) {
+    state.writeInteractionDepth += 1;
+    return new Promise((resolve, reject) => {
+      const requestId = `${Date.now()}-${++state.writeRequest}`;
+      let settled = false;
+      const finish = () => {
+        if (settled) return false;
+        settled = true;
+        state.writeInteractionDepth = Math.max(0, state.writeInteractionDepth - 1);
+        return true;
+      };
+      const timeout = setTimeout(() => {
+        if (!finish()) return;
+        window.removeEventListener("message", receive);
+        reject(new Error("Google Sheets no respondió a la operación de hoja"));
+      }, 15_000);
+
+      function receive(event) {
+        const message = event.data;
+        if (
+          event.source !== window
+          || message?.source !== "sheets-row-drawer"
+          || message?.type !== "sheet-operation-result"
+          || message.requestId !== requestId
+        ) return;
+        if (!finish()) return;
+        clearTimeout(timeout);
+        window.removeEventListener("message", receive);
+        if (message.ok) resolve(message.result || {});
+        else reject(new Error(message.error || "No se pudo completar la operación de hoja"));
+      }
+
+      window.addEventListener("message", receive);
+      window.postMessage({
+        source: "sheets-row-drawer",
+        type: "sheet-operation",
+        requestId,
+        operation,
+        ...payload
+      }, location.origin);
+    });
+  }
+
   function hasPendingWriteVerification() {
     return state.pendingWrites.size > 0
       || state.sheetViewWrites.size > 0
@@ -6915,7 +7010,93 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
         sheet: activeSheetName(),
         selection: nameBoxValue(),
         sheets: visibleBridgeSheets(),
-        capabilities: ["list", "read", "inspect", "write", "append", "update", "clear"]
+        capabilities: ["list", "read", "inspect", "write", "append", "update", "clear", "create-sheet", "rename-sheet", "delete-sheet"]
+      };
+    }
+    if (command.action === "create-sheet") {
+      const name = String(params.name || "").trim();
+      if (!name) throw new Error("El nombre de la hoja no puede estar vacío");
+      if (visibleSheetNames().some((candidate) => normalizedColumn(candidate) === normalizedColumn(name))) {
+        throw new Error(`Ya existe una hoja llamada ${name}`);
+      }
+      const headers = Array.isArray(params.headers)
+        ? params.headers.map((header) => String(header || "").trim())
+        : [];
+      if (headers.some((header) => !header)) throw new Error("Los encabezados no pueden estar vacíos");
+      const headerKeys = headers.map(normalizedColumn);
+      if (new Set(headerKeys).size !== headerKeys.length) throw new Error("Los encabezados de la hoja deben ser únicos");
+
+      const result = await manageSheet("create", { name });
+      state.headerCache.clear();
+      state.sheetCache.clear();
+      let verified = true;
+      let range = "";
+      if (headers.length) {
+        range = bridgeWriteRange("A1", [headers]);
+        await writeRanges([{ reference: qualifiedReference(name, "A1"), rows: [headers] }]);
+        state.headerCache.clear();
+        state.sheetCache.clear();
+        verified = (await verifyBridgeMutation({ sheet: name }, range, [headers])).verified;
+      }
+      await ensureWorkspaceLoaded();
+      const createdSheet = visibleSheets().find((sheet) => normalizedColumn(sheet.name) === normalizedColumn(name));
+      const gid = String(createdSheet?.gid || currentGid());
+      reconcileSheetConfiguration(gid, name, headers);
+      await writeWorkspace();
+      return {
+        spreadsheetId: spreadsheetId(),
+        gid,
+        sheet: name,
+        sheets: result.sheets || visibleSheetNames(),
+        headers,
+        range: range || null,
+        verified
+      };
+    }
+    if (command.action === "rename-sheet") {
+      const previousName = String(params.sheet || "").trim();
+      const name = String(params.name || "").trim();
+      if (!previousName || !name) throw new Error("Se requieren el nombre actual y el nombre nuevo de la hoja");
+      const sourceExists = visibleSheetNames().some((candidate) => normalizedColumn(candidate) === normalizedColumn(previousName));
+      if (!sourceExists) throw new Error(`No existe la hoja ${previousName}`);
+      const duplicate = visibleSheetNames().some((candidate) =>
+        normalizedColumn(candidate) === normalizedColumn(name)
+        && normalizedColumn(candidate) !== normalizedColumn(previousName)
+      );
+      if (duplicate) throw new Error(`Ya existe una hoja llamada ${name}`);
+      const result = await manageSheet("rename", { sheet: previousName, name });
+      await renameWorkspaceSheet(previousName, name);
+      state.headerCache.clear();
+      state.sheetCache.clear();
+      const verified = (result.sheets || visibleSheetNames()).some((candidate) => normalizedColumn(candidate) === normalizedColumn(name));
+      return {
+        spreadsheetId: spreadsheetId(),
+        gid: currentGid(),
+        previousSheet: previousName,
+        sheet: name,
+        sheets: result.sheets || visibleSheetNames(),
+        verified
+      };
+    }
+    if (command.action === "delete-sheet") {
+      const name = String(params.sheet || "").trim();
+      if (!name) throw new Error("Se requiere el nombre de la hoja que se eliminará");
+      const requiredConfirmation = `ELIMINAR ${name}`;
+      if (params.confirmation !== requiredConfirmation) {
+        throw new Error(`La eliminación requiere la confirmación exacta: ${requiredConfirmation}`);
+      }
+      const result = await manageSheet("delete", { sheet: name });
+      await removeWorkspaceSheet(name);
+      state.headerCache.clear();
+      state.sheetCache.clear();
+      const sheets = result.sheets || visibleSheetNames();
+      return {
+        spreadsheetId: spreadsheetId(),
+        gid: currentGid(),
+        deletedSheet: name,
+        sheet: result.activeSheet || activeSheetName(),
+        sheets,
+        verified: !sheets.some((candidate) => normalizedColumn(candidate) === normalizedColumn(name))
       };
     }
     if (command.action === "list") {

@@ -8,8 +8,8 @@ const HOST = "127.0.0.1";
 const PORT = 17373;
 const HEADER_VALUE = "sheets-row-drawer-v1";
 const MAX_BODY_BYTES = 1_048_576;
-const ACTIONS = new Set(["current", "info", "list", "read", "inspect", "write", "append", "update", "clear"]);
-const REPEATABLE_OPTIONS = new Set(["set", "where"]);
+const ACTIONS = new Set(["current", "info", "list", "read", "inspect", "write", "append", "update", "clear", "create-sheet", "rename-sheet", "delete-sheet"]);
+const REPEATABLE_OPTIONS = new Set(["set", "where", "header"]);
 
 function fail(message, details = undefined) {
   const error = new Error(message);
@@ -20,7 +20,7 @@ function fail(message, details = undefined) {
 function parseArguments(argv) {
   const [action, ...tokens] = argv;
   if (!ACTIONS.has(action)) {
-    fail("Uso: sheets.mjs <current|info|list|read|inspect|write|append|update|clear> [--url <URL de Sheets>] [opciones]");
+    fail("Uso: sheets.mjs <current|info|list|read|inspect|write|append|update|clear|create-sheet|rename-sheet|delete-sheet> [--url <URL de Sheets>] [opciones]");
   }
   const options = {};
   for (let index = 0; index < tokens.length; index += 1) {
@@ -156,6 +156,28 @@ async function commandFromArguments(action, options) {
     if (!options.range) fail("clear requiere --range, por ejemplo A2:D10");
     params.range = options.range;
   }
+  if (action === "create-sheet") {
+    const name = String(options.name || "").trim();
+    if (!name) fail("create-sheet requiere --name");
+    params.name = name;
+    params.headers = Array.isArray(options.header) ? options.header.map((header) => String(header).trim()) : [];
+    if (params.headers.some((header) => !header)) fail("--header no puede estar vacío");
+  }
+  if (action === "rename-sheet") {
+    const sheet = String(options.sheet || "").trim();
+    const name = String(options.name || "").trim();
+    if (!sheet || !name) fail("rename-sheet requiere --sheet y --name");
+    params.sheet = sheet;
+    params.name = name;
+  }
+  if (action === "delete-sheet") {
+    const sheet = String(options.sheet || "").trim();
+    if (!sheet) fail("delete-sheet requiere --sheet");
+    const requiredConfirmation = `ELIMINAR ${sheet}`;
+    if (options.confirm !== requiredConfirmation) fail(`delete-sheet requiere --confirm "${requiredConfirmation}"`);
+    params.sheet = sheet;
+    params.confirmation = options.confirm;
+  }
 
   return {
     id: randomUUID(),
@@ -203,7 +225,7 @@ function respond(response, status, value) {
 function contextMatches(command, context) {
   if (command.target.activeTab) return context?.tabActive === true;
   if (context?.spreadsheetId !== command.target.spreadsheetId) return false;
-  if (command.params.sheet) return true;
+  if (command.params.sheet || ["create-sheet", "rename-sheet", "delete-sheet"].includes(command.action)) return true;
   return String(context?.gid || "0") === String(command.params.gid || "0");
 }
 
