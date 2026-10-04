@@ -168,7 +168,13 @@ function Filters({ columns, filters, onChange }) {
   );
 }
 
-function WorkspaceCellEditor({ property, rawValue, row, renderEditor, toEditorValue, onCommit }) {
+const WorkspaceCellEditor = React.memo(function WorkspaceCellEditor({ property, rawValue, row, renderEditor, toEditorValue, onCommit }) {
+  const [editorValue, setEditorValue] = React.useState(() => toEditorValue(rawValue, property));
+
+  React.useEffect(() => {
+    setEditorValue(toEditorValue(rawValue, property));
+  }, [property, rawValue, row, toEditorValue]);
+
   return React.createElement(
     "div",
     {
@@ -180,11 +186,14 @@ function WorkspaceCellEditor({ property, rawValue, row, renderEditor, toEditorVa
     },
     renderEditor(
       property,
-      toEditorValue(rawValue, property),
-      (nextValue) => void onCommit(row, property, nextValue).catch(() => {})
+      editorValue,
+      (nextValue) => {
+        setEditorValue(nextValue);
+        onCommit(row, property, nextValue);
+      }
     )
   );
-}
+});
 
 function DeckView({ columns, table, renderTypeIcon, onAddRow, onOpenRow }) {
   const [search, setSearch] = React.useState("");
