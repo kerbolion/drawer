@@ -8,7 +8,8 @@ const HOST = "127.0.0.1";
 const PORT = 17373;
 const HEADER_VALUE = "sheets-row-drawer-v1";
 const MAX_BODY_BYTES = 1_048_576;
-const ACTIONS = new Set(["info", "read", "inspect", "write", "clear"]);
+const ACTIONS = new Set(["info", "read", "inspect", "write", "append", "update", "clear"]);
+const REPEATABLE_OPTIONS = new Set(["set"]);
 
 function fail(message, details = undefined) {
   const error = new Error(message);
@@ -19,7 +20,7 @@ function fail(message, details = undefined) {
 function parseArguments(argv) {
   const [action, ...tokens] = argv;
   if (!ACTIONS.has(action)) {
-    fail("Uso: sheets.mjs <info|read|inspect|write|clear> --url <URL de Sheets> [opciones]");
+    fail("Uso: sheets.mjs <info|read|inspect|write|append|update|clear> --url <URL de Sheets> [opciones]");
   }
   const options = {};
   for (let index = 0; index < tokens.length; index += 1) {
@@ -27,11 +28,29 @@ function parseArguments(argv) {
     if (!token.startsWith("--")) fail(`Argumento no reconocido: ${token}`);
     const key = token.slice(2);
     const value = tokens[index + 1];
-    if (!value || value.startsWith("--")) fail(`Falta el valor de --${key}`);
-    options[key] = value;
+    if (value === undefined || value.startsWith("--")) fail(`Falta el valor de --${key}`);
+    if (REPEATABLE_OPTIONS.has(key)) {
+      if (!options[key]) options[key] = [];
+      options[key].push(value);
+    } else {
+      options[key] = value;
+    }
     index += 1;
   }
   return { action, options };
+}
+
+function assignments(values, label) {
+  if (!Array.isArray(values) || !values.length) fail(`${label} requiere al menos un --set "Columna=valor"`);
+  const result = {};
+  for (const assignment of values) {
+    const separator = assignment.indexOf("=");
+    if (separator <= 0) fail(`Asignación no válida: ${assignment}. Usa --set "Columna=valor"`);
+    const column = assignment.slice(0, separator).trim();
+    if (!column) fail(`Asignación sin nombre de columna: ${assignment}`);
+    result[column] = assignment.slice(separator + 1);
+  }
+  return result;
 }
 
 function parseSheetUrl(value) {
@@ -71,18 +90,27 @@ async function commandFromArguments(action, options) {
     if (!options.range) fail(`${action} requiere --range, por ejemplo A1:D20`);
     params.range = options.range;
   }
-  if (action === "write") {
-    if (!options.start) fail("write requiere --start, por ejemplo A2");
+  if (action === "write" || (action === "append" && !options.set)) {
+    if (action === "write" && !options.start) fail("write requiere --start, por ejemplo A2");
     const source = options["values-file"]
       ? await readFile(options["values-file"], "utf8")
       : options.values;
-    if (!source) fail("write requiere --values-file o --values");
+    if (!source) fail(`${action} requiere --set, --values-file o --values`);
     try {
       params.values = JSON.parse(source);
     } catch (error) {
       fail("Los valores deben ser JSON válido", error.message);
     }
-    params.start = options.start;
+    if (action === "write") params.start = options.start;
+  }
+  if (action === "append" && options.set) {
+    params.record = assignments(options.set, "append");
+  }
+  if (action === "update") {
+    const row = Number(options.row);
+    if (!Number.isInteger(row) || row < 2) fail("update requiere --row con un número de fila igual o mayor que 2");
+    params.row = row;
+    params.changes = assignments(options.set, "update");
   }
   if (action === "clear") {
     if (!options.range) fail("clear requiere --range, por ejemplo A2:D10");

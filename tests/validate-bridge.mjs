@@ -163,6 +163,22 @@ try {
     }
   });
   await runBridgeCase([
+    "append", "--url", url, "--sheet", "Servicios",
+    "--set", "Código=C-3", "--set", "Nombre=Instalación", "--timeout", "5"
+  ], "append", (command) => {
+    if (command.params.sheet !== "Servicios" || command.params.record?.Código !== "C-3" || command.params.record?.Nombre !== "Instalación") {
+      throw new Error(`El CLI alteró el registro para anexar: ${JSON.stringify(command)}`);
+    }
+  });
+  await runBridgeCase([
+    "update", "--url", url, "--sheet", "Servicios", "--row", "8",
+    "--set", "Estado=", "--set", "Nombre=Seguimiento", "--timeout", "5"
+  ], "update", (command) => {
+    if (command.params.sheet !== "Servicios" || command.params.row !== 8 || command.params.changes?.Estado !== "" || command.params.changes?.Nombre !== "Seguimiento") {
+      throw new Error(`El CLI alteró la actualización por columnas: ${JSON.stringify(command)}`);
+    }
+  });
+  await runBridgeCase([
     "clear", "--url", url, "--sheet", "Servicios", "--range", "B2:D10", "--timeout", "5"
   ], "clear", (command) => {
     if (command.params.range !== "B2:D10" || command.params.sheet !== "Servicios") {
@@ -183,4 +199,4 @@ try {
   await rm(tempDirectory, { recursive: true, force: true });
 }
 
-console.log("BRIDGE_OK: documento aislado, sesión activa obligatoria, vencimiento, lectura, escritura y limpieza confirmados.");
+console.log("BRIDGE_OK: documento aislado, sesión activa obligatoria, vencimiento, lectura, anexado, actualización, escritura y limpieza confirmados.");

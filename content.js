@@ -6671,6 +6671,62 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     return rows.map((row) => row.map((value) => value === null || value === undefined ? "" : String(value)));
   }
 
+  function bridgeValueEquivalent(actualValue, expectedValue) {
+    const actual = String(actualValue ?? "").trim();
+    const expected = String(expectedValue ?? "").trim();
+    if (actual === expected) return true;
+    const booleanValue = (value) => {
+      const normalized = normalizedColumn(value);
+      if (normalized === "true" || normalized === "verdadero") return true;
+      if (normalized === "false" || normalized === "falso") return false;
+      return null;
+    };
+    const actualBoolean = booleanValue(actual);
+    const expectedBoolean = booleanValue(expected);
+    if (actualBoolean !== null && expectedBoolean !== null) return actualBoolean === expectedBoolean;
+    const plainNumber = /^-?(?:0|[1-9]\d*)(?:\.\d+)?$/;
+    return plainNumber.test(actual) && plainNumber.test(expected) && Number(actual) === Number(expected);
+  }
+
+  async function bridgeSheetHeaders(sheetName) {
+    const rows = await readNamedBridgeRange(sheetName, `A1:${MAX_COLUMN}1`, undefined);
+    return rows.find((row) => row.number === 1)?.cells || [];
+  }
+
+  function bridgeHeaderIndexes(headers) {
+    const indexes = new Map();
+    headers.forEach((header, index) => {
+      const key = normalizedColumn(header);
+      if (key && !indexes.has(key)) indexes.set(key, index);
+    });
+    return indexes;
+  }
+
+  function bridgeRecordRow(record, headers) {
+    if (!record || typeof record !== "object" || Array.isArray(record)) {
+      throw new Error("El registro debe contener pares Columna=valor");
+    }
+    const indexes = bridgeHeaderIndexes(headers);
+    const lastColumn = headers.reduce((last, header, index) => String(header || "").trim() ? index : last, -1);
+    if (lastColumn < 0) throw new Error("La hoja no tiene encabezados configurados");
+    const row = Array(lastColumn + 1).fill("");
+    for (const [column, value] of Object.entries(record)) {
+      const index = indexes.get(normalizedColumn(column));
+      if (index === undefined) throw new Error(`La columna ${column} no existe en la hoja`);
+      row[index] = value === null || value === undefined ? "" : String(value);
+    }
+    return row;
+  }
+
+  async function nextBridgeAppendRow(sheetName) {
+    const table = await readSheetTable(sheetName, `A1:${MAX_COLUMN}`, undefined);
+    let lastUsedRow = table.headers.some((value) => String(value || "").trim()) ? 1 : 0;
+    for (const row of table.rows) {
+      if (row.cells.some((value) => String(value || "").trim())) lastUsedRow = Math.max(lastUsedRow, row.number);
+    }
+    return Math.max(2, lastUsedRow + 1);
+  }
+
   async function readNamedBridgeRange(sheetName, range, signal) {
     const table = await readSheetTable(sheetName, range, signal);
     const firstRow = Number(range.match(/[A-Z]+(\d+)/)?.[1] || 1);
@@ -6684,12 +6740,13 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     const range = normalizedBridgeRange(params.range);
     const requestedSheet = String(params.sheet || "").trim();
     const activeName = activeSheetName();
-    const rows = requestedSheet && normalizedColumn(requestedSheet) !== normalizedColumn(activeName)
+    const requestedSheetIsActive = requestedSheet && normalizedColumn(requestedSheet) === normalizedColumn(activeName);
+    const rows = requestedSheet
       ? await readNamedBridgeRange(requestedSheet, range, signal)
       : await readRange(range, signal, String(params.gid || currentGid()));
     return {
       spreadsheetId: spreadsheetId(),
-      gid: String(params.gid || currentGid()),
+      gid: requestedSheet ? (requestedSheetIsActive ? currentGid() : null) : String(params.gid || currentGid()),
       sheet: requestedSheet || activeName,
       range,
       rows: rows.map((row) => ({ row: row.number, values: row.cells }))
@@ -6805,7 +6862,10 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     for (const delay of [500, 1_000, 2_000]) {
       await wait(delay);
       lastResult = await readBridgeRange({ ...params, range }, undefined);
-      if (JSON.stringify(bridgeResultValues(lastResult, expectedRows)) === JSON.stringify(expectedRows)) {
+      const actualRows = bridgeResultValues(lastResult, expectedRows);
+      if (actualRows.every((row, rowIndex) => row.every((value, columnIndex) =>
+        bridgeValueEquivalent(value, expectedRows[rowIndex][columnIndex])
+      ))) {
         return { verified: true, values: expectedRows };
       }
     }
@@ -6828,16 +6888,89 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
         sheet: activeSheetName(),
         selection: nameBoxValue(),
         sheets: visibleBridgeSheets(),
-        capabilities: ["read", "inspect", "write", "clear"]
+        capabilities: ["read", "inspect", "write", "append", "update", "clear"]
       };
     }
     if (command.action === "read") return readBridgeRange(params, undefined);
     if (command.action === "inspect") return inspectBridgeRange(params, undefined);
-    if (command.action !== "write" && command.action !== "clear") {
+    if (command.action !== "write" && command.action !== "append" && command.action !== "update" && command.action !== "clear") {
       throw new Error(`Operación no soportada: ${command.action}`);
     }
 
     const targetSheet = String(params.sheet || activeSheetName()).trim();
+
+    if (command.action === "append") {
+      const expectedRows = params.record
+        ? [bridgeRecordRow(params.record, await bridgeSheetHeaders(targetSheet))]
+        : bridgeRows(params.values);
+      const startRow = await nextBridgeAppendRow(targetSheet);
+      const start = `A${startRow}`;
+      const range = bridgeWriteRange(start, expectedRows);
+      await writeRanges([{ reference: qualifiedReference(targetSheet, start), rows: expectedRows }]);
+      state.headerCache.clear();
+      state.sheetCache.clear();
+      const verification = await verifyBridgeMutation({ ...params, sheet: targetSheet }, range, expectedRows);
+      return {
+        spreadsheetId: spreadsheetId(),
+        gid: currentGid(),
+        sheet: targetSheet,
+        start,
+        range,
+        ...verification
+      };
+    }
+
+    if (command.action === "update") {
+      const rowNumber = Number(params.row);
+      if (!Number.isInteger(rowNumber) || rowNumber < 2) throw new Error("La fila debe ser igual o mayor que 2");
+      const changes = params.changes;
+      if (!changes || typeof changes !== "object" || Array.isArray(changes) || !Object.keys(changes).length) {
+        throw new Error("No hay cambios para aplicar");
+      }
+      const headers = await bridgeSheetHeaders(targetSheet);
+      const indexes = bridgeHeaderIndexes(headers);
+      const cells = Object.entries(changes).map(([column, value]) => {
+        const columnIndex = indexes.get(normalizedColumn(column));
+        if (columnIndex === undefined) throw new Error(`La columna ${column} no existe en la hoja`);
+        return {
+          column,
+          columnIndex,
+          reference: `${columnName(columnIndex + 1)}${rowNumber}`,
+          value: value === null || value === undefined ? "" : String(value)
+        };
+      });
+      await writeRanges(cells.map((cell) => ({
+        reference: qualifiedReference(targetSheet, cell.reference),
+        rows: [[cell.value]]
+      })));
+      state.headerCache.clear();
+      state.sheetCache.clear();
+      let actualValues = {};
+      let verified = false;
+      for (const delay of [500, 1_000, 2_000]) {
+        await wait(delay);
+        const firstColumn = Math.min(...cells.map((cell) => cell.columnIndex));
+        const lastColumn = Math.max(...cells.map((cell) => cell.columnIndex));
+        const range = `${columnName(firstColumn + 1)}${rowNumber}:${columnName(lastColumn + 1)}${rowNumber}`;
+        const result = await readBridgeRange({ ...params, sheet: targetSheet, range }, undefined);
+        const values = result.rows[0]?.values || [];
+        actualValues = Object.fromEntries(cells.map((cell) => [
+          cell.column,
+          String(values[cell.columnIndex - firstColumn] ?? "")
+        ]));
+        verified = cells.every((cell) => bridgeValueEquivalent(actualValues[cell.column], cell.value));
+        if (verified) break;
+      }
+      return {
+        spreadsheetId: spreadsheetId(),
+        gid: currentGid(),
+        sheet: targetSheet,
+        row: rowNumber,
+        verified,
+        values: actualValues
+      };
+    }
+
     let range;
     let expectedRows;
     let operation;
