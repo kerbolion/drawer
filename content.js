@@ -2294,7 +2294,10 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
       }
       movingRowsRef.current.add(row.number);
       setMovingRows([...movingRowsRef.current]);
-      stageSheetViewValue(row, property, nextValue, activeTarget);
+      if (stageSheetViewValue(row, property, nextValue, activeTarget)) {
+        cancelSheetViewTableSync();
+        syncSheetViewTable(activeTarget);
+      }
       setTimeout(() => {
         movingRowsRef.current.delete(row.number);
         setMovingRows([...movingRowsRef.current]);

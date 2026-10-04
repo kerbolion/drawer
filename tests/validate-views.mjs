@@ -844,7 +844,12 @@ try {
   await cdp.command("Input.dispatchMouseEvent", {
     type: "mouseReleased", x: dragPoint.endX, y: dragPoint.endY, button: "left", buttons: 0, clickCount: 1
   });
-  await delay(250);
+  await delay(50);
+  const immediateKanbanGroup = await cdp.evaluate(viewExpression(`return view.querySelector('.kanban-card-shell[data-sheet-row="4"]')?.closest('[data-kanban-group]')?.dataset.kanbanGroup || "";`));
+  if (immediateKanbanGroup !== "En proceso") {
+    throw new Error(`Kanban aplico el movimiento con retraso: ${immediateKanbanGroup || "sin columna"}`);
+  }
+  await delay(200);
   const secondDrag = await cdp.evaluate(`(() => {
     const frame = document.getElementById("sheets-session-probe").shadowRoot.querySelector(".sheet-view-frame");
     const frameRect = frame.getBoundingClientRect();

@@ -1,16 +1,9 @@
 import { defineConfig } from "vite";
 import { resolve } from "node:path";
+import { minifyOptions } from "./scripts/minify-options.mjs";
 
 export default defineConfig({
   publicDir: false,
-  plugins: [{
-    name: "trim-generated-whitespace",
-    generateBundle(_options, bundle) {
-      for (const output of Object.values(bundle)) {
-        if (output.type === "chunk") output.code = output.code.replace(/[ \t]+$/gm, "");
-      }
-    }
-  }],
   resolve: {
     alias: [
       {
@@ -29,7 +22,8 @@ export default defineConfig({
   build: {
     outDir: "dist",
     emptyOutDir: true,
-    minify: false,
+    minify: "terser",
+    terserOptions: minifyOptions,
     lib: {
       entry: resolve(import.meta.dirname, "content.js"),
       name: "SheetsRowDrawer",
