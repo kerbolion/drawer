@@ -246,6 +246,18 @@ select{
   opacity:.35;
 }
 
+.drag-image{
+  position:fixed;
+  z-index:9999;
+  top:0;
+  left:0;
+  margin:0;
+  opacity:1;
+  pointer-events:none;
+  transition:none;
+  will-change:transform;
+}
+
 [contenteditable="true"]{
   cursor:text;
   outline:2px solid var(--site-muted);
@@ -410,8 +422,74 @@ themeToggle.onclick=()=>{
 }
 
 let drag
+let dragImage
+let dragImageOffset={x:0,y:0}
 let workspaces=[]
 let activeWorkspace=''
+
+
+function moverDragImage(x,y){
+
+  if(!dragImage)
+    return
+
+  dragImage.style.transform=
+    `translate3d(${x-dragImageOffset.x}px,${y-dragImageOffset.y}px,0)`
+}
+
+
+function crearDragImage(element,e){
+
+  let rect=element.getBoundingClientRect()
+
+  dragImage?.remove()
+  dragImage=element.cloneNode(true)
+  dragImage.classList.remove('dragging')
+  dragImage.classList.add('drag-image')
+  dragImage.setAttribute('aria-hidden','true')
+  dragImage.style.width=rect.width+'px'
+  dragImage.style.height=rect.height+'px'
+
+  dragImage
+    .querySelectorAll('[draggable]')
+    .forEach(item=>item.draggable=false)
+
+  dragImage.draggable=false
+  dragImageOffset={
+    x:e.clientX-rect.left,
+    y:e.clientY-rect.top
+  }
+
+  document.body.append(dragImage)
+
+  let sourceCards=
+    element.querySelector?.('.cards')
+
+  let previewCards=
+    dragImage.querySelector?.('.cards')
+
+  if(sourceCards && previewCards)
+    previewCards.scrollTop=sourceCards.scrollTop
+
+  moverDragImage(e.clientX,e.clientY)
+
+  let transparent=
+    document.createElement('canvas')
+
+  transparent.width=1
+  transparent.height=1
+
+  e.dataTransfer.effectAllowed='move'
+  e.dataTransfer.setData('text/plain','')
+  e.dataTransfer.setDragImage(transparent,0,0)
+}
+
+
+function eliminarDragImage(){
+
+  dragImage?.remove()
+  dragImage=null
+}
 
 
 function ajustarColumnas(){
@@ -753,7 +831,21 @@ document.addEventListener(
     if(!drag)
       return
 
-    drag?.classList.add('dragging')
+    crearDragImage(drag,e)
+    drag.classList.add('dragging')
+  }
+)
+
+
+document.addEventListener(
+  'drag',
+  e=>{
+
+    if(
+      dragImage &&
+      (e.clientX || e.clientY)
+    )
+      moverDragImage(e.clientX,e.clientY)
   }
 )
 
@@ -763,6 +855,7 @@ document.addEventListener(
   ()=>{
 
     drag?.classList.remove('dragging')
+    eliminarDragImage()
 
     drag=null
 
@@ -776,6 +869,9 @@ document.addEventListener(
   e=>{
 
     e.preventDefault()
+
+    if(dragImage)
+      moverDragImage(e.clientX,e.clientY)
 
     if(!drag)
       return
