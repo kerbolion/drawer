@@ -918,18 +918,19 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
       align-content: start; align-items: start;
     }
     .kanban-board--row {
-      display: grid; grid-auto-flow: column; grid-auto-columns: minmax(300px, 320px); align-items: start;
+      display: grid; grid-auto-flow: column; grid-auto-columns: minmax(300px, 320px); grid-template-rows: minmax(0, 1fr); align-items: stretch;
     }
     .kanban-column {
       display: flex; width: 100%; height: var(--kanban-height, 600px); min-width: 0; min-height: 150px; flex-direction: column; padding: 10px; border: 1px solid var(--workspace-border);
       border-radius: 6px; background: var(--workspace-surface); transition: border-color 120ms ease, box-shadow 120ms ease, background 120ms ease;
     }
-    .kanban-board--row .kanban-column { height: 600px; min-height: 420px; max-height: calc(100vh - 210px); }
+    .kanban-board--row .kanban-column { height: auto; min-height: 0; max-height: none; }
     .kanban-column-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
     .kanban-column-title { display: flex; min-width: 0; align-items: center; gap: 6px; color: var(--workspace-text); font-weight: 700; }
     .kanban-column-title .ant-tag { max-width: 190px; margin-inline-end: 0; overflow: hidden; text-overflow: ellipsis; }
     .kanban-count { color: var(--workspace-text-muted); font-size: 12px; }
     .kanban-cards { display: flex; min-height: 0; flex: 1; flex-direction: column; gap: 8px; overflow-y: auto; padding: 10px; }
+    .kanban-cards:has(.kanban-card-shell.dragging) .kanban-empty-drop { display: none; }
     .kanban-card-shell {
       cursor: grab; touch-action: none; user-select: none;
     }
@@ -1872,7 +1873,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
           ref: boardRef,
           style: {
             "--kanban-columns": columnsPerRow,
-            "--kanban-height": `${boardHeight}px`
+            "--kanban-height": viewMode === "grid" ? `${boardHeight}px` : undefined
           }
         },
         ...groups.map((group) => {

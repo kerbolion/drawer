@@ -1025,7 +1025,7 @@ try {
   if (!editedSelection.endsWith("!C3")) {
     throw new Error(`Kanban restauro la seleccion anterior en lugar de conservar la ultima celda editada: ${editedSelection}`);
   }
-  await cdp.evaluate(viewExpression(`
+  const emptyDropHintHidden = await cdp.evaluate(viewExpression(`
     const card = view.querySelector('.kanban-card-shell[data-sheet-row="2"]');
     const target = view.querySelector('[data-kanban-group="__empty__"] .cards');
     const dataTransfer = new DataTransfer();
@@ -1036,8 +1036,11 @@ try {
       clientY: target.getBoundingClientRect().top + 120,
       dataTransfer
     }));
+    const hidden = getComputedStyle(target.querySelector('.kanban-empty-drop')).display === 'none';
     card.dispatchEvent(new DragEvent('dragend', { bubbles: true, cancelable: true, dataTransfer }));
+    return hidden;
   `));
+  if (!emptyDropHintHidden) throw new Error('Kanban mostro el aviso vacio mientras una tarjeta ocupaba la zona de destino');
   await delay(225);
   const pendingClear = await cdp.evaluate(viewExpression(`return {
     wrote: (parent.__clears || []).includes("'Contactos'!C2"),
