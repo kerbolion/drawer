@@ -980,19 +980,28 @@ try {
     const card = view.querySelector('.card[data-sheet-row="4"]');
     const target = view.querySelector('[data-kanban-group="En proceso"] .cards');
     const dataTransfer = new DataTransfer();
+    const nativeInsertBefore = target.insertBefore;
+    let insertions = 0;
+    target.insertBefore = function (...args) {
+      insertions += 1;
+      return nativeInsertBefore.apply(this, args);
+    };
     card.dispatchEvent(new DragEvent('dragstart', { bubbles: true, cancelable: true, dataTransfer }));
-    target.dispatchEvent(new DragEvent('dragover', {
-      bubbles: true,
-      cancelable: true,
-      clientY: target.getBoundingClientRect().top + 120,
-      dataTransfer
-    }));
+    for (let index = 0; index < 24; index += 1) {
+      target.dispatchEvent(new DragEvent('dragover', {
+        bubbles: true,
+        cancelable: true,
+        clientY: target.getBoundingClientRect().bottom - 4,
+        dataTransfer
+      }));
+    }
     const during = card.closest('[data-kanban-group]')?.dataset.kanbanGroup || '';
     const dragging = card.classList.contains('dragging');
     card.dispatchEvent(new DragEvent('dragend', { bubbles: true, cancelable: true, dataTransfer }));
-    return { during, dragging };
+    target.insertBefore = nativeInsertBefore;
+    return { during, dragging, insertions };
   `));
-  if (firstNativeDrag.during !== "En proceso" || !firstNativeDrag.dragging) {
+  if (firstNativeDrag.during !== "En proceso" || !firstNativeDrag.dragging || firstNativeDrag.insertions > 1) {
     throw new Error(`Kanban no reemplazo el arrastre con el flujo nativo: ${JSON.stringify(firstNativeDrag)}`);
   }
   const firstFrameKanbanGroup = await cdp.evaluate(viewExpression(`return view.querySelector('.kanban-card-shell[data-sheet-row="4"]')?.closest('[data-kanban-group]')?.dataset.kanbanGroup || "";`));

@@ -1767,13 +1767,28 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
       let dragImage = null;
       let dragOffset = { x: 0, y: 0 };
       let columnMoveAnchor = null;
+      let dragImageFrame = 0;
+      let dragImagePoint = null;
+      const kanbanWindow = kanbanDocument.defaultView;
 
       const moveDragImage = (x, y) => {
         if (!dragImage) return;
         dragImage.style.transform = `translate3d(${x - dragOffset.x}px,${y - dragOffset.y}px,0)`;
       };
 
+      const queueDragImageMove = (x, y) => {
+        dragImagePoint = { x, y };
+        if (dragImageFrame) return;
+        dragImageFrame = kanbanWindow.requestAnimationFrame(() => {
+          dragImageFrame = 0;
+          if (dragImagePoint) moveDragImage(dragImagePoint.x, dragImagePoint.y);
+        });
+      };
+
       const removeDragImage = () => {
+        if (dragImageFrame) kanbanWindow.cancelAnimationFrame(dragImageFrame);
+        dragImageFrame = 0;
+        dragImagePoint = null;
         dragImage?.remove();
         dragImage = null;
       };
@@ -1822,14 +1837,14 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
 
       const handleDrag = (event) => {
         if (dragImage && (event.clientX || event.clientY)) {
-          moveDragImage(event.clientX, event.clientY);
+          queueDragImageMove(event.clientX, event.clientY);
         }
       };
 
       const handleDragOver = (event) => {
         if (!drag) return;
         event.preventDefault();
-        moveDragImage(event.clientX, event.clientY);
+        queueDragImageMove(event.clientX, event.clientY);
 
         if (dragType === "column") {
           if (columnMoveAnchor && Math.hypot(
@@ -1866,9 +1881,17 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
         }
         if (!cards || !board.contains(cards)) return;
 
-        const next = [...cards.querySelectorAll(".card:not(.dragging)")].find((card) => (
-          event.clientY < card.getBoundingClientRect().top + card.offsetHeight / 2
-        ));
+        const next = [...cards.querySelectorAll(".card:not(.dragging)")].find((card) => {
+          const rect = card.getBoundingClientRect();
+          return event.clientY < rect.top + rect.height / 2;
+        });
+        if (drag.parentElement === cards) {
+          let followingCard = drag.nextElementSibling;
+          while (followingCard && !followingCard.matches(".card:not(.dragging)")) {
+            followingCard = followingCard.nextElementSibling;
+          }
+          if (followingCard === (next || null)) return;
+        }
         cards.insertBefore(drag, next || null);
       };
 
