@@ -59,15 +59,85 @@ vm.runInNewContext(backgroundSource, {
   chrome
 }, { filename: "background.js" });
 
-function backgroundMessage(type, payload) {
+function backgroundMessage(type, payload, tabActive = false) {
   return new Promise((resolve, reject) => {
     const handled = backgroundListener(
       { source: "sheets-row-drawer-codex", type, payload },
-      { url, tab: { id: 9, active: false, url } },
+      { url, tab: { id: 9, active: tabActive, url } },
       resolve
     );
     if (!handled) reject(new Error(`El service worker no aceptó el mensaje ${type}`));
   });
+}
+
+async function runCurrentCase() {
+  const child = spawn(process.execPath, [script, "current", "--timeout", "5"], {
+    windowsHide: true,
+    stdio: ["ignore", "pipe", "pipe"]
+  });
+  let stdout = "";
+  let stderr = "";
+  child.stdout.on("data", (chunk) => { stdout += chunk; });
+  child.stderr.on("data", (chunk) => { stderr += chunk; });
+  const exit = new Promise((resolve) => child.once("exit", resolve));
+
+  let delivered;
+  const deadline = Date.now() + 3_000;
+  while (Date.now() < deadline) {
+    const inactive = await backgroundMessage("poll", { spreadsheetId: "inactive-sheet", gid: "9" }, false);
+    if (inactive?.command !== null) throw new Error("current se entregó a una pestaña inactiva");
+    delivered = await backgroundMessage("poll", { spreadsheetId: "test-spreadsheet", gid: "7" }, true);
+    if (delivered?.command?.action === "info") break;
+    await delay(50);
+  }
+  if (delivered?.command?.action !== "info") throw new Error(`current no encontró la pestaña activa: ${JSON.stringify(delivered)}`);
+  await backgroundMessage("result", {
+    id: delivered.command.id,
+    ok: true,
+    result: { spreadsheetId: "test-spreadsheet", gid: "7", sheet: "Servicios" }
+  }, true);
+  const exitCode = await exit;
+  if (exitCode !== 0) throw new Error(stderr || `current terminó con código ${exitCode}`);
+  const output = JSON.parse(stdout);
+  if (output.result?.spreadsheetId !== "test-spreadsheet" || output.result?.sheet !== "Servicios") {
+    throw new Error(`current devolvió otro documento: ${stdout}`);
+  }
+}
+
+async function runChunkedAppendCase(recordsFile) {
+  const child = spawn(process.execPath, [
+    script, "append", "--url", url, "--sheet", "Servicios", "--records-file", recordsFile, "--timeout", "5"
+  ], { windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
+  let stdout = "";
+  let stderr = "";
+  child.stdout.on("data", (chunk) => { stdout += chunk; });
+  child.stderr.on("data", (chunk) => { stderr += chunk; });
+  const exit = new Promise((resolve) => child.once("exit", resolve));
+
+  const sizes = [];
+  for (let chunkIndex = 0; chunkIndex < 2; chunkIndex += 1) {
+    let delivered;
+    const deadline = Date.now() + 3_000;
+    while (Date.now() < deadline) {
+      delivered = await backgroundMessage("poll", { spreadsheetId: "test-spreadsheet", gid: "7" });
+      if (delivered?.command?.action === "append") break;
+      await delay(50);
+    }
+    if (delivered?.command?.action !== "append") throw new Error(`No se entregó el bloque ${chunkIndex + 1}`);
+    sizes.push(delivered.command.params.records?.length || 0);
+    await backgroundMessage("result", {
+      id: delivered.command.id,
+      ok: true,
+      result: { chunk: chunkIndex + 1 }
+    });
+  }
+
+  const exitCode = await exit;
+  if (exitCode !== 0) throw new Error(stderr || `El lote terminó con código ${exitCode}`);
+  const output = JSON.parse(stdout);
+  if (sizes[0] !== 100 || sizes[1] !== 1 || output.result?.chunks !== 2 || output.result?.results?.length !== 2) {
+    throw new Error(`El lote no se dividió en 100 + 1: ${JSON.stringify({ sizes, output })}`);
+  }
 }
 
 async function runBridgeCase(argumentsList, expectedAction, inspectCommand) {
@@ -147,9 +217,28 @@ async function runBlockedBridgeCase(name, prepare, expectedError) {
 const tempDirectory = await mkdtemp(path.join(os.tmpdir(), "sheets-bridge-test-"));
 try {
   const valuesFile = path.join(tempDirectory, "values.json");
+  const recordsFile = path.join(tempDirectory, "records.json");
+  const largeRecordsFile = path.join(tempDirectory, "large-records.json");
   await writeFile(valuesFile, JSON.stringify([["C-1", "Limpieza"], ["C-2", "Entrega"]]), "utf8");
+  await writeFile(recordsFile, JSON.stringify([
+    { Código: "C-4", Nombre: "Auditoría" },
+    { Código: "C-5", Nombre: "Soporte" }
+  ]), "utf8");
+  await writeFile(largeRecordsFile, JSON.stringify(Array.from({ length: 101 }, (_, index) => ({
+    Código: `L-${index + 1}`,
+    Nombre: `Registro ${index + 1}`
+  }))), "utf8");
 
+  await runCurrentCase();
   await runBridgeCase(["info", "--url", url, "--timeout", "5"], "info");
+  await runBridgeCase([
+    "list", "--url", url, "--sheet", "Servicios", "--where", "Estado=Activo",
+    "--from-row", "3", "--limit", "25", "--timeout", "5"
+  ], "list", (command) => {
+    if (command.params.sheet !== "Servicios" || command.params.where?.Estado !== "Activo" || command.params.fromRow !== 3 || command.params.limit !== 25) {
+      throw new Error(`El CLI alteró la consulta de registros: ${JSON.stringify(command)}`);
+    }
+  });
   await runBridgeCase([
     "inspect", "--url", url, "--range", "M2", "--timeout", "5"
   ], "inspect", (command) => {
@@ -171,11 +260,27 @@ try {
     }
   });
   await runBridgeCase([
+    "append", "--url", url, "--sheet", "Servicios", "--records-file", recordsFile, "--timeout", "5"
+  ], "append", (command) => {
+    if (command.params.records?.length !== 2 || command.params.records?.[1]?.Código !== "C-5") {
+      throw new Error(`El CLI alteró el lote de registros: ${JSON.stringify(command)}`);
+    }
+  });
+  await runChunkedAppendCase(largeRecordsFile);
+  await runBridgeCase([
     "update", "--url", url, "--sheet", "Servicios", "--row", "8",
     "--set", "Estado=", "--set", "Nombre=Seguimiento", "--timeout", "5"
   ], "update", (command) => {
     if (command.params.sheet !== "Servicios" || command.params.row !== 8 || command.params.changes?.Estado !== "" || command.params.changes?.Nombre !== "Seguimiento") {
       throw new Error(`El CLI alteró la actualización por columnas: ${JSON.stringify(command)}`);
+    }
+  });
+  await runBridgeCase([
+    "update", "--url", url, "--sheet", "Servicios", "--where", "Código=C-3",
+    "--set", "Estado=Completado", "--timeout", "5"
+  ], "update", (command) => {
+    if (command.params.row !== undefined || command.params.where?.Código !== "C-3" || command.params.changes?.Estado !== "Completado") {
+      throw new Error(`El CLI alteró la actualización por identificador: ${JSON.stringify(command)}`);
     }
   });
   await runBridgeCase([
@@ -199,4 +304,4 @@ try {
   await rm(tempDirectory, { recursive: true, force: true });
 }
 
-console.log("BRIDGE_OK: documento aislado, sesión activa obligatoria, vencimiento, lectura, anexado, actualización, escritura y limpieza confirmados.");
+console.log("BRIDGE_OK: descubrimiento activo, documento aislado, sesión obligatoria, consultas, lotes, actualización, escritura y limpieza confirmados.");

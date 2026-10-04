@@ -6727,6 +6727,33 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     return Math.max(2, lastUsedRow + 1);
   }
 
+  async function bridgeSheetRecords(sheetName, options = {}) {
+    const table = await readSheetTable(sheetName, `A1:${MAX_COLUMN}`, undefined);
+    const headers = table.headers;
+    const indexes = bridgeHeaderIndexes(headers);
+    const where = options.where && typeof options.where === "object" ? options.where : {};
+    const conditions = Object.entries(where).map(([column, value]) => {
+      const columnIndex = indexes.get(normalizedColumn(column));
+      if (columnIndex === undefined) throw new Error(`La columna ${column} no existe en la hoja`);
+      return { columnIndex, value: String(value ?? "") };
+    });
+    const fromRow = Math.max(2, Number(options.fromRow) || 2);
+    const limit = Math.min(500, Math.max(1, Number(options.limit) || 100));
+    const records = table.rows
+      .filter((row) => row.number >= fromRow && row.cells.some((value) => String(value || "").trim()))
+      .filter((row) => conditions.every((condition) =>
+        bridgeValueEquivalent(row.cells[condition.columnIndex] ?? "", condition.value)
+      ))
+      .slice(0, limit)
+      .map((row) => ({
+        row: row.number,
+        values: Object.fromEntries(headers.flatMap((header, index) =>
+          String(header || "").trim() ? [[String(header), String(row.cells[index] ?? "")]] : []
+        ))
+      }));
+    return { headers: headers.filter((header) => String(header || "").trim()), records };
+  }
+
   async function readNamedBridgeRange(sheetName, range, signal) {
     const table = await readSheetTable(sheetName, range, signal);
     const firstRow = Number(range.match(/[A-Z]+(\d+)/)?.[1] || 1);
@@ -6888,7 +6915,15 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
         sheet: activeSheetName(),
         selection: nameBoxValue(),
         sheets: visibleBridgeSheets(),
-        capabilities: ["read", "inspect", "write", "append", "update", "clear"]
+        capabilities: ["list", "read", "inspect", "write", "append", "update", "clear"]
+      };
+    }
+    if (command.action === "list") {
+      const sheet = String(params.sheet || activeSheetName()).trim();
+      return {
+        spreadsheetId: spreadsheetId(),
+        sheet,
+        ...(await bridgeSheetRecords(sheet, params))
       };
     }
     if (command.action === "read") return readBridgeRange(params, undefined);
@@ -6900,8 +6935,10 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     const targetSheet = String(params.sheet || activeSheetName()).trim();
 
     if (command.action === "append") {
-      const expectedRows = params.record
-        ? [bridgeRecordRow(params.record, await bridgeSheetHeaders(targetSheet))]
+      const recordList = params.records || (params.record ? [params.record] : null);
+      const headers = recordList ? await bridgeSheetHeaders(targetSheet) : null;
+      const expectedRows = recordList
+        ? recordList.map((record) => bridgeRecordRow(record, headers))
         : bridgeRows(params.values);
       const startRow = await nextBridgeAppendRow(targetSheet);
       const start = `A${startRow}`;
@@ -6921,7 +6958,13 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     }
 
     if (command.action === "update") {
-      const rowNumber = Number(params.row);
+      let rowNumber = Number(params.row);
+      if (params.where && typeof params.where === "object" && Object.keys(params.where).length) {
+        const matches = (await bridgeSheetRecords(targetSheet, { where: params.where, limit: 2 })).records;
+        if (!matches.length) throw new Error("No se encontró ningún registro que coincida con --where");
+        if (matches.length > 1) throw new Error("--where coincide con más de un registro; usa una condición única");
+        rowNumber = matches[0].row;
+      }
       if (!Number.isInteger(rowNumber) || rowNumber < 2) throw new Error("La fila debe ser igual o mayor que 2");
       const changes = params.changes;
       if (!changes || typeof changes !== "object" || Array.isArray(changes) || !Object.keys(changes).length) {

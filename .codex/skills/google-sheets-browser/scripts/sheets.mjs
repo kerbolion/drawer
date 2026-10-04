@@ -8,8 +8,8 @@ const HOST = "127.0.0.1";
 const PORT = 17373;
 const HEADER_VALUE = "sheets-row-drawer-v1";
 const MAX_BODY_BYTES = 1_048_576;
-const ACTIONS = new Set(["info", "read", "inspect", "write", "append", "update", "clear"]);
-const REPEATABLE_OPTIONS = new Set(["set"]);
+const ACTIONS = new Set(["current", "info", "list", "read", "inspect", "write", "append", "update", "clear"]);
+const REPEATABLE_OPTIONS = new Set(["set", "where"]);
 
 function fail(message, details = undefined) {
   const error = new Error(message);
@@ -20,7 +20,7 @@ function fail(message, details = undefined) {
 function parseArguments(argv) {
   const [action, ...tokens] = argv;
   if (!ACTIONS.has(action)) {
-    fail("Uso: sheets.mjs <info|read|inspect|write|append|update|clear> --url <URL de Sheets> [opciones]");
+    fail("Uso: sheets.mjs <current|info|list|read|inspect|write|append|update|clear> [--url <URL de Sheets>] [opciones]");
   }
   const options = {};
   for (let index = 0; index < tokens.length; index += 1) {
@@ -71,14 +71,35 @@ function parseSheetUrl(value) {
   };
 }
 
-function positiveInteger(value, fallback) {
+function positiveInteger(value, fallback, label = "--timeout") {
   if (value === undefined) return fallback;
   const parsed = Number(value);
-  if (!Number.isInteger(parsed) || parsed <= 0) fail("--timeout debe ser un entero positivo");
+  if (!Number.isInteger(parsed) || parsed <= 0) fail(`${label} debe ser un entero positivo`);
   return parsed;
 }
 
+async function jsonOption(options, fileOption, inlineOption, label) {
+  const source = options[fileOption]
+    ? await readFile(options[fileOption], "utf8")
+    : options[inlineOption];
+  if (!source) return null;
+  try {
+    return JSON.parse(source);
+  } catch (error) {
+    fail(`${label} debe contener JSON válido`, error.message);
+  }
+}
+
 async function commandFromArguments(action, options) {
+  if (action === "current") {
+    return {
+      id: randomUUID(),
+      action: "info",
+      target: { activeTab: true },
+      params: { gid: "", sheet: "" },
+      timeoutMs: positiveInteger(options.timeout, 30) * 1_000
+    };
+  }
   if (!options.url) fail("Falta --url");
   const target = parseSheetUrl(options.url);
   const params = {
@@ -90,26 +111,45 @@ async function commandFromArguments(action, options) {
     if (!options.range) fail(`${action} requiere --range, por ejemplo A1:D20`);
     params.range = options.range;
   }
-  if (action === "write" || (action === "append" && !options.set)) {
-    if (action === "write" && !options.start) fail("write requiere --start, por ejemplo A2");
-    const source = options["values-file"]
-      ? await readFile(options["values-file"], "utf8")
-      : options.values;
-    if (!source) fail(`${action} requiere --set, --values-file o --values`);
-    try {
-      params.values = JSON.parse(source);
-    } catch (error) {
-      fail("Los valores deben ser JSON válido", error.message);
-    }
-    if (action === "write") params.start = options.start;
+  if (action === "list") {
+    params.fromRow = positiveInteger(options["from-row"], 2, "--from-row");
+    if (params.fromRow < 2) fail("--from-row debe ser igual o mayor que 2");
+    params.limit = positiveInteger(options.limit, 100, "--limit");
+    if (params.limit > 500) fail("--limit admite como máximo 500 registros por lectura");
+    params.where = options.where ? assignments(options.where, "list") : {};
   }
-  if (action === "append" && options.set) {
-    params.record = assignments(options.set, "append");
+  if (action === "write") {
+    if (!options.start) fail("write requiere --start, por ejemplo A2");
+    params.values = await jsonOption(options, "values-file", "values", "write");
+    if (!params.values) fail("write requiere --values-file o --values");
+    params.start = options.start;
+  }
+  if (action === "append") {
+    const records = await jsonOption(options, "records-file", "records", "append");
+    const values = await jsonOption(options, "values-file", "values", "append");
+    const inputCount = Number(Boolean(options.set)) + Number(Boolean(records)) + Number(Boolean(values));
+    if (inputCount > 1) fail("append acepta solo uno de --set, --records-file/--records o --values-file/--values");
+    if (inputCount === 0) fail("append requiere --set, --records-file/--records o --values-file/--values");
+    if (options.set) params.record = assignments(options.set, "append");
+    if (records) {
+      if (!Array.isArray(records) || !records.length || records.some((record) => !record || typeof record !== "object" || Array.isArray(record))) {
+        fail("append requiere una lista no vacía de objetos en --records-file o --records");
+      }
+      params.records = records;
+    }
+    if (values) params.values = values;
   }
   if (action === "update") {
-    const row = Number(options.row);
-    if (!Number.isInteger(row) || row < 2) fail("update requiere --row con un número de fila igual o mayor que 2");
-    params.row = row;
+    const hasRow = options.row !== undefined;
+    const hasWhere = Array.isArray(options.where) && options.where.length > 0;
+    if (hasRow === hasWhere) fail("update requiere exactamente uno de --row o --where");
+    if (hasRow) {
+      const row = Number(options.row);
+      if (!Number.isInteger(row) || row < 2) fail("update requiere --row con un número de fila igual o mayor que 2");
+      params.row = row;
+    } else {
+      params.where = assignments(options.where, "update");
+    }
     params.changes = assignments(options.set, "update");
   }
   if (action === "clear") {
@@ -161,6 +201,7 @@ function respond(response, status, value) {
 }
 
 function contextMatches(command, context) {
+  if (command.target.activeTab) return context?.tabActive === true;
   if (context?.spreadsheetId !== command.target.spreadsheetId) return false;
   if (command.params.sheet) return true;
   return String(context?.gid || "0") === String(command.params.gid || "0");
@@ -237,10 +278,61 @@ async function run(command) {
   }
 }
 
+function appendCommandChunks(command) {
+  if (command.action !== "append") return [command];
+  const key = Array.isArray(command.params.records)
+    ? "records"
+    : Array.isArray(command.params.values) && Array.isArray(command.params.values[0])
+      ? "values"
+      : "";
+  if (!key) return [command];
+  const chunks = [];
+  let items = [];
+  let cellCount = 0;
+  let byteCount = 0;
+  for (const item of command.params[key]) {
+    const itemCells = key === "records" ? Object.keys(item).length : item.length;
+    const itemBytes = Buffer.byteLength(JSON.stringify(item), "utf8");
+    if (items.length && (items.length >= 100 || cellCount + itemCells > 5_000 || byteCount + itemBytes > 250_000)) {
+      chunks.push(items);
+      items = [];
+      cellCount = 0;
+      byteCount = 0;
+    }
+    items.push(item);
+    cellCount += itemCells;
+    byteCount += itemBytes;
+  }
+  if (items.length) chunks.push(items);
+  if (chunks.length <= 1) return [command];
+  return chunks.map((itemsForChunk) => ({
+    ...command,
+    id: randomUUID(),
+    params: { ...command.params, [key]: itemsForChunk }
+  }));
+}
+
 try {
   const { action, options } = parseArguments(process.argv.slice(2));
   const command = await commandFromArguments(action, options);
-  const result = await run(command);
+  const commands = appendCommandChunks(command);
+  const results = [];
+  for (const chunk of commands) {
+    try {
+      results.push(await run(chunk));
+    } catch (error) {
+      error.details = {
+        ...(error.details && typeof error.details === "object" ? error.details : {}),
+        completedChunks: results.length,
+        totalChunks: commands.length,
+        completedResults: results
+      };
+      throw error;
+    }
+  }
+  const result = results.length === 1
+    ? results[0]
+    : { chunks: results.length, results };
   process.stdout.write(`${JSON.stringify({ ok: true, result }, null, 2)}\n`);
 } catch (error) {
   process.stderr.write(`${JSON.stringify({ ok: false, error: error.message, details: error.details }, null, 2)}\n`);
