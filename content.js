@@ -7471,7 +7471,6 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
         return {
           column,
           columnIndex,
-          reference: `${columnName(columnIndex + 1)}${rowNumber}`,
           value: value === null || value === undefined ? "" : String(value)
         };
       });
