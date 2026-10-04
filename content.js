@@ -44,23 +44,6 @@ import {
   TableOutlined,
   UnorderedListOutlined
 } from "@ant-design/icons";
-import {
-  DndContext,
-  DragOverlay,
-  PointerSensor,
-  closestCorners,
-  pointerWithin,
-  rectIntersection,
-  useDroppable,
-  useSensor,
-  useSensors
-} from "@dnd-kit/core";
-import {
-  SortableContext,
-  useSortable,
-  verticalListSortingStrategy
-} from "@dnd-kit/sortable";
-import { CSS } from "@dnd-kit/utilities";
 import esES from "antd/es/locale/es_ES.js";
 import dayjs from "dayjs";
 import "dayjs/locale/es.js";
@@ -931,7 +914,6 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
       display: flex; min-height: 390px; flex-direction: column; padding: 10px; border: 1px solid var(--workspace-border);
       border-radius: 6px; background: var(--workspace-surface); transition: border-color 120ms ease, box-shadow 120ms ease, background 120ms ease;
     }
-    .kanban-column.is-drag-over { border-color: var(--workspace-primary); background: var(--workspace-primary-soft); box-shadow: 0 0 0 2px var(--workspace-primary-soft); }
     .kanban-column-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
     .kanban-column-title { display: flex; min-width: 0; align-items: center; gap: 6px; color: var(--workspace-text); font-weight: 700; }
     .kanban-column-title .ant-tag { max-width: 190px; margin-inline-end: 0; overflow: hidden; text-overflow: ellipsis; }
@@ -942,16 +924,11 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     }
     .kanban-card-shell:active { cursor: grabbing; }
     .kanban-card-shell.is-protected, .kanban-card-shell.is-protected:active { cursor: default; }
-    .kanban-card-shell.is-dragging { opacity: .28; }
+    .kanban-card-shell.dragging { opacity: .35; }
     .kanban-card-shell.is-moving { opacity: .55; pointer-events: none; }
-    .kanban-card-shell.is-moving:not(.is-dragging) { animation: kanban-card-settle 180ms cubic-bezier(.2, 0, 0, 1); }
+    .kanban-card-shell.is-moving { animation: kanban-card-settle 180ms cubic-bezier(.2, 0, 0, 1); }
     .kanban-card { border-color: var(--workspace-border); background: var(--workspace-surface); transition: border-color 140ms ease, box-shadow 140ms ease, transform 140ms ease; }
     .kanban-card:hover { border-color: var(--workspace-primary-border); box-shadow: 0 8px 22px var(--workspace-shadow); }
-    .kanban-card-overlay { cursor: grabbing; animation: kanban-card-lift 140ms cubic-bezier(.2, 0, 0, 1); }
-    .kanban-card-overlay .kanban-card {
-      border-color: var(--workspace-primary-border); box-shadow: 0 18px 42px rgba(15, 23, 42, .22);
-      transform: rotate(.35deg) scale(1.015);
-    }
     .kanban-card .ant-card-head { min-height: 38px; padding: 0 10px; }
     .kanban-card .ant-card-head-title { padding: 8px 0; }
     .kanban-card .ant-card-body { padding: 10px; }
@@ -969,16 +946,12 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
       display: flex; min-height: 80px; align-items: center; justify-content: center; padding: 12px;
       border: 1px dashed var(--workspace-border-soft); border-radius: 6px; color: var(--workspace-text-muted); font-size: 12px;
     }
-    @keyframes kanban-card-lift {
-      from { opacity: .75; transform: scale(.97); }
-      to { opacity: 1; transform: scale(1); }
-    }
     @keyframes kanban-card-settle {
       from { transform: scale(.98); }
       to { transform: scale(1); }
     }
     @media (prefers-reduced-motion: reduce) {
-      .kanban-card, .kanban-card-overlay, .kanban-card-shell.is-moving { animation: none !important; transition: none !important; }
+      .kanban-card, .kanban-card-shell.is-moving { animation: none !important; transition: none !important; }
     }
     .kanban-footer { display: flex; flex: 0 0 auto; justify-content: flex-end; padding: 10px 12px; border-top: 1px solid var(--workspace-border); background: var(--workspace-surface); }
     .month-controls { display: flex; align-items: center; gap: 8px; }
@@ -1463,43 +1436,6 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     );
   }
 
-  const kanbanCardDragId = (rowNumber) => `sheet-kanban-card:${rowNumber}`;
-  const kanbanGroupDropId = (groupId) => `sheet-kanban-group:${groupId}`;
-
-  function kanbanCollisionDetection(args) {
-    const groupContainers = args.droppableContainers.filter((container) => container.data.current?.type === "group");
-    if (!groupContainers.length) return [];
-    const groupArgs = { ...args, droppableContainers: groupContainers };
-    const pointerCollisions = pointerWithin(groupArgs);
-    if (pointerCollisions.length) return pointerCollisions;
-    if (args.pointerCoordinates) {
-      const expandedGroupCollisions = groupContainers.flatMap((container) => {
-        const rect = args.droppableRects.get(container.id);
-        if (!rect) return [];
-        const margin = 18;
-        const point = args.pointerCoordinates;
-        if (
-          point.x < rect.left - margin
-          || point.x > rect.right + margin
-          || point.y < rect.top - margin
-          || point.y > rect.bottom + margin
-        ) return [];
-        const horizontalDistance = Math.max(rect.left - point.x, 0, point.x - rect.right);
-        const verticalDistance = Math.max(rect.top - point.y, 0, point.y - rect.bottom);
-        return [{
-          id: container.id,
-          data: {
-            droppableContainer: container,
-            value: Math.hypot(horizontalDistance, verticalDistance)
-          }
-        }];
-      }).sort((first, second) => first.data.value - second.data.value);
-      if (expandedGroupCollisions.length) return expandedGroupCollisions;
-    }
-    const intersections = rectIntersection(groupArgs);
-    return intersections.length ? intersections : closestCorners(groupArgs);
-  }
-
   function KanbanCardContent({ columns, row, statusColumn, titleColumn }) {
     const fields = columns.filter((column) => (
       column.index !== statusColumn.index
@@ -1533,29 +1469,13 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     );
   }
 
-  function SortableKanbanCard({ activeRowNumber, columns, groupId, moving, onOpenRow, row, statusColumn, suppressOpenRef, titleColumn }) {
-    const {
-      attributes,
-      listeners,
-      setNodeRef,
-      transform,
-      transition,
-      isDragging
-    } = useSortable({
-      id: kanbanCardDragId(row.number),
-      data: { type: "card", row, groupId },
-      disabled: moving || statusColumn.protected === true
-    });
-
+  function NativeKanbanCard({ columns, moving, onOpenRow, row, statusColumn, suppressOpenRef, titleColumn }) {
     return React.createElement(
       "div",
       {
-        ...attributes,
-        ...listeners,
-        ref: setNodeRef,
-        className: ["kanban-card-shell", isDragging || activeRowNumber === row.number ? "is-dragging" : "", moving ? "is-moving" : "", statusColumn.protected ? "is-protected" : ""].filter(Boolean).join(" "),
+        className: ["kanban-card-shell", "card", moving ? "is-moving" : "", statusColumn.protected ? "is-protected" : ""].filter(Boolean).join(" "),
         "data-sheet-row": String(row.number),
-        style: { transform: CSS.Transform.toString(transform), transition },
+        draggable: !moving && !statusColumn.protected,
         onDoubleClick: () => {
           if (suppressOpenRef.current === row.number) {
             suppressOpenRef.current = null;
@@ -1571,17 +1491,11 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     );
   }
 
-  function KanbanColumn({ activeRowNumber, columns, dragOverGroup, group, groupRows, movingRows, onOpenRow, statusColumn, suppressOpenRef, titleColumn, visibleRows }) {
-    const { setNodeRef, isOver } = useDroppable({
-      id: kanbanGroupDropId(group.id),
-      data: { type: "group", groupId: group.id }
-    });
-
+  function KanbanColumn({ columns, group, groupRows, movingRows, onOpenRow, statusColumn, suppressOpenRef, titleColumn, visibleRows }) {
     return React.createElement(
       "section",
       {
-        ref: setNodeRef,
-        className: `kanban-column ${isOver || dragOverGroup === group.id ? "is-drag-over" : ""}`.trim(),
+        className: "kanban-column column",
         "data-kanban-group": group.id
       },
       React.createElement(
@@ -1595,24 +1509,18 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
         React.createElement("span", { className: "kanban-count" }, String(groupRows.length))
       ),
       React.createElement(
-        SortableContext,
-        { items: visibleRows.map((row) => kanbanCardDragId(row.number)), strategy: verticalListSortingStrategy },
-        React.createElement(
-          "div",
-          { className: "kanban-cards" },
-          ...(visibleRows.length ? visibleRows.map((row) => React.createElement(SortableKanbanCard, {
-            activeRowNumber,
-            columns,
-            groupId: group.id,
-            key: row.number,
-            moving: movingRows.includes(row.number),
-            onOpenRow,
-            row,
-            statusColumn,
-            suppressOpenRef,
-            titleColumn
-          })) : [React.createElement("div", { className: "kanban-empty-drop", key: "empty" }, "Arrastra registros aquí.")])
-        )
+        "div",
+        { className: "kanban-cards cards" },
+        ...(visibleRows.length ? visibleRows.map((row) => React.createElement(NativeKanbanCard, {
+          columns,
+          key: row.number,
+          moving: movingRows.includes(row.number),
+          onOpenRow,
+          row,
+          statusColumn,
+          suppressOpenRef,
+          titleColumn
+        })) : [React.createElement("div", { className: "kanban-empty-drop", key: "empty" }, "Arrastra registros aquí.")])
       )
     );
   }
@@ -1626,13 +1534,18 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     ));
     const [search, setSearch] = React.useState("");
     const [page, setPage] = React.useState(1);
-    const [activeRow, setActiveRow] = React.useState(null);
-    const [dragOverGroup, setDragOverGroup] = React.useState("");
+    const [rowOrder, setRowOrder] = React.useState([]);
+    const [rowGroups, setRowGroups] = React.useState({});
+    const [boardRevision, setBoardRevision] = React.useState(0);
+    const boardRef = React.useRef(null);
     const suppressOpenRef = React.useRef(null);
-    const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
     const pageSize = 8;
     const statusColumn = statusColumns.find((column) => column.id === columnId) || statusColumns[0];
     const rows = sheetViewRows(table);
+    const rowNumbersKey = rows.map((row) => row.number).join("|");
+    const rowStatusesKey = statusColumn
+      ? rows.map((row) => `${row.number}:${String(row.cells[statusColumn.index] || "").trim() || "__empty__"}`).join("|")
+      : "";
 
     React.useEffect(() => {
       if (!statusColumns.some((column) => column.id === columnId)) {
@@ -1643,12 +1556,41 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     }, [columnId, statusColumns.map((column) => column.id).join("|")]);
 
     React.useEffect(() => setPage(1), [columnId, search]);
+    React.useEffect(() => {
+      const available = new Set(rows.map((row) => row.number));
+      setRowOrder((current) => [
+        ...current.filter((rowNumber) => available.has(rowNumber)),
+        ...rows.map((row) => row.number).filter((rowNumber) => !current.includes(rowNumber))
+      ]);
+    }, [rowNumbersKey]);
+    React.useEffect(() => {
+      if (!statusColumn) return;
+      const available = new Set(rows.map((row) => row.number));
+      setRowGroups((current) => {
+        let changed = false;
+        const next = { ...current };
+        for (const [rowNumber, groupId] of Object.entries(current)) {
+          const row = rows.find((candidate) => candidate.number === Number(rowNumber));
+          const actualGroup = String(row?.cells[statusColumn.index] || "").trim() || "__empty__";
+          if (!available.has(Number(rowNumber)) || actualGroup === groupId) {
+            delete next[rowNumber];
+            changed = true;
+          }
+        }
+        return changed ? next : current;
+      });
+    }, [columnId, rowStatusesKey]);
     if (!statusColumn) return React.createElement(SheetViewEmpty, { description: "Configura una columna como Estado para usar Kanban" });
 
+    const orderIndex = new Map(rowOrder.map((rowNumber, index) => [rowNumber, index]));
     const normalizedSearch = normalizedColumn(search);
-    const filteredRows = normalizedSearch
+    const filteredRows = (normalizedSearch
       ? rows.filter((row) => normalizedColumn(row.cells.join(" ")).includes(normalizedSearch))
-      : rows;
+      : rows).sort((left, right) => (
+        (orderIndex.get(left.number) ?? Number.MAX_SAFE_INTEGER)
+        - (orderIndex.get(right.number) ?? Number.MAX_SAFE_INTEGER)
+        || left.number - right.number
+      ));
     const configuredGroups = propertyOptionEntries(statusColumn).map((option) => ({
       id: option.label,
       label: option.label,
@@ -1670,7 +1612,10 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     const groupedRows = Object.fromEntries(groups.map((group) => [group.id, []]));
     for (const row of filteredRows) {
       const value = String(row.cells[statusColumn.index] || "").trim();
-      const groupId = groupedRows[value] ? value : "__empty__";
+      const stagedGroup = rowGroups[row.number];
+      const groupId = stagedGroup && groupedRows[stagedGroup]
+        ? stagedGroup
+        : groupedRows[value] ? value : "__empty__";
       groupedRows[groupId].push(row);
     }
     const longestGroup = Math.max(0, ...Object.values(groupedRows).map((groupRows) => groupRows.length));
@@ -1689,38 +1634,77 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
       }, 200);
     };
 
-    const handleDragStart = ({ active }) => {
-      if (statusColumn.protected) return;
-      const row = active.data.current?.row || null;
-      suppressOpenRef.current = row?.number || null;
-      setActiveRow(row);
-      setDragOverGroup(active.data.current?.groupId || "");
-    };
+    React.useEffect(() => {
+      const board = boardRef.current;
+      if (!board) return undefined;
+      const kanbanDocument = board.ownerDocument;
+      let drag = null;
 
-    const handleDragOver = ({ over }) => {
-      setDragOverGroup(over?.data.current?.groupId || "");
-    };
+      const handleDragStart = (event) => {
+        if (!board.contains(event.target) || !event.target.matches(".card")) return;
+        drag = event.target;
+        suppressOpenRef.current = Number(drag.dataset.sheetRow) || null;
+        drag.classList.add("dragging");
+      };
 
-    const handleDragCancel = () => {
-      setActiveRow(null);
-      setDragOverGroup("");
-      releaseSuppressedOpen();
-    };
+      const handleDragOver = (event) => {
+        if (!drag) return;
+        event.preventDefault();
 
-    const handleDragEnd = ({ active, over }) => {
-      if (statusColumn.protected) return;
-      const row = active.data.current?.row;
-      const groupId = over?.data.current?.groupId || "";
-      setActiveRow(null);
-      setDragOverGroup("");
-      releaseSuppressedOpen();
-      if (!row || !groupId) return;
-      const group = groups.find((candidate) => candidate.id === groupId);
-      if (!group) return;
-      const nextValue = group.id === "__empty__" ? "" : group.label;
-      if (String(row.cells[statusColumn.index] || "").trim() === nextValue) return;
-      void onMoveRow(row, statusColumn, nextValue);
-    };
+        let cards = event.target.closest(".cards");
+        if (!cards) {
+          const column = event.target.closest(".column");
+          cards = column?.querySelector(".cards");
+        }
+        if (!cards || !board.contains(cards)) return;
+
+        const next = [...cards.querySelectorAll(".card:not(.dragging)")].find((card) => (
+          event.clientY < card.getBoundingClientRect().top + card.offsetHeight / 2
+        ));
+        cards.insertBefore(drag, next || null);
+      };
+
+      const handleDragEnd = () => {
+        if (!drag) return;
+        const draggedCard = drag;
+        const rowNumber = Number(draggedCard.dataset.sheetRow);
+        const destination = draggedCard.closest("[data-kanban-group]");
+        const group = groups.find((candidate) => candidate.id === destination?.dataset.kanbanGroup);
+        const row = rows.find((candidate) => candidate.number === rowNumber);
+        const visibleOrder = [...board.querySelectorAll(".card[data-sheet-row]")]
+          .map((card) => Number(card.dataset.sheetRow))
+          .filter(Number.isFinite);
+
+        draggedCard.classList.remove("dragging");
+        drag = null;
+        flushSync(() => {
+          if (group) setRowGroups((current) => ({ ...current, [rowNumber]: group.id }));
+          setRowOrder((current) => [
+            ...visibleOrder,
+            ...current.filter((currentRow) => !visibleOrder.includes(currentRow)),
+            ...rows.map((candidate) => candidate.number).filter((currentRow) => !visibleOrder.includes(currentRow) && !current.includes(currentRow))
+          ]);
+          setBoardRevision((current) => current + 1);
+        });
+        releaseSuppressedOpen();
+
+        if (!row || !group) return;
+        const nextValue = group.id === "__empty__" ? "" : group.label;
+        if (String(row.cells[statusColumn.index] || "").trim() !== nextValue) {
+          void onMoveRow(row, statusColumn, nextValue);
+        }
+      };
+
+      kanbanDocument.addEventListener("dragstart", handleDragStart);
+      kanbanDocument.addEventListener("dragover", handleDragOver);
+      kanbanDocument.addEventListener("dragend", handleDragEnd);
+      return () => {
+        drag?.classList.remove("dragging");
+        kanbanDocument.removeEventListener("dragstart", handleDragStart);
+        kanbanDocument.removeEventListener("dragover", handleDragOver);
+        kanbanDocument.removeEventListener("dragend", handleDragEnd);
+      };
+    }, [boardRevision, columnId, rowNumbersKey, statusColumn.id, movingRows.join("|"), groups.map((group) => group.id).join("|")]);
 
     return React.createElement(
       "div",
@@ -1744,56 +1728,28 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
         })
       ),
       React.createElement(
-        DndContext,
+        "div",
         {
-          collisionDetection: kanbanCollisionDetection,
-          sensors,
-          onDragStart: handleDragStart,
-          onDragOver: handleDragOver,
-          onDragCancel: handleDragCancel,
-          onDragEnd: handleDragEnd
+          className: "kanban-board kanban",
+          key: `${columnId}:${boardRevision}`,
+          ref: boardRef
         },
-        React.createElement(
-          "div",
-          { className: "kanban-board" },
-          ...groups.map((group) => {
-            const groupRows = groupedRows[group.id] || [];
-            const visibleRows = groupRows.slice((safePage - 1) * pageSize, safePage * pageSize);
-            return React.createElement(KanbanColumn, {
-              activeRowNumber: activeRow?.number || null,
-              columns: displayColumns,
-              dragOverGroup,
-              group,
-              groupRows,
-              key: group.id,
-              movingRows,
-              onOpenRow,
-              statusColumn,
-              suppressOpenRef,
-              titleColumn,
-              visibleRows
-            });
-          })
-        ),
-        React.createElement(
-          DragOverlay,
-          {
-            adjustScale: false,
-            dropAnimation: { duration: 180, easing: "cubic-bezier(.2, 0, 0, 1)" }
-          },
-          activeRow
-            ? React.createElement(
-              "div",
-              { className: "kanban-card-shell kanban-card-overlay", "data-drag-overlay": "" },
-              React.createElement(KanbanCardContent, {
-                columns: displayColumns,
-                row: activeRow,
-                statusColumn,
-                titleColumn
-              })
-            )
-            : null
-        )
+        ...groups.map((group) => {
+          const groupRows = groupedRows[group.id] || [];
+          const visibleRows = groupRows.slice((safePage - 1) * pageSize, safePage * pageSize);
+          return React.createElement(KanbanColumn, {
+            columns: displayColumns,
+            group,
+            groupRows,
+            key: group.id,
+            movingRows,
+            onOpenRow,
+            statusColumn,
+            suppressOpenRef,
+            titleColumn,
+            visibleRows
+          });
+        })
       ),
       longestGroup > pageSize
         ? React.createElement(

@@ -8,39 +8,88 @@
 <style>
 *{box-sizing:border-box}
 
+:root{
+  --columns:3;
+  --height:600px;
+}
+
 body{
   margin:0;
   font-family:Arial,sans-serif;
   background:#f5f5f5;
 }
 
-.kanban{
+.settings{
   display:flex;
   gap:15px;
-  padding:20px;
-  overflow-x:auto;
-  min-height:100vh;
-  align-items:flex-start;
+  align-items:center;
+  padding:12px 20px;
+  background:white;
+  border-bottom:1px solid #ddd;
 }
+
+.settings label{
+  display:flex;
+  align-items:center;
+  gap:6px;
+}
+
+.settings input{
+  width:70px;
+  padding:5px;
+}
+
+button{
+  border:0;
+  cursor:pointer;
+}
+
+
+/* TABLERO */
+
+.kanban{
+  display:grid;
+  grid-template-columns:repeat(var(--columns),minmax(0,1fr));
+  gap:15px;
+  padding:20px;
+  width:100%;
+  align-items:start;
+}
+
+
+/* COLUMNAS */
 
 .column{
   background:#e9e9e9;
-  width:280px;
-  min-width:280px;
+  width:100%;
+  height:var(--height);
   padding:10px;
   border-radius:8px;
-  height:-webkit-fill-available;
+
+  display:flex;
+  flex-direction:column;
+
+  min-width:0;
 }
 
 .column h3{
   margin:0 0 10px;
   padding:5px;
   cursor:grab;
+  flex:none;
 }
 
+
+/* ZONA DE TARJETAS */
+
 .cards{
-  min-height:40px;
+  flex:1;
+  min-height:0;
+  overflow-y:auto;
 }
+
+
+/* TARJETAS */
 
 .card{
   background:white;
@@ -49,15 +98,15 @@ body{
   border-radius:6px;
   cursor:grab;
   box-shadow:0 1px 3px #0002;
-  white-space:pre-wrap;
+  height:auto;
+  min-height:0;
 }
 
-button{
-  border:0;
-  cursor:pointer;
-}
+
+/* BOTONES */
 
 .add-card{
+  flex:none;
   width:100%;
   padding:8px;
   background:transparent;
@@ -65,14 +114,18 @@ button{
 }
 
 .add-column{
-  min-width:160px;
-  padding:12px;
-  border-radius:8px;
+  padding:8px 12px;
 }
+
+
+/* DRAG */
 
 .dragging{
   opacity:.35;
 }
+
+
+/* EDICIÓN */
 
 [contenteditable="true"]{
   cursor:text;
@@ -84,51 +137,179 @@ button{
 
 <body>
 
-<div class="kanban">
 
-  <section class="column">
-    <h3 draggable="true">Pendiente</h3>
+<div class="settings">
 
-    <div class="cards">
-      <div class="card" draggable="true">Crear landing</div>
-      <div class="card" draggable="true">Diseñar formulario</div>
-      <div class="card" draggable="true">Configurar dominio</div>
-    </div>
+  <label>
+    Columnas por fila
 
-    <button class="add-card">+ Agregar tarjeta</button>
-  </section>
-
-
-  <section class="column">
-    <h3 draggable="true">En proceso</h3>
-
-    <div class="cards">
-      <div class="card" draggable="true">Crear CRM</div>
-      <div class="card" draggable="true">Probar extensión</div>
-    </div>
-
-    <button class="add-card">+ Agregar tarjeta</button>
-  </section>
+    <input
+      id="columns"
+      type="number"
+      min="1"
+      max="10"
+      value="3">
+  </label>
 
 
-  <section class="column">
-    <h3 draggable="true">Terminado</h3>
+  <label>
+    Alto
 
-    <div class="cards">
-      <div class="card" draggable="true">Comprar dominio</div>
-    </div>
+    <input
+      id="height"
+      type="number"
+      min="150"
+      value="600">
 
-    <button class="add-card">+ Agregar tarjeta</button>
-  </section>
+    px
+  </label>
 
 
-  <button class="add-column">+ Agregar columna</button>
+  <button class="add-column">
+    + Agregar columna
+  </button>
 
 </div>
 
 
+
+<div class="kanban" id="kanban">
+
+
+  <section class="column">
+
+    <h3 draggable="true">
+      Pendiente
+    </h3>
+
+    <div class="cards">
+
+      <div class="card" draggable="true">
+Crear landing
+      </div>
+
+      <div class="card" draggable="true">
+Diseñar formulario
+      </div>
+
+      <div class="card" draggable="true">
+Configurar dominio
+      </div>
+
+      <div class="card" draggable="true">
+Subir imágenes
+      </div>
+
+      <div class="card" draggable="true">
+Revisar versión móvil
+      </div>
+
+      <div class="card" draggable="true">
+Configurar hosting
+      </div>
+
+      <div class="card" draggable="true">
+Publicar
+      </div>
+
+    </div>
+
+    <button class="add-card">
+      + Agregar tarjeta
+    </button>
+
+  </section>
+
+
+
+  <section class="column">
+
+    <h3 draggable="true">
+      En proceso
+    </h3>
+
+    <div class="cards">
+
+      <div class="card" draggable="true">
+Crear CRM
+      </div>
+
+      <div class="card" draggable="true">
+Probar extensión
+      </div>
+
+    </div>
+
+    <button class="add-card">
+      + Agregar tarjeta
+    </button>
+
+  </section>
+
+
+
+  <section class="column">
+
+    <h3 draggable="true">
+      Terminado
+    </h3>
+
+    <div class="cards">
+
+      <div class="card" draggable="true">
+Comprar dominio
+      </div>
+
+    </div>
+
+    <button class="add-card">
+      + Agregar tarjeta
+    </button>
+
+  </section>
+
+
+
+  <section class="column">
+
+    <h3 draggable="true">
+      Archivado
+    </h3>
+
+    <div class="cards">
+
+      <div class="card" draggable="true">
+Proyecto antiguo
+      </div>
+
+    </div>
+
+    <button class="add-card">
+      + Agregar tarjeta
+    </button>
+
+  </section>
+
+
+</div>
+
+
+
 <script>
 let drag
+
+
+/* CONFIGURACIÓN */
+
+columns.oninput=()=>{
+  document.documentElement.style
+    .setProperty('--columns',columns.value)
+}
+
+height.oninput=()=>{
+  document.documentElement.style
+    .setProperty('--height',height.value+'px')
+}
 
 
 /* EDITAR */
@@ -140,18 +321,20 @@ function editar(el,seleccionar=false){
   el.focus()
 
   let range=document.createRange()
+
   range.selectNodeContents(el)
 
   if(!seleccionar)
     range.collapse(false)
 
   let selection=window.getSelection()
+
   selection.removeAllRanges()
   selection.addRange(range)
 }
 
 
-/* DRAG */
+/* INICIAR DRAG */
 
 document.addEventListener('dragstart',e=>{
 
@@ -165,12 +348,16 @@ document.addEventListener('dragstart',e=>{
 })
 
 
+/* TERMINAR DRAG */
+
 document.addEventListener('dragend',()=>{
 
   drag?.classList.remove('dragging')
   drag=null
 })
 
+
+/* MOVER */
 
 document.addEventListener('dragover',e=>{
 
@@ -183,23 +370,29 @@ document.addEventListener('dragover',e=>{
 
   if(drag.matches('.card')){
 
-    let cards=e.target.closest('.cards')
+    let column=e.target.closest('.column')
 
-    if(!cards){
-      let column=e.target.closest('.column')
-      cards=column?.querySelector('.cards')
-    }
+    if(!column) return
 
-    if(!cards) return
+    let cards=column.querySelector('.cards')
 
-    let next=[...cards.querySelectorAll('.card:not(.dragging)')]
-      .find(card=>
-        e.clientY <
-        card.getBoundingClientRect().top +
-        card.offsetHeight/2
+    let next=[
+      ...cards.querySelectorAll(
+        '.card:not(.dragging)'
       )
+    ].find(card=>{
 
-    cards.insertBefore(drag,next || null)
+      let rect=card.getBoundingClientRect()
+
+      return e.clientY <
+        rect.top +
+        rect.height/2
+    })
+
+    cards.insertBefore(
+      drag,
+      next || null
+    )
   }
 
 
@@ -207,52 +400,55 @@ document.addEventListener('dragover',e=>{
 
   if(drag.matches('.column')){
 
-    let board=e.target.closest('.kanban')
+    let target=e.target.closest('.column')
 
-    if(!board) return
+    if(!target || target===drag)
+      return
 
-    let columns=[
-      ...board.querySelectorAll('.column:not(.dragging)')
-    ]
+    let rect=target.getBoundingClientRect()
 
-    let next=columns.find(column=>
+    let before=
       e.clientX <
-      column.getBoundingClientRect().left +
-      column.offsetWidth/2
-    )
+      rect.left +
+      rect.width/2
 
-    board.insertBefore(
-      drag,
-      next || board.querySelector('.add-column')
-    )
+    if(before)
+      target.before(drag)
+    else
+      target.after(drag)
   }
+
 })
 
 
-/* DOBLE CLIC PARA EDITAR */
+/* DOBLE CLIC */
 
 document.addEventListener('dblclick',e=>{
 
-  if(!e.target.matches('.card,h3')) return
+  if(!e.target.matches('.card,h3'))
+    return
 
   editar(e.target)
 })
 
 
-/* ENTER GUARDA / SHIFT + ENTER SALTO */
+/* ENTER */
 
 document.addEventListener('keydown',e=>{
 
-  if(!e.target.isContentEditable) return
+  if(!e.target.isContentEditable)
+    return
 
 
-  /* Shift + Enter = salto */
+  /* SHIFT + ENTER EN TARJETAS */
 
-  if(e.key==='Enter' && e.shiftKey){
-
-    /* En títulos no permitimos varias líneas */
+  if(
+    e.key==='Enter' &&
+    e.shiftKey
+  ){
 
     if(e.target.matches('h3')){
+
       e.preventDefault()
       e.target.blur()
     }
@@ -261,33 +457,42 @@ document.addEventListener('keydown',e=>{
   }
 
 
-  /* Enter normal = guardar */
+  /* ENTER NORMAL GUARDA */
 
   if(e.key==='Enter'){
 
     e.preventDefault()
     e.target.blur()
   }
+
 })
 
 
-/* CLIC FUERA = GUARDAR */
+/* CLIC FUERA GUARDA */
 
-document.addEventListener('blur',e=>{
+document.addEventListener(
+  'blur',
 
-  if(!e.target.isContentEditable) return
+  e=>{
 
-  e.target.contentEditable=false
-  e.target.draggable=true
+    if(!e.target.isContentEditable)
+      return
 
-},true)
+    e.target.contentEditable=false
+    e.target.draggable=true
+
+  },
+
+  true
+)
 
 
 /* AGREGAR TARJETA */
 
 document.addEventListener('click',e=>{
 
-  if(!e.target.matches('.add-card')) return
+  if(!e.target.matches('.add-card'))
+    return
 
   let cards=e.target
     .closest('.column')
@@ -301,13 +506,18 @@ document.addEventListener('click',e=>{
 
   cards.append(card)
 
+  card.scrollIntoView({
+    block:'nearest'
+  })
+
   editar(card,true)
 })
 
 
 /* AGREGAR COLUMNA */
 
-document.querySelector('.add-column').onclick=function(){
+document.querySelector('.add-column')
+.onclick=()=>{
 
   let column=document.createElement('section')
 
@@ -323,7 +533,7 @@ document.querySelector('.add-column').onclick=function(){
     </button>
   `
 
-  this.before(column)
+  kanban.append(column)
 
   editar(
     column.querySelector('h3'),

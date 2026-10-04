@@ -794,91 +794,44 @@ try {
     throw new Error(`La tarjeta abrio su fila con un solo clic: ${JSON.stringify(afterSingleClick)}`);
   }
 
-  const dragPoint = await cdp.evaluate(`(() => {
-    const frame = document.getElementById("sheets-session-probe").shadowRoot.querySelector(".sheet-view-frame");
-    const frameRect = frame.getBoundingClientRect();
-    const view = frame.contentDocument;
-    const card = view.querySelector('.kanban-card-shell[data-sheet-row="4"]');
-    const target = Array.from(view.querySelectorAll("[data-kanban-group]")).find(group => group.dataset.kanbanGroup === "En proceso");
-    const start = card.getBoundingClientRect();
-    const end = target.getBoundingClientRect();
-    return {
-      startX: frameRect.left + start.left + start.width / 2,
-      startY: frameRect.top + start.top + start.height / 2,
-      endX: frameRect.left + end.left - 4,
-      endY: frameRect.top + end.top + Math.min(120, end.height / 2),
-      frameLeft: frameRect.left,
-      frameWidth: frameRect.width,
-      viewportWidth: innerWidth,
-      cardLeft: start.left,
-      targetLeft: end.left
-    };
-  })()`);
-  await cdp.command("Input.dispatchMouseEvent", {
-    type: "mousePressed", x: dragPoint.startX, y: dragPoint.startY, button: "left", buttons: 1, clickCount: 1
-  });
-  await cdp.command("Input.dispatchMouseEvent", {
-    type: "mouseMoved", x: dragPoint.startX + 12, y: dragPoint.startY + 4, button: "left", buttons: 1
-  });
-  await delay(120);
-  const dragVisual = await cdp.evaluate(viewExpression(`return {
-    overlay: Boolean(view.querySelector("[data-drag-overlay]")),
-    source: Array.from(view.querySelectorAll('.kanban-card-shell[data-sheet-row="4"]')).some(card => card.classList.contains("is-dragging")),
-    classes: Array.from(view.querySelectorAll('.kanban-card-shell[data-sheet-row="4"]'), card => card.className),
-    panels: view.querySelectorAll(".sheet-view-panel").length
-  };`));
-  if (!dragVisual.overlay) {
-    throw new Error(`Kanban no mostro la animacion de arrastre: ${JSON.stringify(dragVisual)}`);
+  const firstNativeDrag = await cdp.evaluate(viewExpression(`
+    const card = view.querySelector('.card[data-sheet-row="4"]');
+    const target = view.querySelector('[data-kanban-group="En proceso"] .cards');
+    const dataTransfer = new DataTransfer();
+    card.dispatchEvent(new DragEvent('dragstart', { bubbles: true, cancelable: true, dataTransfer }));
+    target.dispatchEvent(new DragEvent('dragover', {
+      bubbles: true,
+      cancelable: true,
+      clientY: target.getBoundingClientRect().top + 120,
+      dataTransfer
+    }));
+    const during = card.closest('[data-kanban-group]')?.dataset.kanbanGroup || '';
+    const dragging = card.classList.contains('dragging');
+    card.dispatchEvent(new DragEvent('dragend', { bubbles: true, cancelable: true, dataTransfer }));
+    return { during, dragging };
+  `));
+  if (firstNativeDrag.during !== "En proceso" || !firstNativeDrag.dragging) {
+    throw new Error(`Kanban no reemplazo el arrastre con el flujo nativo: ${JSON.stringify(firstNativeDrag)}`);
   }
-  await cdp.command("Input.dispatchMouseEvent", {
-    type: "mouseMoved", x: dragPoint.endX, y: dragPoint.endY, button: "left", buttons: 1
-  });
-  await delay(100);
-  const dragTarget = await cdp.evaluate(viewExpression(`return Array.from(view.querySelectorAll("[data-kanban-group]"), group => ({
-    id: group.dataset.kanbanGroup,
-    active: group.classList.contains("is-drag-over")
-  }));`));
-  if (!dragTarget.some((group) => group.id === "En proceso" && group.active)) {
-    throw new Error(`Kanban no detecto la columna de destino: ${JSON.stringify({ dragPoint, dragTarget })}`);
+  const firstFrameKanbanGroup = await cdp.evaluate(viewExpression(`return view.querySelector('.kanban-card-shell[data-sheet-row="4"]')?.closest('[data-kanban-group]')?.dataset.kanbanGroup || "";`));
+  if (firstFrameKanbanGroup !== "En proceso") {
+    throw new Error(`Kanban reboto a la columna de origen en el primer frame: ${firstFrameKanbanGroup || "sin columna"}`);
   }
-  await cdp.command("Input.dispatchMouseEvent", {
-    type: "mouseReleased", x: dragPoint.endX, y: dragPoint.endY, button: "left", buttons: 0, clickCount: 1
-  });
   await delay(50);
-  const immediateKanbanGroup = await cdp.evaluate(viewExpression(`return view.querySelector('.kanban-card-shell[data-sheet-row="4"]')?.closest('[data-kanban-group]')?.dataset.kanbanGroup || "";`));
-  if (immediateKanbanGroup !== "En proceso") {
-    throw new Error(`Kanban aplico el movimiento con retraso: ${immediateKanbanGroup || "sin columna"}`);
-  }
   await delay(200);
-  const secondDrag = await cdp.evaluate(`(() => {
-    const frame = document.getElementById("sheets-session-probe").shadowRoot.querySelector(".sheet-view-frame");
-    const frameRect = frame.getBoundingClientRect();
-    const view = frame.contentDocument;
+  await cdp.evaluate(viewExpression(`
     const card = view.querySelector('.kanban-card-shell[data-sheet-row="3"]');
-    const target = Array.from(view.querySelectorAll("[data-kanban-group]")).find(group => group.dataset.kanbanGroup === "Nuevo");
-    const start = card.getBoundingClientRect();
-    const end = target.getBoundingClientRect();
-    return {
-      startX: frameRect.left + start.left + Math.min(34, start.width / 2),
-      startY: frameRect.top + start.top + start.height / 2,
-      endX: frameRect.left + end.left + Math.min(44, end.width / 2),
-      endY: frameRect.top + end.top + Math.min(120, end.height / 2)
-    };
-  })()`);
-  await cdp.command("Input.dispatchMouseEvent", {
-    type: "mousePressed", x: secondDrag.startX, y: secondDrag.startY, button: "left", buttons: 1, clickCount: 1
-  });
-  await cdp.command("Input.dispatchMouseEvent", {
-    type: "mouseMoved", x: secondDrag.startX - 12, y: secondDrag.startY + 4, button: "left", buttons: 1
-  });
-  await delay(35);
-  await cdp.command("Input.dispatchMouseEvent", {
-    type: "mouseMoved", x: secondDrag.endX, y: secondDrag.endY, button: "left", buttons: 1
-  });
-  await delay(35);
-  await cdp.command("Input.dispatchMouseEvent", {
-    type: "mouseReleased", x: secondDrag.endX, y: secondDrag.endY, button: "left", buttons: 0, clickCount: 1
-  });
+    const target = view.querySelector('[data-kanban-group="Nuevo"] .cards');
+    const dataTransfer = new DataTransfer();
+    card.dispatchEvent(new DragEvent('dragstart', { bubbles: true, cancelable: true, dataTransfer }));
+    target.dispatchEvent(new DragEvent('dragover', {
+      bubbles: true,
+      cancelable: true,
+      clientY: target.getBoundingClientRect().top + 120,
+      dataTransfer
+    }));
+    card.dispatchEvent(new DragEvent('dragend', { bubbles: true, cancelable: true, dataTransfer }));
+  `));
   await delay(225);
   const pendingKanban = await cdp.evaluate(viewExpression(`return {
     wrote: (parent.__pastes || []).some((paste) => paste.reference.endsWith("!C3") || paste.reference.endsWith("!C4")),
@@ -890,6 +843,27 @@ try {
   };`));
   if (pendingKanban.wrote || pendingKanban.saveDisabled || pendingKanban.cancelDisabled || pendingKanban.state !== "pending" || pendingKanban.row3Group !== "Nuevo" || pendingKanban.row4Group !== "En proceso") {
     throw new Error(`Kanban no conservo los movimientos como borrador: ${JSON.stringify(pendingKanban)}`);
+  }
+  await cdp.evaluate(viewExpression(`
+    const card = view.querySelector('.card[data-sheet-row="3"]');
+    const target = view.querySelector('.card[data-sheet-row="2"]');
+    const dataTransfer = new DataTransfer();
+    card.dispatchEvent(new DragEvent('dragstart', { bubbles: true, cancelable: true, dataTransfer }));
+    target.dispatchEvent(new DragEvent('dragover', {
+      bubbles: true,
+      cancelable: true,
+      clientY: target.getBoundingClientRect().top + 2,
+      dataTransfer
+    }));
+    card.dispatchEvent(new DragEvent('dragend', { bubbles: true, cancelable: true, dataTransfer }));
+  `));
+  await delay(100);
+  const verticalOrder = await cdp.evaluate(viewExpression(`return Array.from(
+    view.querySelector('[data-kanban-group="Nuevo"]')?.querySelectorAll('.card[data-sheet-row]') || [],
+    card => card.dataset.sheetRow
+  );`));
+  if (JSON.stringify(verticalOrder) !== JSON.stringify(["3", "2"])) {
+    throw new Error(`Kanban no conservo el orden vertical nativo: ${JSON.stringify(verticalOrder)}`);
   }
   await cdp.evaluate(viewExpression('view.querySelector("[data-sheet-view-save]").click();'));
   const pasteDeadline = Date.now() + 4_000;
@@ -922,35 +896,19 @@ try {
   if (!editedSelection.endsWith("!C3")) {
     throw new Error(`Kanban restauro la seleccion anterior en lugar de conservar la ultima celda editada: ${editedSelection}`);
   }
-  const clearDrag = await cdp.evaluate(`(() => {
-    const frame = document.getElementById("sheets-session-probe").shadowRoot.querySelector(".sheet-view-frame");
-    const frameRect = frame.getBoundingClientRect();
-    const view = frame.contentDocument;
+  await cdp.evaluate(viewExpression(`
     const card = view.querySelector('.kanban-card-shell[data-sheet-row="2"]');
-    const target = view.querySelector('[data-kanban-group="__empty__"]');
-    const start = card.getBoundingClientRect();
-    const end = target.getBoundingClientRect();
-    return {
-      startX: frameRect.left + start.left + Math.min(34, start.width / 2),
-      startY: frameRect.top + start.top + start.height / 2,
-      endX: frameRect.left + end.left + Math.min(44, end.width / 2),
-      endY: frameRect.top + end.top + Math.min(120, end.height / 2)
-    };
-  })()`);
-  await cdp.command("Input.dispatchMouseEvent", {
-    type: "mousePressed", x: clearDrag.startX, y: clearDrag.startY, button: "left", buttons: 1, clickCount: 1
-  });
-  await cdp.command("Input.dispatchMouseEvent", {
-    type: "mouseMoved", x: clearDrag.startX - 12, y: clearDrag.startY + 4, button: "left", buttons: 1
-  });
-  await delay(35);
-  await cdp.command("Input.dispatchMouseEvent", {
-    type: "mouseMoved", x: clearDrag.endX, y: clearDrag.endY, button: "left", buttons: 1
-  });
-  await delay(35);
-  await cdp.command("Input.dispatchMouseEvent", {
-    type: "mouseReleased", x: clearDrag.endX, y: clearDrag.endY, button: "left", buttons: 0, clickCount: 1
-  });
+    const target = view.querySelector('[data-kanban-group="__empty__"] .cards');
+    const dataTransfer = new DataTransfer();
+    card.dispatchEvent(new DragEvent('dragstart', { bubbles: true, cancelable: true, dataTransfer }));
+    target.dispatchEvent(new DragEvent('dragover', {
+      bubbles: true,
+      cancelable: true,
+      clientY: target.getBoundingClientRect().top + 120,
+      dataTransfer
+    }));
+    card.dispatchEvent(new DragEvent('dragend', { bubbles: true, cancelable: true, dataTransfer }));
+  `));
   await delay(225);
   const pendingClear = await cdp.evaluate(viewExpression(`return {
     wrote: (parent.__clears || []).includes("'Contactos'!C2"),
