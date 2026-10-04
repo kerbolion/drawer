@@ -928,7 +928,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     .kanban-column-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; cursor: grab; }
     .kanban-column-header:active { cursor: grabbing; }
     .kanban-column.dragging { opacity: .35; }
-    .kanban-column-drag-image {
+    .kanban-drag-image {
       position: fixed; z-index: 10000; top: 0; left: 0; margin: 0; opacity: 1; pointer-events: none;
       transition: none; will-change: transform;
     }
@@ -1551,7 +1551,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     );
   }
 
-  function SheetKanban({ table, columns, visibleColumnIds, initialColumnId, initialColumnsPerRow, initialGroupOrder, initialHeight, initialView, movingRows, onColumnChange, onLayoutChange, onMoveRow, onOpenRow }) {
+  function SheetKanban({ table, columns, visibleColumnIds, initialColumnId, initialColumnsPerRow, initialGroupOrder, initialHeight, initialRowOrder, initialView, movingRows, onColumnChange, onLayoutChange, onMoveRow, onOpenRow }) {
     const statusColumns = columns.filter((column) => column.type === "status");
     const visibleIds = Array.isArray(visibleColumnIds) ? new Set(visibleColumnIds) : null;
     const displayColumns = visibleIds ? columns.filter((column) => visibleIds.has(column.id)) : columns;
@@ -1564,7 +1564,11 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     const [columnsPerRow, setColumnsPerRow] = React.useState(() => Math.min(10, Math.max(1, Math.round(Number(initialColumnsPerRow) || 3))));
     const [boardHeight, setBoardHeight] = React.useState(() => Math.max(150, Math.round(Number(initialHeight) || 600)));
     const [groupOrder, setGroupOrder] = React.useState(() => Array.isArray(initialGroupOrder) ? initialGroupOrder : []);
-    const [rowOrder, setRowOrder] = React.useState([]);
+    const [rowOrder, setRowOrder] = React.useState(() => (
+      Array.isArray(initialRowOrder)
+        ? [...new Set(initialRowOrder.map(Number).filter((rowNumber) => Number.isInteger(rowNumber) && rowNumber > 0))]
+        : []
+    ));
     const [rowGroups, setRowGroups] = React.useState({});
     const [boardRevision, setBoardRevision] = React.useState(0);
     const boardRef = React.useRef(null);
@@ -1575,6 +1579,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     const rows = sheetViewRows(table);
     const rowNumbersKey = rows.map((row) => row.number).join("|");
     const initialGroupOrderKey = Array.isArray(initialGroupOrder) ? initialGroupOrder.join("\u0000") : "";
+    const initialRowOrderKey = Array.isArray(initialRowOrder) ? initialRowOrder.join("|") : "";
     const rowStatusesKey = statusColumn
       ? rows.map((row) => `${row.number}:${String(row.cells[statusColumn.index] || "").trim() || "__empty__"}`).join("|")
       : "";
@@ -1596,6 +1601,10 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     React.useEffect(() => {
       setGroupOrder(Array.isArray(initialGroupOrder) ? initialGroupOrder : []);
     }, [initialGroupOrderKey]);
+    React.useEffect(() => {
+      if (!Array.isArray(initialRowOrder)) return;
+      setRowOrder([...new Set(initialRowOrder.map(Number).filter((rowNumber) => Number.isInteger(rowNumber) && rowNumber > 0))]);
+    }, [initialRowOrderKey]);
     React.useEffect(() => {
       const available = new Set(rows.map((row) => row.number));
       setRowOrder((current) => [
@@ -1755,35 +1764,36 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
       const kanbanDocument = board.ownerDocument;
       let drag = null;
       let dragType = "";
-      let columnDragImage = null;
-      let columnDragOffset = { x: 0, y: 0 };
+      let dragImage = null;
+      let dragOffset = { x: 0, y: 0 };
       let columnMoveAnchor = null;
 
-      const moveColumnDragImage = (x, y) => {
-        if (!columnDragImage) return;
-        columnDragImage.style.transform = `translate3d(${x - columnDragOffset.x}px,${y - columnDragOffset.y}px,0)`;
+      const moveDragImage = (x, y) => {
+        if (!dragImage) return;
+        dragImage.style.transform = `translate3d(${x - dragOffset.x}px,${y - dragOffset.y}px,0)`;
       };
 
-      const removeColumnDragImage = () => {
-        columnDragImage?.remove();
-        columnDragImage = null;
+      const removeDragImage = () => {
+        dragImage?.remove();
+        dragImage = null;
       };
 
-      const createColumnDragImage = (column, event) => {
-        const rect = column.getBoundingClientRect();
-        columnDragImage = column.cloneNode(true);
-        columnDragImage.classList.remove("dragging");
-        columnDragImage.classList.add("kanban-column-drag-image");
-        columnDragImage.setAttribute("aria-hidden", "true");
-        columnDragImage.style.width = `${rect.width}px`;
-        columnDragImage.style.height = `${rect.height}px`;
-        columnDragImage.querySelectorAll("[draggable]").forEach((item) => { item.draggable = false; });
-        const sourceCards = column.querySelector(".kanban-cards");
-        const previewCards = columnDragImage.querySelector(".kanban-cards");
-        columnDragOffset = { x: event.clientX - rect.left, y: event.clientY - rect.top };
-        kanbanDocument.body.append(columnDragImage);
+      const createDragImage = (element, event) => {
+        const rect = element.getBoundingClientRect();
+        dragImage = element.cloneNode(true);
+        dragImage.classList.remove("dragging");
+        dragImage.classList.add("kanban-drag-image");
+        dragImage.setAttribute("aria-hidden", "true");
+        dragImage.style.width = `${rect.width}px`;
+        dragImage.style.height = `${rect.height}px`;
+        dragImage.querySelectorAll("[draggable]").forEach((item) => { item.draggable = false; });
+        dragImage.draggable = false;
+        const sourceCards = element.querySelector(".kanban-cards");
+        const previewCards = dragImage.querySelector(".kanban-cards");
+        dragOffset = { x: event.clientX - rect.left, y: event.clientY - rect.top };
+        kanbanDocument.body.append(dragImage);
         if (sourceCards && previewCards) previewCards.scrollTop = sourceCards.scrollTop;
-        moveColumnDragImage(event.clientX, event.clientY);
+        moveDragImage(event.clientX, event.clientY);
 
         const transparent = kanbanDocument.createElement("canvas");
         transparent.width = 1;
@@ -1805,23 +1815,23 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
           drag = header.closest(".kanban-column");
           dragType = "column";
           columnMoveAnchor = null;
-          createColumnDragImage(drag, event);
         }
+        createDragImage(drag, event);
         drag.classList.add("dragging");
       };
 
       const handleDrag = (event) => {
-        if (dragType === "column" && columnDragImage && (event.clientX || event.clientY)) {
-          moveColumnDragImage(event.clientX, event.clientY);
+        if (dragImage && (event.clientX || event.clientY)) {
+          moveDragImage(event.clientX, event.clientY);
         }
       };
 
       const handleDragOver = (event) => {
         if (!drag) return;
         event.preventDefault();
+        moveDragImage(event.clientX, event.clientY);
 
         if (dragType === "column") {
-          moveColumnDragImage(event.clientX, event.clientY);
           if (columnMoveAnchor && Math.hypot(
             event.clientX - columnMoveAnchor.x,
             event.clientY - columnMoveAnchor.y
@@ -1869,7 +1879,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
             .map((column) => String(column.dataset.kanbanGroup || ""))
             .filter(Boolean);
           drag.classList.remove("dragging");
-          removeColumnDragImage();
+          removeDragImage();
           drag = null;
           dragType = "";
           columnMoveAnchor = null;
@@ -1889,20 +1899,24 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
         const visibleOrder = [...board.querySelectorAll(".card[data-sheet-row]")]
           .map((card) => Number(card.dataset.sheetRow))
           .filter(Number.isFinite);
+        const nextRowOrder = [
+          ...visibleOrder,
+          ...rowOrder.filter((currentRow) => !visibleOrder.includes(currentRow)),
+          ...rows.map((candidate) => candidate.number)
+            .filter((currentRow) => !visibleOrder.includes(currentRow) && !rowOrder.includes(currentRow))
+        ];
 
         draggedCard.classList.remove("dragging");
+        removeDragImage();
         drag = null;
         dragType = "";
         captureBoardScroll();
         flushSync(() => {
           if (group) setRowGroups((current) => ({ ...current, [rowNumber]: group.id }));
-          setRowOrder((current) => [
-            ...visibleOrder,
-            ...current.filter((currentRow) => !visibleOrder.includes(currentRow)),
-            ...rows.map((candidate) => candidate.number).filter((currentRow) => !visibleOrder.includes(currentRow) && !current.includes(currentRow))
-          ]);
+          setRowOrder(nextRowOrder);
           setBoardRevision((current) => current + 1);
         });
+        onLayoutChange?.("kanbanRowOrder", nextRowOrder);
         releaseSuppressedOpen();
 
         if (!row || !group) return;
@@ -1916,13 +1930,13 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
       kanbanDocument.addEventListener("dragend", handleDragEnd);
       return () => {
         drag?.classList.remove("dragging");
-        removeColumnDragImage();
+        removeDragImage();
         kanbanDocument.removeEventListener("dragstart", handleDragStart);
         kanbanDocument.removeEventListener("drag", handleDrag);
         kanbanDocument.removeEventListener("dragover", handleDragOver);
         kanbanDocument.removeEventListener("dragend", handleDragEnd);
       };
-    }, [boardRevision, columnId, rowNumbersKey, statusColumn.id, movingRows.join("|"), groups.map((group) => group.id).join("|")]);
+    }, [boardRevision, columnId, rowNumbersKey, rowOrder.join("|"), statusColumn.id, movingRows.join("|"), groups.map((group) => group.id).join("|")]);
 
     return React.createElement(
       "div",
@@ -2633,6 +2647,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
           initialColumnsPerRow: state.workspace?.sheetViews?.[workspaceTarget.gid]?.kanbanColumns,
           initialGroupOrder: state.workspace?.sheetViews?.[workspaceTarget.gid]?.kanbanGroupOrder,
           initialHeight: state.workspace?.sheetViews?.[workspaceTarget.gid]?.kanbanHeight,
+          initialRowOrder: state.workspace?.sheetViews?.[workspaceTarget.gid]?.kanbanRowOrder,
           initialView: state.workspace?.sheetViews?.[workspaceTarget.gid]?.kanbanView,
           movingRows,
           onColumnChange: (columnId) => setSheetViewSetting(workspaceTarget.gid, "kanbanColumnId", columnId),
@@ -2658,6 +2673,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
             initialColumnsPerRow: currentSheetViewSettings().kanbanColumns || settings.kanbanColumns,
             initialGroupOrder: currentSheetViewSettings().kanbanGroupOrder,
             initialHeight: currentSheetViewSettings().kanbanHeight || settings.kanbanHeight,
+            initialRowOrder: currentSheetViewSettings().kanbanRowOrder,
             initialView: currentSheetViewSettings().kanbanView || settings.kanbanView,
             movingRows,
             onColumnChange: (columnId) => setCurrentSheetViewSetting("kanbanColumnId", columnId),
@@ -3766,6 +3782,9 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
           .map((groupId) => String(groupId || "").trim())
           .filter(Boolean))],
         kanbanHeight: Math.max(150, Math.round(Number(view.kanbanHeight) || 600)),
+        kanbanRowOrder: [...new Set((Array.isArray(view.kanbanRowOrder) ? view.kanbanRowOrder : [])
+          .map(Number)
+          .filter((rowNumber) => Number.isInteger(rowNumber) && rowNumber > 0))],
         kanbanView: view.kanbanView === "row" ? "row" : "grid",
         hiddenColumnIds: [...new Set((Array.isArray(view.hiddenColumnIds) ? view.hiddenColumnIds : [])
           .map((id) => String(id || "").trim())
