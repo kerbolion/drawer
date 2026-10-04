@@ -239,6 +239,17 @@ try {
     throw new Error(`La vista Deck no cargo el documento, la hoja y sus registros: ${JSON.stringify(workspaceTable)}`);
   }
 
+  await cdp.evaluate(viewExpression('view.querySelector(".workspace-browser-sheet.is-active").click();'));
+  await delay(120);
+  const repeatedActiveSheet = await cdp.evaluate(viewExpression(`return {
+    rows: Array.from(view.querySelectorAll('[data-workspace-deck-row]'), row => row.dataset.workspaceDeckRow),
+    empty: Boolean(view.querySelector('.ant-empty')),
+    selected: view.querySelector('.workspace-browser-sheet.is-active')?.textContent.trim() || ''
+  };`));
+  if (JSON.stringify(repeatedActiveSheet.rows) !== JSON.stringify(["2", "3", "4"]) || repeatedActiveSheet.empty || repeatedActiveSheet.selected !== "Contactos") {
+    throw new Error(`Volver a elegir la hoja activa vacio sus datos: ${JSON.stringify(repeatedActiveSheet)}`);
+  }
+
   await cdp.evaluate(viewExpression('view.querySelector("[data-workspace-view=table]").click();'));
   const workspaceRowsDeadline = Date.now() + 3_000;
   while (Date.now() < workspaceRowsDeadline) {

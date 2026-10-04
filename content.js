@@ -2197,6 +2197,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     const movingRows = [];
     const [workspaceTarget, setWorkspaceTarget] = React.useState(() => ({ gid: drawerGid(), name: sheetName }));
     const [workspaceColumns, setWorkspaceColumns] = React.useState(columns);
+    const [workspaceLoadRevision, setWorkspaceLoadRevision] = React.useState(0);
     const [documents, setDocuments] = React.useState(() => [{
       id: spreadsheetId(),
       name: workspaceDocumentName(),
@@ -2441,7 +2442,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
         controller.abort();
         setActivity("views", false);
       };
-    }, [view, refreshKey, activeTarget.gid, activeTarget.name]);
+    }, [view, refreshKey, activeTarget.gid, activeTarget.name, workspaceLoadRevision]);
 
     React.useEffect(() => {
       if (view !== "table") return undefined;
@@ -2600,6 +2601,13 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
         return;
       }
       const gid = String(sheet.gid || "");
+      const sameTarget = gid === String(workspaceTarget.gid)
+        && normalizedColumn(sheet.name) === normalizedColumn(workspaceTarget.name);
+      if (sameTarget) {
+        setError("");
+        setWorkspaceLoadRevision((current) => current + 1);
+        return;
+      }
       const configured = state.workspace?.sheets?.[gid];
       setWorkspaceTarget({ gid, name: sheet.name });
       setWorkspaceColumns((configured?.columns || []).filter((column) => String(column.sourceHeader || "").trim()));
