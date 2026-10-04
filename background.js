@@ -67,6 +67,31 @@
     }
   }
 
+  function bridgeAccessAllowed(session) {
+    if (!session?.ok || !session.authenticated || !session.user || session.user.active === false) return false;
+    if (session.user.role === "superadmin") return true;
+    return session.account?.status === "active" && !session.account?.expired;
+  }
+
+  function bridgeAccessError(session) {
+    if (!session?.ok) return session?.error || "No se pudo validar la sesión de Abrir CRM.";
+    if (!session.authenticated || !session.user) return "Inicia sesión en Abrir CRM para usar el acceso de IA.";
+    if (session.user.active === false) return "El usuario de Abrir CRM está inactivo.";
+    if (session.account?.status !== "active") return "La cuenta de Abrir CRM está suspendida.";
+    if (session.account?.expired) return "La suscripción de Abrir CRM está vencida.";
+    return "La cuenta no tiene acceso al servicio.";
+  }
+
+  function bridgeSessionPayload(session, error) {
+    if (session?.ok && session.authenticated) return session;
+    return { authenticated: false, serviceError: error };
+  }
+
+  function isSheetsSender(sender) {
+    const senderUrl = String(sender?.url || sender?.tab?.url || "");
+    return /^https:\/\/docs\.google\.com\/spreadsheets\/d\//.test(senderUrl);
+  }
+
   async function cloudRequest(path, options = {}) {
     const stored = await storageGet(STORAGE_KEYS.token);
     const token = stored[STORAGE_KEYS.token] || "";
@@ -285,14 +310,52 @@
 
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message?.source === "sheets-row-drawer-codex") {
+      if (!isSheetsSender(sender)) {
+        sendResponse({ command: null, accessBlocked: true, error: "Origen del puente no permitido." });
+        return false;
+      }
       const route = message.type === "poll" ? "/v1/poll" : message.type === "result" ? "/v1/result" : "";
       if (!route) return false;
-      void bridgePost(route, {
-        ...message.payload,
-        extensionVersion: chrome.runtime.getManifest().version,
-        tabId: sender.tab?.id ?? null,
-        tabActive: sender.tab?.active ?? null
-      }).then(result => sendResponse(result || { command: null }));
+      void (async () => {
+        const bridgePayload = {
+          ...message.payload,
+          extensionVersion: chrome.runtime.getManifest().version,
+          tabId: sender.tab?.id ?? null,
+          tabActive: sender.tab?.active ?? null
+        };
+        const result = await bridgePost(route, bridgePayload);
+        if (message.type !== "poll" || !result?.command) {
+          sendResponse(result || { command: null });
+          return;
+        }
+
+        const session = await cloudCommand("session");
+        if (bridgeAccessAllowed(session)) {
+          sendResponse(result);
+          return;
+        }
+
+        const error = bridgeAccessError(session);
+        await bridgePost("/v1/result", {
+          id: result.command.id,
+          ok: false,
+          error,
+          code: "CLOUD_ACCESS_REQUIRED",
+          extensionVersion: chrome.runtime.getManifest().version,
+          tabId: sender.tab?.id ?? null,
+          tabActive: sender.tab?.active ?? null
+        });
+        sendResponse({
+          command: null,
+          accessBlocked: true,
+          error,
+          session: bridgeSessionPayload(session, error)
+        });
+      })().catch(error => sendResponse({
+        command: null,
+        accessBlocked: true,
+        error: error?.message || "No se pudo validar el acceso del puente."
+      }));
       return true;
     }
 

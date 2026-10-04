@@ -3103,7 +3103,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
 
   function cloudAccessAllowed(session = state.cloudSession) {
     if (!state.cloudRequired) return true;
-    if (!session?.authenticated || !session.user) return false;
+    if (!session?.authenticated || !session.user || session.user.active === false) return false;
     if (session.user.role === "superadmin") return true;
     return session.account?.status === "active" && !session.account?.expired;
   }
@@ -6724,9 +6724,18 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
         gid: currentGid(),
         sheet: activeSheetName()
       });
+      if (response?.accessBlocked) {
+        ui.cloudAccountUi?.setSession(response.session || {
+          authenticated: false,
+          serviceError: response.error || "Se requiere una sesión activa para usar el acceso de IA."
+        });
+        ui.cloudAccountUi?.open();
+        return;
+      }
       const command = response?.command;
       if (command) {
         try {
+          if (!cloudAccessAllowed()) throw new Error("Se requiere una sesión activa de Abrir CRM para ejecutar esta orden.");
           const result = await executeCodexBridgeCommand(command);
           await runtimeBridgeMessage("result", { id: command.id, ok: true, result });
         } catch (error) {
