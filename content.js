@@ -929,14 +929,14 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     }
     .kanban-column {
       display: flex; min-height: 390px; flex-direction: column; padding: 10px; border: 1px solid var(--workspace-border);
-      border-radius: 6px; background: var(--workspace-surface);
+      border-radius: 6px; background: var(--workspace-surface); transition: border-color 120ms ease, box-shadow 120ms ease, background 120ms ease;
     }
-    .kanban-column.is-drag-over { border-color: var(--workspace-primary); box-shadow: 0 0 0 2px var(--workspace-primary-soft); }
+    .kanban-column.is-drag-over { border-color: var(--workspace-primary); background: var(--workspace-primary-soft); box-shadow: 0 0 0 2px var(--workspace-primary-soft); }
     .kanban-column-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
     .kanban-column-title { display: flex; min-width: 0; align-items: center; gap: 6px; color: var(--workspace-text); font-weight: 700; }
     .kanban-column-title .ant-tag { max-width: 190px; margin-inline-end: 0; overflow: hidden; text-overflow: ellipsis; }
     .kanban-count { color: var(--workspace-text-muted); font-size: 12px; }
-    .kanban-cards { display: flex; flex-direction: column; gap: 8px; }
+    .kanban-cards { display: flex; min-height: 96px; flex: 1; flex-direction: column; gap: 8px; }
     .kanban-card-shell {
       cursor: grab; touch-action: none; user-select: none;
     }
@@ -1467,10 +1467,37 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
   const kanbanGroupDropId = (groupId) => `sheet-kanban-group:${groupId}`;
 
   function kanbanCollisionDetection(args) {
-    const pointerCollisions = pointerWithin(args);
+    const groupContainers = args.droppableContainers.filter((container) => container.data.current?.type === "group");
+    if (!groupContainers.length) return [];
+    const groupArgs = { ...args, droppableContainers: groupContainers };
+    const pointerCollisions = pointerWithin(groupArgs);
     if (pointerCollisions.length) return pointerCollisions;
-    const intersections = rectIntersection(args);
-    return intersections.length ? intersections : closestCorners(args);
+    if (args.pointerCoordinates) {
+      const expandedGroupCollisions = groupContainers.flatMap((container) => {
+        const rect = args.droppableRects.get(container.id);
+        if (!rect) return [];
+        const margin = 18;
+        const point = args.pointerCoordinates;
+        if (
+          point.x < rect.left - margin
+          || point.x > rect.right + margin
+          || point.y < rect.top - margin
+          || point.y > rect.bottom + margin
+        ) return [];
+        const horizontalDistance = Math.max(rect.left - point.x, 0, point.x - rect.right);
+        const verticalDistance = Math.max(rect.top - point.y, 0, point.y - rect.bottom);
+        return [{
+          id: container.id,
+          data: {
+            droppableContainer: container,
+            value: Math.hypot(horizontalDistance, verticalDistance)
+          }
+        }];
+      }).sort((first, second) => first.data.value - second.data.value);
+      if (expandedGroupCollisions.length) return expandedGroupCollisions;
+    }
+    const intersections = rectIntersection(groupArgs);
+    return intersections.length ? intersections : closestCorners(groupArgs);
   }
 
   function KanbanCardContent({ columns, row, statusColumn, titleColumn }) {

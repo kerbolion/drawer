@@ -805,7 +805,7 @@ try {
     return {
       startX: frameRect.left + start.left + start.width / 2,
       startY: frameRect.top + start.top + start.height / 2,
-      endX: frameRect.left + end.left + Math.min(44, end.width / 2),
+      endX: frameRect.left + end.left - 4,
       endY: frameRect.top + end.top + Math.min(120, end.height / 2),
       frameLeft: frameRect.left,
       frameWidth: frameRect.width,
