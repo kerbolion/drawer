@@ -22,6 +22,7 @@
   --site-secondary-button-text:#222;
   --site-secondary-button-border:#ddd;
   --site-shadow:#0002;
+  --danger:#b42318;
   --primary-color:var(--site-heading);
   --primary-hover:color-mix(in srgb,var(--site-heading) 84%,var(--site-bg));
   --primary-color-rgb:var(--site-heading-rgb);
@@ -44,6 +45,7 @@
   --site-secondary-button-text:var(--site-button-text);
   --site-secondary-button-border:var(--site-border);
   --site-shadow:#0008;
+  --danger:#ff7b72;
 }
 
 body{
@@ -263,6 +265,73 @@ select{
   outline:2px solid var(--site-muted);
   background:var(--site-bg);
 }
+
+.modal-backdrop{
+  position:fixed;
+  inset:0;
+  z-index:10000;
+  display:grid;
+  place-items:center;
+  padding:18px;
+  background:#0008;
+}
+
+.modal-backdrop[hidden]{
+  display:none;
+}
+
+.modal{
+  display:grid;
+  width:min(420px,100%);
+  gap:12px;
+  border:1px solid var(--site-border);
+  border-radius:8px;
+  background:var(--site-bg);
+  color:var(--site-text);
+  padding:16px;
+  box-shadow:0 18px 60px #0007;
+}
+
+.modal h2{
+  margin:0;
+  font-size:18px;
+}
+
+.modal p{
+  margin:0;
+  color:var(--site-muted);
+}
+
+.modal input{
+  width:100%;
+  padding:8px 10px;
+}
+
+.modal .actions{
+  display:flex;
+  justify-content:flex-end;
+  gap:8px;
+}
+
+.modal .actions button{
+  min-height:34px;
+  border:1px solid var(--site-border);
+  border-radius:6px;
+  background:var(--site-secondary-button-bg);
+  color:var(--site-secondary-button-text);
+  padding:0 11px;
+  font-weight:700;
+}
+
+.modal .actions .primary{
+  border-color:var(--primary-color);
+  background:var(--primary-color);
+  color:var(--site-accent-text);
+}
+
+.modal .actions .danger{
+  color:var(--danger);
+}
 </style>
 </head>
 
@@ -379,11 +448,90 @@ select{
 
 </div>
 
+<div class="modal-backdrop" id="confirm-modal" hidden>
+  <section class="modal" role="dialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby="confirm-message">
+    <h2 id="confirm-title">Nombre del tablero</h2>
+    <p id="confirm-message">Escribe el nombre del tablero.</p>
+    <input id="confirm-input" autocomplete="off">
+    <div class="actions">
+      <button id="cancel-confirm" type="button">Cancelar</button>
+      <button class="primary" id="accept-confirm" type="button">Guardar</button>
+    </div>
+  </section>
+</div>
+
 
 <script>
 const STORAGE='kanban-data'
 const THEME_STORAGE='minimal-builder-theme'
 const COLUMN_MOVE_MARGIN=16
+
+const confirmModal=
+  document.querySelector('#confirm-modal')
+
+const confirmTitle=
+  document.querySelector('#confirm-title')
+
+const confirmMessage=
+  document.querySelector('#confirm-message')
+
+const confirmInput=
+  document.querySelector('#confirm-input')
+
+const cancelConfirm=
+  document.querySelector('#cancel-confirm')
+
+const acceptConfirm=
+  document.querySelector('#accept-confirm')
+
+let resolveModal
+
+
+function cerrarModal(value=null){
+
+  confirmModal.hidden=true
+  resolveModal?.(value)
+  resolveModal=null
+}
+
+
+function pedirNombre(title,message,value=''){
+
+  confirmTitle.textContent=title
+  confirmMessage.textContent=message
+  confirmInput.value=value
+  confirmModal.hidden=false
+
+  requestAnimationFrame(()=>{
+    confirmInput.focus()
+    confirmInput.select()
+  })
+
+  return new Promise(resolve=>{
+    resolveModal=resolve
+  })
+}
+
+
+cancelConfirm.onclick=()=>cerrarModal()
+
+acceptConfirm.onclick=()=>
+  cerrarModal(confirmInput.value)
+
+confirmModal.onclick=e=>{
+
+  if(e.target===confirmModal)
+    cerrarModal()
+}
+
+confirmInput.onkeydown=e=>{
+
+  if(e.key==='Enter')
+    cerrarModal(confirmInput.value)
+
+  if(e.key==='Escape')
+    cerrarModal()
+}
 
 const themeToggle=
   document.querySelector('[data-theme-toggle]')
@@ -1131,7 +1279,7 @@ workspaceTabs.addEventListener(
 
 workspaceTabs.addEventListener(
   'dblclick',
-  e=>{
+  async e=>{
 
     let tab=
       e.target.closest('.workspace-tab')
@@ -1144,8 +1292,9 @@ workspaceTabs.addEventListener(
         item=>item.id===tab.dataset.workspace
       )
 
-    let title=prompt(
-      'Nombre del tablero',
+    let title=await pedirNombre(
+      'Renombrar tablero',
+      'Escribe el nuevo nombre del tablero.',
       workspace.title
     )
 
@@ -1177,13 +1326,16 @@ workspaceTabs.addEventListener(
 
 
 document.querySelector('.add-workspace')
-.onclick=()=>{
+.onclick=async()=>{
 
   let suggested=
     `Tablero ${workspaces.length+1}`
 
-  let title=
-    prompt('Nombre del tablero',suggested)
+  let title=await pedirNombre(
+    'Agregar tablero',
+    'Escribe el nombre del nuevo tablero.',
+    suggested
+  )
 
   if(title===null)
     return
