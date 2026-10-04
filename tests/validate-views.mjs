@@ -12,7 +12,7 @@ const chrome = [
 ].find(existsSync);
 if (!chrome) throw new Error("No se encontro Google Chrome");
 
-const extensionDir = path.resolve(import.meta.dirname, "..");
+const extensionDir = path.resolve(import.meta.dirname, "..", "dist-extension");
 const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 const sheet = {
   headers: ["ID Contacto", "Nombre", "Estado", "Fecha", "", ""],
@@ -41,10 +41,12 @@ const webServer = http.createServer((request, response) => {
   const url = new URL(request.url, `http://127.0.0.1:${webPort}`);
   response.setHeader("Content-Type", "text/html; charset=utf-8");
   if (url.pathname.endsWith("/edit")) {
+    response.setHeader("Content-Security-Policy", "require-trusted-types-for 'script'");
     response.end(`<!doctype html><html><body>
       <input id="t-name-box" value="A2">
       <div class="docs-sheet-tab docs-sheet-active-tab"><span class="docs-sheet-tab-name">Contactos</span></div>
       <script>
+        const e = "host-page-binding";
         globalThis.__lastPaste = null;
         globalThis.__pastes = [];
         globalThis.__clears = [];

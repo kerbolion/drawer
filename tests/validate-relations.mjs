@@ -12,7 +12,7 @@ const chrome = [
 ].find(existsSync);
 if (!chrome) throw new Error("No se encontro Google Chrome");
 
-const extensionDir = path.resolve(import.meta.dirname, "..");
+const extensionDir = path.resolve(import.meta.dirname, "..", "dist-extension");
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function freePort() {
@@ -1358,6 +1358,22 @@ try {
     box.dispatchEvent(new Event("input", { bubbles: true }));
   })()`);
   await waitForRelation("Servicios");
+  const relatedFormReadyDeadline = Date.now() + 12_000;
+  let relatedFormReady;
+  while (Date.now() < relatedFormReadyDeadline) {
+    relatedFormReady = await cdp.evaluate(`(() => {
+      const host = document.getElementById("sheets-session-probe");
+      return {
+        row: host?.dataset.row || "",
+        pending: host?.dataset.hasPendingChanges || ""
+      };
+    })()`);
+    if (relatedFormReady.row === "2" && relatedFormReady.pending !== "true") break;
+    await delay(100);
+  }
+  if (relatedFormReady?.row !== "2" || relatedFormReady.pending === "true") {
+    throw new Error(`El formulario principal no terminó de cargar Contactos antes del alta relacionada: ${JSON.stringify(relatedFormReady)}`);
+  }
   await cdp.evaluate(`(() => {
     window.__createRelatedPastes = [];
     document.addEventListener("paste", event => {

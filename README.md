@@ -69,9 +69,9 @@ Durante el desarrollo se puede cargar la raíz del proyecto. Para compartir o pu
 npm run build:extension
 ```
 
-Ese comando genera `dist-extension/` con únicamente el manifiesto y los archivos ejecutables requeridos. Vite agrupa React y Ant Design, y Terser elimina comentarios, acorta identificadores y minimiza `content`, `background` y `page-write`. Los archivos fuente, pruebas, servidor y credenciales no se copian al paquete distribuible.
+Ese comando genera `dist-extension/` con únicamente el manifiesto y los archivos ejecutables requeridos. Vite agrupa React y Ant Design; después `content`, `background` y `page-write` se limpian con Terser, pasan por una capa de ofuscación con arreglos de cadenas, nombres hexadecimales y transformación parcial del flujo, y finalmente Terser compacta y acorta el resultado ofuscado. Los archivos fuente, pruebas, servidor y credenciales no se copian al paquete distribuible.
 
-Chrome Web Store permite minificación, pero prohíbe ocultar la funcionalidad mediante ofuscación y también prohíbe ejecutar JavaScript remoto en Manifest V3. Por eso la protección efectiva se basa en autorización del servidor, persistencia remota y secretos exclusivamente del backend. El runtime remoto de MinimalBuilder pertenece a los sitios publicados; no es la lógica ejecutable de su extensión.
+Esta salida ofuscada está destinada a distribución privada. Chrome Web Store permite minificación, pero prohíbe ocultar la funcionalidad mediante ofuscación y también prohíbe ejecutar JavaScript remoto en Manifest V3. La autorización del servidor, la persistencia remota y los secretos exclusivamente del backend continúan siendo la barrera efectiva de acceso; la ofuscación dificulta el análisis del cliente, pero no sustituye esos controles.
 
 Antes de publicar, hospeda [`PRIVACY.md`](PRIVACY.md) en una URL pública y declárala en Chrome Web Store.
 

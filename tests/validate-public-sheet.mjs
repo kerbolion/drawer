@@ -13,7 +13,7 @@ const chromeCandidates = [
 const chrome = chromeCandidates.find(existsSync);
 if (!chrome) throw new Error("No se encontro Google Chrome");
 
-const extensionDir = path.resolve(import.meta.dirname, "..");
+const extensionDir = path.resolve(import.meta.dirname, "..", "dist-extension");
 const profileDir = path.join(os.tmpdir(), `sheets-probe-${process.pid}-${Date.now()}`);
 const sheetUrl = "https://docs.google.com/spreadsheets/d/1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms/edit#gid=0&range=A2";
 

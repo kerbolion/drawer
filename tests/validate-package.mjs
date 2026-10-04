@@ -46,6 +46,15 @@ for (const file of files.filter(file => file.endsWith(".js"))) {
   if (/sourceMappingURL|\beval\s*\(|\bnew\s+Function\s*\(/.test(code)) {
     throw new Error(`${file} contiene código dinámico o un mapa de fuentes.`);
   }
+  if (file === "page-write.js" && /\bFunction\b/.test(code)) {
+    throw new Error("page-write.js contiene un constructor dinámico incompatible con Trusted Types.");
+  }
+  if (!code.startsWith("(()=>{")) {
+    throw new Error(`${file} expone declaraciones en el ámbito global.`);
+  }
+  if (!code.includes("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+/=")) {
+    throw new Error(`${file} no contiene la capa de ofuscación esperada.`);
+  }
 }
 
 console.log("PAQUETE_OK: distribución mínima, sin fuentes, mapas ni ejecución dinámica.");
