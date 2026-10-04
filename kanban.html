@@ -40,6 +40,10 @@ body{
   padding:5px;
 }
 
+.settings select{
+  padding:5px;
+}
+
 button{
   border:0;
   cursor:pointer;
@@ -56,6 +60,17 @@ button{
   padding:20px;
   width:100%;
   align-items:start;
+}
+
+.kanban.row{
+  grid-auto-flow:column;
+  grid-auto-columns:minmax(300px,320px);
+  grid-template-columns:none;
+  overflow-x:auto;
+}
+
+.kanban.row .column{
+  height:600px;
 }
 
 .column{
@@ -117,6 +132,14 @@ button{
 <div class="settings">
 
   <label>
+    Mostrar como
+    <select id="view">
+      <option value="grid">GRID</option>
+      <option value="row">FILA</option>
+    </select>
+  </label>
+
+  <label class="grid-setting">
     Columnas por fila
     <input
       id="columns"
@@ -126,7 +149,7 @@ button{
       value="3">
   </label>
 
-  <label>
+  <label class="grid-setting">
     Alto
     <input
       id="height"
@@ -136,7 +159,7 @@ button{
     px
   </label>
 
-  <label>
+  <label class="grid-setting">
     Ancho mínimo
     <input
       id="minWidth"
@@ -213,6 +236,20 @@ let drag
 
 function ajustarColumnas(){
 
+  let grid=
+    view.value==='grid'
+
+  kanban.classList.toggle(
+    'row',
+    !grid
+  )
+
+  document.querySelectorAll('.grid-setting')
+    .forEach(setting=>setting.hidden=!grid)
+
+  if(!grid)
+    return
+
   let deseadas=Math.max(
     1,
     Number(columns.value) || 1
@@ -256,6 +293,7 @@ function guardar(){
     columns:columns.value,
     height:height.value,
     minWidth:minWidth.value,
+    view:view.value,
 
     board:[
       ...kanban.querySelectorAll('.column')
@@ -305,6 +343,9 @@ function cargar(){
 
   minWidth.value=
     data.minWidth || 280
+
+  view.value=
+    data.view==='row' ? 'row' : 'grid'
 
 
   document.documentElement.style
@@ -388,6 +429,13 @@ columns.oninput=()=>{
 }
 
 
+view.onchange=()=>{
+
+  ajustarColumnas()
+  guardar()
+}
+
+
 height.oninput=()=>{
 
   document.documentElement.style
@@ -422,6 +470,9 @@ document.addEventListener(
 
     if(e.target.matches('h3'))
       drag=e.target.parentElement
+
+    if(!drag)
+      return
 
     drag?.classList.add('dragging')
   }
@@ -487,38 +538,66 @@ document.addEventListener(
 
     if(drag.matches('.column')){
 
-      let target=
+      let hovered=
         e.target.closest('.column')
 
-      if(
-        !target ||
-        target===drag
-      )
+      if(hovered===drag)
         return
 
-      let rect=
-        target.getBoundingClientRect()
+      let candidates=[
+        ...kanban.querySelectorAll(
+          '.column:not(.dragging)'
+        )
+      ]
 
-      let mitadY=
-        rect.top +
-        rect.height/2
-
-      let mitadX=
-        rect.left +
-        rect.width/2
-
-
-      if(e.clientY < mitadY){
-
-        if(e.clientX < mitadX)
-          target.before(drag)
-        else
-          target.after(drag)
-
-      }else{
-
-        target.after(drag)
+      if(!candidates.length){
+        kanban.append(drag)
+        return
       }
+
+      let target=hovered ||
+        candidates.reduce(
+          (nearest,column)=>{
+
+            let rect=
+              column.getBoundingClientRect()
+
+            let dx=
+              e.clientX < rect.left
+                ? rect.left-e.clientX
+                : e.clientX > rect.right
+                  ? e.clientX-rect.right
+                  : 0
+
+            let dy=
+              e.clientY < rect.top
+                ? rect.top-e.clientY
+                : e.clientY > rect.bottom
+                  ? e.clientY-rect.bottom
+                  : 0
+
+            let distance=
+              dx*dx + dy*dy
+
+            return !nearest ||
+              distance < nearest.distance
+                ? {column,distance}
+                : nearest
+          },
+          null
+        ).column
+
+      let ordered=[
+        ...kanban.querySelectorAll('.column')
+      ]
+
+      if(
+        ordered.indexOf(drag) <
+        ordered.indexOf(target)
+      )
+        target.after(drag)
+      else
+        target.before(drag)
     }
   }
 )
