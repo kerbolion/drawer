@@ -944,6 +944,8 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     .kanban-card .ant-card-head { min-height: 38px; padding: 0 10px; }
     .kanban-card .ant-card-head-title { padding: 8px 0; }
     .kanban-card .ant-card-body { padding: 10px; }
+    .kanban-card--title-only .ant-card-head { border-bottom: 0; }
+    .kanban-card--title-only .ant-card-body { display: none; }
     .kanban-card-title { display: flex; min-width: 0; align-items: center; gap: 6px; color: var(--workspace-text); font-weight: 700; }
     .kanban-card-title > span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .kanban-card-drag { display: inline-flex; color: var(--workspace-text-muted); pointer-events: none; }
@@ -1458,12 +1460,14 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
       && column.index !== titleColumn?.index
       && String(row.cells[column.index] || "").trim()
     )).slice(0, 3);
+    const titleOnly = fields.length === 0;
 
     return React.createElement(
       Card,
       {
-        className: "kanban-card",
+        className: `kanban-card${titleOnly ? " kanban-card--title-only" : ""}`,
         size: "small",
+        variant: "outlined",
         title: React.createElement(
           "div",
           { className: "kanban-card-title" },
