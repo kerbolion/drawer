@@ -1785,9 +1785,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
 
         if (!row || !group) return;
         const nextValue = group.id === "__empty__" ? "" : group.label;
-        if (String(row.cells[statusColumn.index] || "").trim() !== nextValue) {
-          void onMoveRow(row, statusColumn, nextValue);
-        }
+        void onMoveRow(row, statusColumn, nextValue);
       };
 
       kanbanDocument.addEventListener("dragstart", handleDragStart);
@@ -2057,7 +2055,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     const [table, setTable] = React.useState(null);
     const [loading, setLoading] = React.useState(false);
     const [error, setError] = React.useState("");
-    const [movingRows, setMovingRows] = React.useState([]);
+    const movingRows = [];
     const [workspaceTarget, setWorkspaceTarget] = React.useState(() => ({ gid: drawerGid(), name: sheetName }));
     const [workspaceColumns, setWorkspaceColumns] = React.useState(columns);
     const [documents, setDocuments] = React.useState(() => [{
@@ -2065,12 +2063,8 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
       name: workspaceDocumentName(),
       sheets: workspaceSheetList()
     }]);
-    const movingRowsRef = React.useRef(new Set());
     const sheetViewDraftsRef = React.useRef(new Map());
-    const sheetViewOriginalRowsRef = React.useRef(new Map());
-    const sheetViewRemovedRowsRef = React.useRef(new Set());
     const sourceSheetKeyRef = React.useRef(sheetKey);
-    const sheetViewTableSyncTimerRef = React.useRef(0);
     const [, setSheetViewDraftVersion] = React.useState(0);
     const [sheetViewSaving, setSheetViewSaving] = React.useState(false);
     const [sheetViewSaveError, setSheetViewSaveError] = React.useState(false);
@@ -2085,11 +2079,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
       setView("");
       setTable(null);
       setError("");
-      movingRowsRef.current.clear();
-      setMovingRows([]);
       sheetViewDraftsRef.current.clear();
-      sheetViewOriginalRowsRef.current.clear();
-      sheetViewRemovedRowsRef.current.clear();
       setSheetViewDraftVersion((current) => current + 1);
       setSheetViewSaving(false);
       setSheetViewSaveError(false);
@@ -2103,7 +2093,8 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     }, [sheetKey, view]);
 
     const activeTarget = view === "table" ? workspaceTarget : { gid: drawerGid(), name: sheetName };
-    const hasSheetViewChanges = sheetViewDraftsRef.current.size > 0;
+    const pendingSheetViewDrafts = () => [...sheetViewDraftsRef.current.values()].filter((draft) => draft.pending);
+    const hasSheetViewChanges = pendingSheetViewDrafts().length > 0;
     const sheetViewSaveMode = sheetViewSaveError
       ? "error"
       : sheetViewSaving
@@ -2124,7 +2115,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     const sheetViewDraftKey = (target, rowNumber, propertyIndex) => `${sheetViewRowKey(target, rowNumber)}:${Number(propertyIndex)}`;
     const hasDraftForRow = (target, rowNumber) => {
       const prefix = `${sheetViewRowKey(target, rowNumber)}:`;
-      return [...sheetViewDraftsRef.current.keys()].some((key) => key.startsWith(prefix));
+      return [...sheetViewDraftsRef.current.entries()].some(([key, draft]) => key.startsWith(prefix) && draft.pending);
     };
     const bumpSheetViewDrafts = () => setSheetViewDraftVersion((current) => current + 1);
     const changeHiddenColumnIds = (gid, sheetName, hiddenColumnIds) => {
@@ -2154,7 +2145,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
       return {
         ...nextTable,
         rows: nextTable.rows
-          .filter((row) => !sheetViewRemovedRowsRef.current.has(sheetViewRowKey(target, row.number)))
+          .filter((row) => !draftsByRow.get(row.number)?.some((draft) => draft.pending && draft.removesRow))
           .map((row) => {
             const drafts = draftsByRow.get(row.number);
             if (!drafts?.length) return row;
@@ -2165,81 +2156,71 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
       };
     };
 
-    const cancelSheetViewTableSync = () => {
-      if (!sheetViewTableSyncTimerRef.current) return;
-      panelFrame.contentWindow.clearTimeout(sheetViewTableSyncTimerRef.current);
-      sheetViewTableSyncTimerRef.current = 0;
-    };
-
     const syncSheetViewTable = (target = activeTarget) => {
       setTable((current) => tableWithSheetViewDrafts(current, target));
     };
 
-    const scheduleSheetViewTableSync = (target = activeTarget) => {
-      cancelSheetViewTableSync();
-      sheetViewTableSyncTimerRef.current = panelFrame.contentWindow.setTimeout(() => {
-        sheetViewTableSyncTimerRef.current = 0;
-        syncSheetViewTable(target);
-      }, 180);
-    };
-
-    React.useEffect(() => () => cancelSheetViewTableSync(), []);
-
     const stageSheetViewValue = (row, property, nextValue, target = activeTarget, allowProtected = false) => {
       if (!row || (property.protected && !allowProtected) || sheetViewSaving) return false;
-      const hadChanges = sheetViewDraftsRef.current.size > 0;
       const normalizedValue = String(nextValue ?? "");
-      const rowKey = sheetViewRowKey(target, row.number);
-      if (!sheetViewOriginalRowsRef.current.has(rowKey)) {
-        sheetViewOriginalRowsRef.current.set(rowKey, { ...row, cells: [...row.cells] });
-      }
-      const originalRow = sheetViewOriginalRowsRef.current.get(rowKey);
-      const originalValue = String(originalRow.cells[property.index] || "");
       const draftKey = sheetViewDraftKey(target, row.number, property.index);
-      if (valuesEqualForProperty(normalizedValue, originalValue, property)) {
-        sheetViewDraftsRef.current.delete(draftKey);
-      } else {
-        sheetViewDraftsRef.current.set(draftKey, {
-          targetKey: sheetViewTargetKey(target),
-          target: { gid: String(target.gid), name: String(target.name) },
-          row: Number(row.number),
-          property,
-          value: normalizedValue
+      const existingDraft = sheetViewDraftsRef.current.get(draftKey);
+      const originalValue = existingDraft?.originalValue ?? String(row.cells[property.index] || "");
+      const originalRow = existingDraft?.originalRow || { ...row, cells: [...row.cells] };
+      sheetViewDraftsRef.current.set(draftKey, {
+        targetKey: sheetViewTargetKey(target),
+        target: { gid: String(target.gid), name: String(target.name) },
+        row: Number(row.number),
+        property,
+        value: normalizedValue,
+        originalValue,
+        originalRow,
+        pending: !valuesEqualForProperty(normalizedValue, originalValue, property),
+        removesRow: existingDraft?.removesRow || false
+      });
+      if (sheetViewTargetKey(target) === sheetViewTargetKey(activeTarget)) {
+        setTable((current) => {
+          if (!current) return current;
+          return {
+            ...current,
+            rows: current.rows.map((currentRow) => {
+              if (currentRow.number !== row.number) return currentRow;
+              const cells = [...currentRow.cells];
+              cells[property.index] = normalizedValue;
+              return { ...currentRow, cells };
+            })
+          };
         });
       }
-      if (!hasDraftForRow(target, row.number)) {
-        sheetViewOriginalRowsRef.current.delete(rowKey);
-        sheetViewRemovedRowsRef.current.delete(rowKey);
-      }
-      scheduleSheetViewTableSync(target);
       setError("");
       setSheetViewSaveError(false);
-      if (hadChanges !== (sheetViewDraftsRef.current.size > 0)) bumpSheetViewDrafts();
+      bumpSheetViewDrafts();
       return true;
     };
 
     const cancelSheetViewChanges = () => {
-      if (sheetViewSaving || !sheetViewDraftsRef.current.size) return;
-      cancelSheetViewTableSync();
-      const originals = [...sheetViewOriginalRowsRef.current.values()];
+      if (sheetViewSaving || !hasSheetViewChanges) return;
+      const drafts = pendingSheetViewDrafts();
       setTable((current) => {
         if (!current) return current;
         const rows = new Map(current.rows.map((row) => [row.number, row]));
-        for (const original of originals) rows.set(original.number, { ...original, cells: [...original.cells] });
+        for (const draft of drafts) {
+          const currentRow = rows.get(draft.row) || { ...draft.originalRow, cells: [...draft.originalRow.cells] };
+          const cells = [...currentRow.cells];
+          cells[draft.property.index] = draft.originalValue;
+          rows.set(draft.row, { ...currentRow, cells });
+        }
         return { ...current, rows: [...rows.values()].sort((left, right) => left.number - right.number) };
       });
       sheetViewDraftsRef.current.clear();
-      sheetViewOriginalRowsRef.current.clear();
-      sheetViewRemovedRowsRef.current.clear();
       setSheetViewSaveError(false);
       setError("");
       bumpSheetViewDrafts();
     };
 
     const saveSheetViewChanges = async () => {
-      if (sheetViewSaving || !sheetViewDraftsRef.current.size) return;
-      cancelSheetViewTableSync();
-      const drafts = [...sheetViewDraftsRef.current.values()];
+      if (sheetViewSaving || !hasSheetViewChanges) return;
+      const drafts = pendingSheetViewDrafts();
       const latestTable = tableWithSheetViewDrafts(table, activeTarget);
       setTable(latestTable);
       const rowsByNumber = new Map((latestTable?.rows || []).map((row) => [row.number, row]));
@@ -2248,19 +2229,16 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
       setError("");
       try {
         await Promise.all(drafts.map((draft) => {
-          const original = sheetViewOriginalRowsRef.current.get(sheetViewRowKey(draft.target, draft.row));
           const rowValues = rowsByNumber.get(draft.row)?.cells
-            || (sheetViewRemovedRowsRef.current.has(sheetViewRowKey(draft.target, draft.row))
-              ? (original?.cells || []).map(() => "")
-              : original?.cells || []);
+            || (draft.removesRow
+              ? draft.originalRow.cells.map(() => "")
+              : draft.originalRow.cells);
           return writeSheetViewValue(draft.row, draft.property, draft.value, rowValues, draft.target);
         }));
         const verificationKeys = new Set(drafts.map((draft) => `sheet-view:${draft.target.gid}:${draft.row}:${draft.property.index}`));
         const deadline = Date.now() + 9_000;
         while (Date.now() < deadline && [...verificationKeys].some((key) => state.sheetViewWrites.has(key))) await wait(80);
         sheetViewDraftsRef.current.clear();
-        sheetViewOriginalRowsRef.current.clear();
-        sheetViewRemovedRowsRef.current.clear();
         bumpSheetViewDrafts();
       } catch (saveError) {
         setSheetViewSaveError(true);
@@ -2275,6 +2253,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
         setError("Guarda o cancela los cambios pendientes antes de cerrar la vista.");
         return;
       }
+      sheetViewDraftsRef.current.clear();
       setView("");
     };
 
@@ -2411,23 +2390,13 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
       }
     };
 
-    const moveRow = async (row, property, nextValue) => {
+    const moveRow = (row, property, nextValue) => {
       if (property.protected) return;
-      if (movingRowsRef.current.has(row.number)) return;
       if (state.primaryDrafts.size || state.relatedDrafts.size) {
         setError("Guarda o cancela los cambios pendientes antes de mover una ficha.");
         return;
       }
-      movingRowsRef.current.add(row.number);
-      setMovingRows([...movingRowsRef.current]);
-      if (stageSheetViewValue(row, property, nextValue, activeTarget)) {
-        cancelSheetViewTableSync();
-        syncSheetViewTable(activeTarget);
-      }
-      setTimeout(() => {
-        movingRowsRef.current.delete(row.number);
-        setMovingRows([...movingRowsRef.current]);
-      }, 220);
+      stageSheetViewValue(row, property, nextValue, activeTarget);
     };
 
     const editWorkspaceCell = (row, property, nextEditorValue) => {
@@ -2473,12 +2442,12 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
       for (const row of previousRows) {
         for (const property of workspaceColumns) stageSheetViewValue(row, property, "", workspaceTarget, true);
         if (hasDraftForRow(workspaceTarget, row.number)) {
-          sheetViewRemovedRowsRef.current.add(sheetViewRowKey(workspaceTarget, row.number));
+          for (const draft of sheetViewDraftsRef.current.values()) {
+            if (draft.pending && draft.targetKey === sheetViewTargetKey(workspaceTarget) && draft.row === row.number) draft.removesRow = true;
+          }
         }
       }
-      setTable((current) => current
-        ? ({ ...current, rows: current.rows.filter((row) => !sheetViewRemovedRowsRef.current.has(sheetViewRowKey(workspaceTarget, row.number))) })
-        : current);
+      syncSheetViewTable(workspaceTarget);
       bumpSheetViewDrafts();
     };
 
@@ -5193,6 +5162,9 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
   }
 
   function valuesEqualForProperty(left, right, property) {
+    if (["status", "select"].includes(property.type)) {
+      return String(left ?? "").trim() === String(right ?? "").trim();
+    }
     if (["number", "currency"].includes(property.type)) {
       const leftNumber = parseNumber(left, property);
       const rightNumber = parseNumber(right, property);

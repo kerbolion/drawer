@@ -17,7 +17,7 @@ const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, mil
 const sheet = {
   headers: ["ID Contacto", "Nombre", "Estado", "Fecha", "", ""],
   rows: [
-    ["1", "Ana", "Nuevo", "02/10/2026", "", ""],
+    ["1", "Ana", "Nuevo ", "02/10/2026", "", ""],
     ["2", "Luis", "En proceso", "15/10/2026", "", ""],
     ["3", "Mia", "", "02/11/2026", "", ""]
   ]
@@ -826,6 +826,94 @@ try {
   })()`);
   if (!independentKanban.mainHidden || !independentKanban.viewOpen || independentKanban.width !== independentKanban.viewportWidth || independentKanban.height !== independentKanban.viewportHeight || independentKanban.transition !== "0s" || independentKanban.antDrawer || independentKanban.expandAction) {
     throw new Error(`Kanban no abrio como superficie completa independiente: ${JSON.stringify(independentKanban)}`);
+  }
+
+  const rapidReturnOrigin = await cdp.evaluate(viewExpression(`return view.querySelector('.kanban-card-shell[data-sheet-row="2"]')?.closest('[data-kanban-group]')?.dataset.kanbanGroup || "";`));
+  await cdp.evaluate(viewExpression(`
+    const card = view.querySelector('.kanban-card-shell[data-sheet-row="2"]');
+    const target = [...view.querySelectorAll('[data-kanban-group]')]
+      .find((column) => column.dataset.kanbanGroup !== ${JSON.stringify(rapidReturnOrigin)})
+      ?.querySelector('.cards');
+    const dataTransfer = new DataTransfer();
+    card.dispatchEvent(new DragEvent('dragstart', { bubbles: true, cancelable: true, dataTransfer }));
+    target.dispatchEvent(new DragEvent('dragover', {
+      bubbles: true,
+      cancelable: true,
+      clientY: target.getBoundingClientRect().top + 120,
+      dataTransfer
+    }));
+    card.dispatchEvent(new DragEvent('dragend', { bubbles: true, cancelable: true, dataTransfer }));
+  `));
+  await delay(20);
+  await cdp.evaluate(viewExpression(`
+    const card = view.querySelector('.kanban-card-shell[data-sheet-row="2"]');
+    const target = view.querySelector('[data-kanban-group=${JSON.stringify(rapidReturnOrigin)}] .cards');
+    const dataTransfer = new DataTransfer();
+    card.dispatchEvent(new DragEvent('dragstart', { bubbles: true, cancelable: true, dataTransfer }));
+    target.dispatchEvent(new DragEvent('dragover', {
+      bubbles: true,
+      cancelable: true,
+      clientY: target.getBoundingClientRect().top + 120,
+      dataTransfer
+    }));
+    card.dispatchEvent(new DragEvent('dragend', { bubbles: true, cancelable: true, dataTransfer }));
+  `));
+  await delay(80);
+  const rapidReturnState = await cdp.evaluate(viewExpression(`return {
+    group: view.querySelector('.kanban-card-shell[data-sheet-row="2"]')?.closest('[data-kanban-group]')?.dataset.kanbanGroup || "",
+    saveDisabled: view.querySelector('[data-sheet-view-save]').disabled,
+    state: view.querySelector('[data-sheet-view-save-state]')?.dataset.sheetViewSaveState || ""
+  };`));
+  if (rapidReturnState.group !== rapidReturnOrigin || !rapidReturnState.saveDisabled || rapidReturnState.state !== "saved") {
+    throw new Error(`Kanban mantuvo cambios pendientes despues de devolver rapidamente una tarjeta: ${JSON.stringify({ rapidReturnOrigin, rapidReturnState })}`);
+  }
+
+  await cdp.evaluate(viewExpression(`
+    const card = view.querySelector('.kanban-card-shell[data-sheet-row="2"]');
+    const target = [...view.querySelectorAll('[data-kanban-group]')]
+      .find((column) => column.dataset.kanbanGroup !== ${JSON.stringify(rapidReturnOrigin)})
+      ?.querySelector('.cards');
+    const dataTransfer = new DataTransfer();
+    card.dispatchEvent(new DragEvent('dragstart', { bubbles: true, cancelable: true, dataTransfer }));
+    target.dispatchEvent(new DragEvent('dragover', {
+      bubbles: true,
+      cancelable: true,
+      clientY: target.getBoundingClientRect().top + 120,
+      dataTransfer
+    }));
+    card.dispatchEvent(new DragEvent('dragend', { bubbles: true, cancelable: true, dataTransfer }));
+  `));
+  await delay(80);
+  const thirdMoveState = await cdp.evaluate(viewExpression(`return {
+    group: view.querySelector('.kanban-card-shell[data-sheet-row="2"]')?.closest('[data-kanban-group]')?.dataset.kanbanGroup || "",
+    saveDisabled: view.querySelector('[data-sheet-view-save]').disabled,
+    state: view.querySelector('[data-sheet-view-save-state]')?.dataset.sheetViewSaveState || ""
+  };`));
+  if (thirdMoveState.group === rapidReturnOrigin || thirdMoveState.saveDisabled || thirdMoveState.state !== "pending") {
+    throw new Error(`Kanban no detecto el tercer movimiento despues de volver al origen: ${JSON.stringify({ rapidReturnOrigin, thirdMoveState })}`);
+  }
+
+  await cdp.evaluate(viewExpression(`
+    const card = view.querySelector('.kanban-card-shell[data-sheet-row="2"]');
+    const target = view.querySelector('[data-kanban-group=${JSON.stringify(rapidReturnOrigin)}] .cards');
+    const dataTransfer = new DataTransfer();
+    card.dispatchEvent(new DragEvent('dragstart', { bubbles: true, cancelable: true, dataTransfer }));
+    target.dispatchEvent(new DragEvent('dragover', {
+      bubbles: true,
+      cancelable: true,
+      clientY: target.getBoundingClientRect().top + 120,
+      dataTransfer
+    }));
+    card.dispatchEvent(new DragEvent('dragend', { bubbles: true, cancelable: true, dataTransfer }));
+  `));
+  await delay(80);
+  const fourthReturnState = await cdp.evaluate(viewExpression(`return {
+    group: view.querySelector('.kanban-card-shell[data-sheet-row="2"]')?.closest('[data-kanban-group]')?.dataset.kanbanGroup || "",
+    saveDisabled: view.querySelector('[data-sheet-view-save]').disabled,
+    state: view.querySelector('[data-sheet-view-save-state]')?.dataset.sheetViewSaveState || ""
+  };`));
+  if (fourthReturnState.group !== rapidReturnOrigin || !fourthReturnState.saveDisabled || fourthReturnState.state !== "saved") {
+    throw new Error(`Kanban no limpio el cuarto movimiento al volver otra vez al origen: ${JSON.stringify({ rapidReturnOrigin, fourthReturnState })}`);
   }
 
   await cdp.evaluate(viewExpression('view.querySelector(\'.kanban-card-shell[data-sheet-row="4"]\').click();'));
