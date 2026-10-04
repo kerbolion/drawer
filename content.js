@@ -929,7 +929,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     .kanban-column-title { display: flex; min-width: 0; align-items: center; gap: 6px; color: var(--workspace-text); font-weight: 700; }
     .kanban-column-title .ant-tag { max-width: 190px; margin-inline-end: 0; overflow: hidden; text-overflow: ellipsis; }
     .kanban-count { color: var(--workspace-text-muted); font-size: 12px; }
-    .kanban-cards { display: flex; min-height: 0; flex: 1; flex-direction: column; gap: 8px; overflow-y: auto; }
+    .kanban-cards { display: flex; min-height: 0; flex: 1; flex-direction: column; gap: 8px; overflow-y: auto; padding: 10px; }
     .kanban-card-shell {
       cursor: grab; touch-action: none; user-select: none;
     }
