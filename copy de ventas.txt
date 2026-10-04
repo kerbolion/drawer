@@ -1,0 +1,185 @@
+Todo comienza y termina en una hoja de cálculo.
+
+Convierte Google Sheets en una forma más práctica de gestionar clientes, tareas y datos.
+
+Sin migraciones.
+Sin cambiar tu forma de trabajar.
+Tus datos siguen estando en Google Sheets.
+________________
+
+
+Una mejor forma de trabajar con tus hojas
+
+Visualiza y gestiona la información de tu hoja desde diferentes vistas según lo que necesites hacer.
+
+Formulario
+
+Consulta y edita cada fila como un registro individual.
+Una forma más cómoda de trabajar con muchos campos sin desplazarte entre columnas.
+________________
+
+
+Kanban
+
+Organiza tus registros por etapas.
+Mueve clientes, oportunidades, pedidos o tareas de una columna a otra y mantén actualizada tu hoja automáticamente.
+________________
+
+
+Calendario
+
+Visualiza los registros que contienen fechas directamente en un calendario.
+Ideal para citas, seguimientos, entregas, reservas o tareas.
+________________
+
+
+Edición directa
+
+Trabaja con tus registros desde una vista de tabla, edita sus campos y controla qué columnas quieres mostrar.
+Cuando lo necesites, vuelve a la hoja y continúa trabajando directamente en sus celdas.
+
+No existen dos bases de datos.
+Lo que ves en Abrir CRM es lo que tienes en Google Sheets.
+________________
+
+
+Registros relacionados
+
+Conecta la información de diferentes hojas y consulta sus registros relacionados desde el mismo formulario.
+
+Visualiza clientes con sus tareas, proyectos con sus actividades o pedidos con sus detalles sin perder el contexto del registro principal.
+________________
+
+
+Tu asistente de IA también puede trabajar con tus hojas
+
+Abrir CRM incluye un skill que permite a un asistente de IA autorizado trabajar directamente con el documento que tienes abierto.
+
+Puedes pedirle que lea tus datos, encuentre registros, agregue información, actualice campos o prepare nuevas hojas usando instrucciones normales.
+
+Sin copiar y pegar datos entre aplicaciones.
+Sin configurar Google APIs.
+Sin entregar las credenciales de tu cuenta de Google.
+________________
+
+
+Consulta y encuentra información
+
+Pídele al asistente que:
+
+• Lea una hoja completa o un rango específico.
+• Liste los registros usando los nombres reales de las columnas.
+• Busque clientes, tareas o movimientos mediante una o varias condiciones.
+• Revise una celda cuando necesites entender un valor o comportamiento particular.
+• Identifique la hoja activa y las demás hojas disponibles en el documento.
+
+Ejemplos:
+
+“Muéstrame los clientes con estado Activo.”
+“Busca las tareas de este cliente.”
+“Revisa los registros pendientes de octubre.”
+________________
+
+
+Agrega y actualiza registros
+
+El asistente puede crear registros nuevos, localizar el siguiente espacio disponible y colocar cada dato en la columna correcta.
+
+También puede actualizar una fila por su número o encontrarla mediante un identificador único, como el ID de un cliente, una orden o una tarea.
+
+Puedes pedirle que:
+
+• Agregue un registro individual.
+• Importe lotes de registros.
+• Actualice únicamente los campos indicados.
+• Vacíe un campo sin alterar el resto de la fila.
+• Escriba matrices de datos en un rango concreto.
+• Limpie el contenido de un rango conservando su estructura y formato.
+
+Ejemplos:
+
+“Agrega estos diez contactos a la hoja Clientes.”
+“Cambia a Completada la tarea con ID T-104.”
+“Limpia las notas de los registros archivados.”
+________________
+
+
+Crea y organiza hojas completas
+
+El asistente también puede administrar las hojas que forman parte del documento.
+
+Puede:
+
+• Crear una hoja nueva.
+• Definir sus encabezados desde el primer momento.
+• Poblarla inmediatamente con registros.
+• Renombrarla conservando su identidad interna y configuración.
+• Eliminarla cuando se lo indiques expresamente.
+
+Las eliminaciones requieren una confirmación exacta y nunca se permite borrar la última hoja del documento.
+
+Ejemplo:
+
+“Crea una hoja llamada Oportunidades con las columnas ID, Cliente, Estado, Monto y Próximo seguimiento. Después agrega estos registros.”
+________________
+
+
+Preparado para pocos o muchos registros
+
+Para tareas sencillas, el asistente trabaja directamente con los nombres de las columnas.
+
+Para cargas grandes, divide los registros en lotes controlados y los procesa de forma secuencial para mantener la operación estable.
+
+Cada escritura se vuelve a leer y verificar antes de considerarse completada.
+________________
+
+
+Control sobre cada cambio
+
+El acceso de IA funciona únicamente cuando:
+
+• El documento está abierto en tu navegador.
+• Tu sesión de Google tiene acceso a la hoja.
+• Abrir CRM está instalado e iniciado con una cuenta activa.
+• Tu suscripción se encuentra vigente.
+
+El skill utiliza la sesión que ya tienes abierta y dirige cada operación al documento y la hoja correspondientes.
+
+No utiliza cuentas de servicio, no extrae cookies y no necesita una integración adicional con la API de Google.
+________________
+
+
+Tus datos siguen siendo tuyos
+
+No necesitas importar archivos ni reconstruir tu información dentro de otra plataforma.
+
+Conecta tu hoja y continúa trabajando sobre los datos que ya tienes.
+________________
+
+
+Una hoja. Diferentes formas de trabajar.
+
+Tabla para editar directamente los datos.
+Formulario para trabajar registro por registro.
+Kanban para gestionar procesos.
+Calendario para organizar fechas.
+Relaciones para conectar información entre hojas.
+IA para consultar, crear y actualizar datos con instrucciones naturales.
+
+Todo conectado al mismo documento de Google Sheets.
+________________
+
+
+Menos sistema. Más claridad.
+
+Si ya utilizas Google Sheets para gestionar tu negocio, no necesitas empezar desde cero.
+
+Solo necesitas una mejor forma de trabajar con la información que ya tienes.
+________________
+
+
+Convierte Google Sheets en tu CRM.
+
+Conecta tu hoja, elige cómo quieres verla y deja que tu asistente te ayude a mantenerla actualizada.
+
+Probar ahora
