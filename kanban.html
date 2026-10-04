@@ -383,6 +383,7 @@ select{
 <script>
 const STORAGE='kanban-data'
 const THEME_STORAGE='minimal-builder-theme'
+const COLUMN_MOVE_MARGIN=16
 
 const themeToggle=
   document.querySelector('[data-theme-toggle]')
@@ -424,6 +425,7 @@ themeToggle.onclick=()=>{
 let drag
 let dragImage
 let dragImageOffset={x:0,y:0}
+let columnMoveAnchor
 let workspaces=[]
 let activeWorkspace=''
 
@@ -831,6 +833,7 @@ document.addEventListener(
     if(!drag)
       return
 
+    columnMoveAnchor=null
     crearDragImage(drag,e)
     drag.classList.add('dragging')
   }
@@ -858,6 +861,7 @@ document.addEventListener(
     eliminarDragImage()
 
     drag=null
+    columnMoveAnchor=null
 
     guardar()
   }
@@ -912,6 +916,15 @@ document.addEventListener(
 
 
     if(drag.matches('.column')){
+
+      if(
+        columnMoveAnchor &&
+        Math.hypot(
+          e.clientX-columnMoveAnchor.x,
+          e.clientY-columnMoveAnchor.y
+        ) < COLUMN_MOVE_MARGIN
+      )
+        return
 
       let hovered=
         e.target.closest('.column')
@@ -973,6 +986,11 @@ document.addEventListener(
         target.after(drag)
       else
         target.before(drag)
+
+      columnMoveAnchor={
+        x:e.clientX,
+        y:e.clientY
+      }
     }
   }
 )
