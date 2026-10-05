@@ -2518,28 +2518,9 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     React.useEffect(() => {
       if (view === "kanban" && !statusColumns.length) setView("");
       if (view === "calendar" && !dateColumns.length) setView("");
-      if (view !== "table" && state.workspaceRecordOverlay) closeWorkspaceRecordOverlay();
     }, [view, statusColumns.length, dateColumns.length]);
 
-    const openRow = async (rowNumber) => {
-      if (hasSheetViewChanges || sheetViewSaving) {
-        setError("Guarda o cancela los cambios pendientes antes de abrir otra fila.");
-        return;
-      }
-      if (state.primaryDrafts.size || state.relatedDrafts.size) {
-        setError("Guarda o cancela los cambios pendientes antes de abrir otra fila.");
-        return;
-      }
-      try {
-        await drainSheetViewMutations();
-        await focusSheetRange(`A${rowNumber}`);
-        setView("");
-      } catch (focusError) {
-        setError(focusError.message);
-      }
-    };
-
-    const openWorkspaceRow = async (rowNumber) => {
+    const openSheetViewRow = async (rowNumber, target = workspaceTarget) => {
       if (hasSheetViewChanges || sheetViewSaving) {
         setError("Guarda o cancela los cambios pendientes antes de abrir otra fila.");
         return;
@@ -2551,7 +2532,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
       try {
         await drainSheetViewMutations();
         setError("");
-        await focusSheetRange(qualifiedReference(workspaceTarget.name, `A${rowNumber}`));
+        await focusSheetRange(qualifiedReference(target.name, `A${rowNumber}`));
         openWorkspaceRecordOverlay();
         setStatus(`Leyendo la fila ${rowNumber} desde tu sesiÃ³n de Googleâ€¦`, "busy");
         ui.fields.inert = true;
@@ -2561,14 +2542,14 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
           Date.now() < deadline
           && (
             selectedRow(nameBoxValue()) !== Number(rowNumber)
-            || normalizedColumn(activeSheetName()) !== normalizedColumn(workspaceTarget.name)
+            || normalizedColumn(activeSheetName()) !== normalizedColumn(target.name)
           )
         ) await wait(50);
         state.lastSelection = "";
         if (
           selectedRow(nameBoxValue()) === Number(rowNumber)
-          && normalizedColumn(activeSheetName()) === normalizedColumn(workspaceTarget.name)
-        ) await loadRow(Number(rowNumber), true, workspaceTarget);
+          && normalizedColumn(activeSheetName()) === normalizedColumn(target.name)
+        ) await loadRow(Number(rowNumber), true, target);
         else pollSelection();
       } catch (focusError) {
         closeWorkspaceRecordOverlay();
@@ -2681,7 +2662,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
         onClearRows: clearWorkspaceRows,
         onDocumentSelect: selectWorkspaceDocument,
         onHiddenColumnIdsChange: (hiddenColumnIds) => changeHiddenColumnIds(workspaceTarget.gid, workspaceTarget.name, hiddenColumnIds),
-        onOpenRow: openWorkspaceRow,
+        onOpenRow: openSheetViewRow,
         onSheetSelect: selectWorkspaceSheet,
         renderCalendar: (openWorkspaceRow, visibleColumns) => React.createElement(SheetCalendar, {
           table,
@@ -2735,7 +2716,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
             onColumnChange: (columnId) => setCurrentSheetViewSetting("kanbanColumnId", columnId),
             onLayoutChange: (name, value) => setCurrentSheetViewSetting(name, value),
             onMoveRow: moveRow,
-            onOpenRow: openRow
+            onOpenRow: (rowNumber) => openSheetViewRow(rowNumber, activeTarget)
           })
           : view === "calendar"
             ? React.createElement(SheetCalendar, {
@@ -2744,7 +2725,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
               visibleColumnIds: sourceColumns.map((column) => column.id),
               initialColumnId: currentSheetViewSettings().calendarColumnId || settings.calendarColumnId,
               onColumnChange: (columnId) => setCurrentSheetViewSetting("calendarColumnId", columnId),
-              onOpenRow: openRow
+              onOpenRow: (rowNumber) => openSheetViewRow(rowNumber, activeTarget)
             })
             : null;
 

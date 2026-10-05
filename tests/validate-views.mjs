@@ -1171,11 +1171,50 @@ try {
   let selected;
   while (Date.now() < rowDeadline) {
     selected = await cdp.evaluate(`({ box: document.getElementById("t-name-box").value, row: document.getElementById("sheets-session-probe").dataset.row })`);
-    if (selected.box === "A4" && selected.row === "4") break;
+    if ((selected.box === "A4" || selected.box.endsWith("!A4")) && selected.row === "4") break;
     await delay(100);
   }
-  if (selected?.box !== "A4" || selected.row !== "4") {
+  if ((!selected?.box || (selected.box !== "A4" && !selected.box.endsWith("!A4"))) || selected.row !== "4") {
     throw new Error(`La tarjeta no abrio su fila despues del guardado manual: ${JSON.stringify(selected)}`);
+  }
+
+  const readRecordOverlay = () => cdp.evaluate(`(() => {
+      const root = document.getElementById("sheets-session-probe").shadowRoot;
+      const panelFrame = root.querySelector(".panel-frame");
+      const viewFrame = root.querySelector(".sheet-view-frame");
+      const panel = panelFrame.contentDocument;
+      return {
+        overlay: panel.querySelector(".drawer")?.classList.contains("is-workspace-record-overlay") || false,
+        panelVisible: !panelFrame.hidden,
+        viewVisible: !viewFrame.hidden,
+        activeView: viewFrame.contentDocument.querySelector("[data-sheet-view-panel]")?.dataset.sheetViewPanel || ""
+      };
+    })()`);
+  let kanbanRecordOverlay;
+  const kanbanOverlayDeadline = Date.now() + 5_000;
+  while (Date.now() < kanbanOverlayDeadline) {
+    kanbanRecordOverlay = await readRecordOverlay();
+    if (kanbanRecordOverlay.overlay) break;
+    await delay(80);
+  }
+  if (!kanbanRecordOverlay.overlay || !kanbanRecordOverlay.panelVisible || !kanbanRecordOverlay.viewVisible || kanbanRecordOverlay.activeView !== "kanban") {
+    throw new Error(`Abrir una tarjeta cerro el Kanban en lugar de superponer el drawer: ${JSON.stringify(kanbanRecordOverlay)}`);
+  }
+  await cdp.evaluate(panelExpression('panel.querySelector(".drawer > header .close").click();'));
+  await delay(150);
+  const restoredKanban = await cdp.evaluate(`(() => {
+    const root = document.getElementById("sheets-session-probe").shadowRoot;
+    const panelFrame = root.querySelector(".panel-frame");
+    const viewFrame = root.querySelector(".sheet-view-frame");
+    return {
+      overlay: panelFrame.contentDocument.querySelector(".drawer")?.classList.contains("is-workspace-record-overlay") || false,
+      panelHidden: panelFrame.hidden,
+      viewVisible: !viewFrame.hidden,
+      activeView: viewFrame.contentDocument.querySelector("[data-sheet-view-panel]")?.dataset.sheetViewPanel || ""
+    };
+  })()`);
+  if (restoredKanban.overlay || !restoredKanban.panelHidden || !restoredKanban.viewVisible || restoredKanban.activeView !== "kanban") {
+    throw new Error(`Cerrar los detalles no restauro el Kanban: ${JSON.stringify(restoredKanban)}`);
   }
 
   await delay(250);
@@ -1274,11 +1313,38 @@ try {
   const calendarRowDeadline = Date.now() + 5_000;
   while (Date.now() < calendarRowDeadline) {
     selected = await cdp.evaluate(`({ box: document.getElementById("t-name-box").value, row: document.getElementById("sheets-session-probe").dataset.row })`);
-    if (selected.box === "A2" && selected.row === "2") break;
+    if ((selected.box === "A2" || selected.box.endsWith("!A2")) && selected.row === "2") break;
     await delay(100);
   }
-  if (selected?.box !== "A2" || selected.row !== "2") {
+  if ((!selected?.box || (selected.box !== "A2" && !selected.box.endsWith("!A2"))) || selected.row !== "2") {
     throw new Error(`El evento no abrio su fila: ${JSON.stringify(selected)}`);
+  }
+
+  let calendarRecordOverlay;
+  const calendarOverlayDeadline = Date.now() + 5_000;
+  while (Date.now() < calendarOverlayDeadline) {
+    calendarRecordOverlay = await readRecordOverlay();
+    if (calendarRecordOverlay.overlay) break;
+    await delay(80);
+  }
+  if (!calendarRecordOverlay.overlay || !calendarRecordOverlay.panelVisible || !calendarRecordOverlay.viewVisible || calendarRecordOverlay.activeView !== "calendar") {
+    throw new Error(`Abrir un evento cerro el Calendario en lugar de superponer el drawer: ${JSON.stringify(calendarRecordOverlay)}`);
+  }
+  await cdp.evaluate(panelExpression('panel.querySelector(".drawer > header .close").click();'));
+  await delay(150);
+  const restoredCalendar = await cdp.evaluate(`(() => {
+    const root = document.getElementById("sheets-session-probe").shadowRoot;
+    const panelFrame = root.querySelector(".panel-frame");
+    const viewFrame = root.querySelector(".sheet-view-frame");
+    return {
+      overlay: panelFrame.contentDocument.querySelector(".drawer")?.classList.contains("is-workspace-record-overlay") || false,
+      panelHidden: panelFrame.hidden,
+      viewVisible: !viewFrame.hidden,
+      activeView: viewFrame.contentDocument.querySelector("[data-sheet-view-panel]")?.dataset.sheetViewPanel || ""
+    };
+  })()`);
+  if (restoredCalendar.overlay || !restoredCalendar.panelHidden || !restoredCalendar.viewVisible || restoredCalendar.activeView !== "calendar") {
+    throw new Error(`Cerrar los detalles no restauro el Calendario: ${JSON.stringify(restoredCalendar)}`);
   }
 
   const removeFirstColumn = (row) => [row[1] || "", row[2] || "", row[3] || "", "", ""];
