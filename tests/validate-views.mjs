@@ -815,7 +815,7 @@ try {
     if (kanban.rows?.length === 3) break;
     await delay(100);
   }
-  if (!kanban.title.includes("Kanban") || kanban.rows.length !== 3 || kanban.groups[0]?.id !== "__empty__" || !kanban.groups.some((group) => group.id === "Nuevo" && group.count === 1) || !kanban.groups.some((group) => group.id === "__empty__" && group.count === 1)) {
+  if (!kanban.title.includes("Kanban") || kanban.rows.length !== 3 || kanban.groups[0]?.id !== "__empty__" || !kanban.groups.some((group) => group.id === "Nuevo" && group.count === 1) || !kanban.groups.some((group) => group.id === "__empty__" && group.count === 1) || kanban.groups.some((group) => group.id === "Cerrado")) {
     throw new Error(`Kanban no represento toda la hoja: ${JSON.stringify(kanban)}`);
   }
 
@@ -884,9 +884,7 @@ try {
   const rapidReturnOrigin = await cdp.evaluate(viewExpression(`return view.querySelector('.kanban-card-shell[data-sheet-row="2"]')?.closest('[data-kanban-group]')?.dataset.kanbanGroup || "";`));
   await cdp.evaluate(viewExpression(`
     const card = view.querySelector('.kanban-card-shell[data-sheet-row="2"]');
-    const target = [...view.querySelectorAll('[data-kanban-group]')]
-      .find((column) => column.dataset.kanbanGroup !== ${JSON.stringify(rapidReturnOrigin)})
-      ?.querySelector('.cards');
+    const target = view.querySelector('[data-kanban-group="__empty__"] .cards');
     const dataTransfer = new DataTransfer();
     card.dispatchEvent(new DragEvent('dragstart', { bubbles: true, cancelable: true, dataTransfer }));
     target.dispatchEvent(new DragEvent('dragover', {
@@ -1101,9 +1099,17 @@ try {
   if (!editedSelection.endsWith("!C3")) {
     throw new Error(`Kanban restauro la seleccion anterior en lugar de conservar la ultima celda editada: ${editedSelection}`);
   }
+  const groupsAfterSave = await cdp.evaluate(viewExpression(`return Array.from(
+    view.querySelectorAll('[data-kanban-group]'),
+    (group) => group.dataset.kanbanGroup
+  );`));
+  if (!groupsAfterSave.includes("__empty__") || groupsAfterSave.includes("Cerrado")) {
+    throw new Error(`Kanban conservo etapas ausentes del documento: ${JSON.stringify(groupsAfterSave)}`);
+  }
   const emptyDropHintHidden = await cdp.evaluate(viewExpression(`
     const card = view.querySelector('.kanban-card-shell[data-sheet-row="2"]');
     const target = view.querySelector('[data-kanban-group="__empty__"] .cards');
+    const hint = target.querySelector('.kanban-empty-drop');
     const dataTransfer = new DataTransfer();
     card.dispatchEvent(new DragEvent('dragstart', { bubbles: true, cancelable: true, dataTransfer }));
     target.dispatchEvent(new DragEvent('dragover', {
@@ -1112,7 +1118,7 @@ try {
       clientY: target.getBoundingClientRect().top + 120,
       dataTransfer
     }));
-    const hidden = getComputedStyle(target.querySelector('.kanban-empty-drop')).display === 'none';
+    const hidden = !hint.isConnected || getComputedStyle(hint).display === 'none';
     card.dispatchEvent(new DragEvent('dragend', { bubbles: true, cancelable: true, dataTransfer }));
     return hidden;
   `));

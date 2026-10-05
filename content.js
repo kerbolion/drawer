@@ -1551,7 +1551,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     );
   }
 
-  function SheetKanban({ table, columns, visibleColumnIds, initialColumnId, initialColumnsPerRow, initialGroupOrder, initialHeight, initialRowOrder, initialView, movingRows, onColumnChange, onLayoutChange, onMoveRow, onOpenRow }) {
+  function SheetKanban({ table, columns, visibleColumnIds, getDocumentColumnValues, initialColumnId, initialColumnsPerRow, initialGroupOrder, initialHeight, initialRowOrder, initialView, movingRows, onColumnChange, onLayoutChange, onMoveRow, onOpenRow }) {
     const statusColumns = columns.filter((column) => column.type === "status");
     const visibleIds = Array.isArray(visibleColumnIds) ? new Set(visibleColumnIds) : null;
     const displayColumns = visibleIds ? columns.filter((column) => visibleIds.has(column.id)) : columns;
@@ -1692,15 +1692,25 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
         - (orderIndex.get(right.number) ?? Number.MAX_SAFE_INTEGER)
         || left.number - right.number
       ));
-    const configuredGroups = propertyOptionEntries(statusColumn).map((option) => ({
-      id: option.label,
-      label: option.label,
-      color: option.color
-    }));
+    const documentValues = typeof getDocumentColumnValues === "function"
+      ? getDocumentColumnValues(statusColumn)
+      : rows.map((row) => row.cells[statusColumn.index]);
+    const documentGroups = new Set();
+    for (const documentValue of documentValues) {
+      const value = String(documentValue || "").trim();
+      if (value) documentGroups.add(value);
+    }
+    const configuredGroups = propertyOptionEntries(statusColumn)
+      .filter((option) => documentGroups.has(option.label))
+      .map((option) => ({
+        id: option.label,
+        label: option.label,
+        color: option.color
+      }));
     const knownGroups = new Set(configuredGroups.map((group) => group.id));
     const inferredGroups = [];
-    for (const row of filteredRows) {
-      const value = String(row.cells[statusColumn.index] || "").trim();
+    for (const documentValue of documentValues) {
+      const value = String(documentValue || "").trim();
       if (!value || knownGroups.has(value)) continue;
       knownGroups.add(value);
       inferredGroups.push({ id: value, label: value, color: "" });
@@ -2319,6 +2329,22 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
       };
     };
 
+    const sheetViewDocumentColumnValues = (property, target = activeTarget) => {
+      const valuesByRow = new Map((table?.rows || []).map((row) => [
+        Number(row.number),
+        String(row.cells[property.index] || "")
+      ]));
+      const targetKey = sheetViewTargetKey(target);
+      for (const draft of sheetViewDraftsRef.current.values()) {
+        if (
+          draft.targetKey === targetKey
+          && draft.pending
+          && Number(draft.property.index) === Number(property.index)
+        ) valuesByRow.set(Number(draft.row), String(draft.originalValue || ""));
+      }
+      return [...valuesByRow.values()];
+    };
+
     const syncSheetViewTable = (target = activeTarget) => {
       setTable((current) => tableWithSheetViewDrafts(current, target));
     };
@@ -2677,6 +2703,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
           table,
           columns: workspaceColumns,
           visibleColumnIds: visibleColumns.map((column) => column.id),
+          getDocumentColumnValues: (property) => sheetViewDocumentColumnValues(property, workspaceTarget),
           initialColumnId: state.workspace?.sheetViews?.[workspaceTarget.gid]?.kanbanColumnId,
           initialColumnsPerRow: state.workspace?.sheetViews?.[workspaceTarget.gid]?.kanbanColumns,
           initialGroupOrder: state.workspace?.sheetViews?.[workspaceTarget.gid]?.kanbanGroupOrder,
@@ -2703,6 +2730,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
             table,
             columns,
             visibleColumnIds: sourceColumns.map((column) => column.id),
+            getDocumentColumnValues: (property) => sheetViewDocumentColumnValues(property, activeTarget),
             initialColumnId: currentSheetViewSettings().kanbanColumnId || settings.kanbanColumnId,
             initialColumnsPerRow: currentSheetViewSettings().kanbanColumns || settings.kanbanColumns,
             initialGroupOrder: currentSheetViewSettings().kanbanGroupOrder,
