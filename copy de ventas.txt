@@ -22,7 +22,7 @@ ________________
 Kanban
 
 Organiza tus registros por etapas.
-Mueve clientes, oportunidades, pedidos o tareas de una columna a otra y mantén actualizada tu hoja automáticamente.
+Mueve clientes, oportunidades, pedidos o tareas de una columna a otra con una experiencia fluida y guarda todos los cambios en tu hoja cuando estés listo.
 ________________
 
 
@@ -55,7 +55,7 @@ Tu asistente de IA también puede trabajar con tus hojas
 
 Abrir CRM incluye un skill que permite a un asistente de IA autorizado trabajar directamente con el documento que tienes abierto.
 
-Puedes pedirle que lea tus datos, encuentre registros, agregue información, actualice campos o prepare nuevas hojas usando instrucciones normales.
+Puedes pedirle que lea tus datos, encuentre registros, agregue información, actualice campos o limpie contenido en las hojas existentes usando instrucciones normales.
 
 Sin copiar y pegar datos entre aplicaciones.
 Sin configurar Google APIs.
@@ -71,7 +71,7 @@ Pídele al asistente que:
 • Liste los registros usando los nombres reales de las columnas.
 • Busque clientes, tareas o movimientos mediante una o varias condiciones.
 • Revise una celda cuando necesites entender un valor o comportamiento particular.
-• Identifique la hoja activa y las demás hojas disponibles en el documento.
+• Identifique las hojas disponibles en el documento.
 
 Ejemplos:
 
@@ -101,26 +101,6 @@ Ejemplos:
 “Agrega estos diez contactos a la hoja Clientes.”
 “Cambia a Completada la tarea con ID T-104.”
 “Limpia las notas de los registros archivados.”
-________________
-
-
-Crea y organiza hojas completas
-
-El asistente también puede administrar las hojas que forman parte del documento.
-
-Puede:
-
-• Crear una hoja nueva.
-• Definir sus encabezados desde el primer momento.
-• Poblarla inmediatamente con registros.
-• Renombrarla conservando su identidad interna y configuración.
-• Eliminarla cuando se lo indiques expresamente.
-
-Las eliminaciones requieren una confirmación exacta y nunca se permite borrar la última hoja del documento.
-
-Ejemplo:
-
-“Crea una hoja llamada Oportunidades con las columnas ID, Cliente, Estado, Monto y Próximo seguimiento. Después agrega estos registros.”
 ________________
 
 
@@ -164,7 +144,7 @@ Formulario para trabajar registro por registro.
 Kanban para gestionar procesos.
 Calendario para organizar fechas.
 Relaciones para conectar información entre hojas.
-IA para consultar, crear y actualizar datos con instrucciones naturales.
+IA para consultar, agregar, actualizar y limpiar datos con instrucciones naturales.
 
 Todo conectado al mismo documento de Google Sheets.
 ________________
