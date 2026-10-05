@@ -578,21 +578,34 @@ document.addEventListener(
   'contextmenu',
   e=>{
 
+    let workspaceTab=
+      e.target.closest('.workspace-tab')
+
     let card=e.target.closest('.card')
     let column=e.target.closest('.column')
 
-    if(!column || !kanban.contains(column)){
+    if(
+      workspaceTab &&
+      workspaceTabs.contains(workspaceTab)
+    ){
+      e.preventDefault()
+      contextTarget=workspaceTab
+      deleteContext.textContent='Eliminar tablero'
+    }else if(
+      column &&
+      kanban.contains(column)
+    ){
+      e.preventDefault()
+      contextTarget=card || column
+
+      deleteContext.textContent=
+        card
+          ? 'Eliminar tarjeta'
+          : 'Eliminar columna'
+    }else{
       cerrarMenuContextual()
       return
     }
-
-    e.preventDefault()
-    contextTarget=card || column
-
-    deleteContext.textContent=
-      card
-        ? 'Eliminar tarjeta'
-        : 'Eliminar columna'
 
     contextMenu.hidden=false
 
@@ -617,10 +630,20 @@ deleteContext.onclick=async()=>{
 
   let target=contextTarget
   let card=target?.matches('.card')
-  let label=card
-    ? target.textContent.trim()
-    : target?.querySelector('h3')
+  let workspace=target?.matches('.workspace-tab')
+  let type=workspace
+    ? 'tablero'
+    : card
+      ? 'tarjeta'
+      : 'columna'
+
+  let label=workspace
+    ? target.querySelector('span')
         ?.textContent.trim()
+    : card
+      ? target.textContent.trim()
+      : target?.querySelector('h3')
+          ?.textContent.trim()
 
   cerrarMenuContextual()
 
@@ -628,12 +651,50 @@ deleteContext.onclick=async()=>{
     return
 
   let accepted=await pedirConfirmacion(
-    card ? 'Eliminar tarjeta' : 'Eliminar columna',
-    `Vas a eliminar ${card ? 'la tarjeta' : 'la columna'} "${label || ''}". Esta accion no se puede deshacer.`
+    `Eliminar ${type}`,
+    `Vas a eliminar ${type==='tablero' ? 'el' : 'la'} ${type} "${label || ''}". Esta accion no se puede deshacer.`
   )
 
   if(!accepted || !target.isConnected)
     return
+
+  if(workspace){
+    let id=target.dataset.workspace
+    let index=workspaces.findIndex(
+      item=>item.id===id
+    )
+
+    workspaces=workspaces.filter(
+      item=>item.id!==id
+    )
+
+    if(!workspaces.length)
+      workspaces.push({
+        id:crypto.randomUUID?.() ||
+          `workspace-${Date.now()}`,
+        title:'Tablero 1',
+        board:[{
+          title:'Nueva columna',
+          cards:[]
+        }]
+      })
+
+    if(id===activeWorkspace){
+      let next=workspaces[
+        Math.min(
+          Math.max(index,0),
+          workspaces.length-1
+        )
+      ]
+
+      activeWorkspace=next.id
+      dibujarTablero(next.board)
+    }
+
+    ajustarColumnas()
+    guardar()
+    return
+  }
 
   target.remove()
   ajustarColumnas()

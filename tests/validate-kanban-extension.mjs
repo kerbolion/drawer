@@ -338,7 +338,70 @@ try {
     throw new Error(`Las eliminaciones no persistieron: ${JSON.stringify({ deletion, deletionRestored })}`);
   }
 
-  console.log("KANBAN_EXTENSION_OK: pestaña completa, scroll estable, menu contextual y persistencia confirmados.");
+  const boardDeletion = await cdp.evaluate(`(async()=>{
+    let initialWorkspaces=document.querySelectorAll('.workspace-tab').length
+    document.querySelector('.add-workspace').click()
+    await new Promise(resolve=>requestAnimationFrame(resolve))
+    document.querySelector('#confirm-input').value='Tablero temporal'
+    document.querySelector('#accept-confirm').click()
+    await new Promise(resolve=>setTimeout(resolve,80))
+
+    let createdWorkspaces=document.querySelectorAll('.workspace-tab').length
+    let active=document.querySelector('.workspace-tab.active')
+    let deletedId=active.dataset.workspace
+    active.dispatchEvent(new MouseEvent('contextmenu',{
+      bubbles:true,
+      cancelable:true,
+      clientX:60,
+      clientY:30
+    }))
+    let menu=document.querySelector('#delete-context').textContent.trim()
+    document.querySelector('#delete-context').click()
+    await new Promise(resolve=>requestAnimationFrame(resolve))
+    let modal=document.querySelector('#confirm-title').textContent.trim()
+    document.querySelector('#accept-confirm').click()
+    await new Promise(resolve=>setTimeout(resolve,80))
+
+    let stored=(await chrome.storage.local.get(['kanban-data']))['kanban-data']
+    return {
+      initialWorkspaces,
+      createdWorkspaces,
+      workspaces:document.querySelectorAll('.workspace-tab').length,
+      activeId:document.querySelector('.workspace-tab.active')?.dataset.workspace || '',
+      deletedId,
+      storedWorkspaces:stored.workspaces.length,
+      storedActive:stored.activeWorkspace,
+      menu,
+      modal
+    }
+  })()`);
+
+  if (
+    boardDeletion.createdWorkspaces !== boardDeletion.initialWorkspaces + 1 ||
+    boardDeletion.workspaces !== boardDeletion.initialWorkspaces ||
+    boardDeletion.storedWorkspaces !== boardDeletion.workspaces ||
+    boardDeletion.activeId === boardDeletion.deletedId ||
+    boardDeletion.storedActive !== boardDeletion.activeId ||
+    boardDeletion.menu !== "Eliminar tablero" ||
+    boardDeletion.modal !== "Eliminar tablero"
+  ) {
+    throw new Error(`El menu contextual no elimino el tablero: ${JSON.stringify(boardDeletion)}`);
+  }
+
+  cdp.reload();
+  await delay(500);
+  const boardDeletionRestored = await cdp.evaluate(`({
+    workspaces:document.querySelectorAll('.workspace-tab').length,
+    activeId:document.querySelector('.workspace-tab.active')?.dataset.workspace || ''
+  })`);
+  if (
+    boardDeletionRestored.workspaces !== boardDeletion.workspaces ||
+    boardDeletionRestored.activeId !== boardDeletion.activeId
+  ) {
+    throw new Error(`La eliminacion del tablero no persistio: ${JSON.stringify({ boardDeletion, boardDeletionRestored })}`);
+  }
+
+  console.log("KANBAN_EXTENSION_OK: scroll, menus de tarjeta, columna y tablero, y persistencia confirmados.");
 } finally {
   cdp?.close();
   browser.kill();
