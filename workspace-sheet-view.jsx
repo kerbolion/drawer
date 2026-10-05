@@ -11,10 +11,8 @@ import {
   CalendarOutlined,
   CloseOutlined,
   DeleteOutlined,
-  DownOutlined,
   EyeInvisibleOutlined,
   FileTextOutlined,
-  FolderOpenOutlined,
   ProfileOutlined,
   PlusOutlined,
   SearchOutlined,
@@ -46,85 +44,6 @@ function fieldDisplay(value, property) {
     return checked ? "Sí" : "No";
   }
   return source.replace(/\s*\n\s*/g, " ");
-}
-
-function Sidebar({ documents, currentDocumentId, selectedSheetGid, onDocumentSelect, onSheetSelect }) {
-  const [expanded, setExpanded] = React.useState(() => new Set([currentDocumentId]));
-
-  React.useEffect(() => {
-    setExpanded((current) => {
-      if (current.has(currentDocumentId)) return current;
-      return new Set([...current, currentDocumentId]);
-    });
-  }, [currentDocumentId]);
-
-  const toggle = (id) => {
-    setExpanded((current) => {
-      const next = new Set(current);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  };
-
-  return React.createElement(
-    "aside",
-    { className: "workspace-browser-sidebar", "aria-label": "Documentos y hojas" },
-    React.createElement("div", { className: "workspace-browser-sidebar-title" }, "Documentos"),
-    React.createElement(
-      "nav",
-      { className: "workspace-browser-tree" },
-      ...documents.map((documentItem) => {
-        const isExpanded = expanded.has(documentItem.id);
-        const isCurrent = documentItem.id === currentDocumentId;
-        return React.createElement(
-          "section",
-          { className: "workspace-browser-document", key: documentItem.id },
-          React.createElement(
-            "div",
-            { className: `workspace-browser-document-row ${isCurrent ? "is-current" : ""}`.trim() },
-            React.createElement(Button, {
-              type: "text",
-              size: "small",
-              className: "workspace-browser-tree-toggle",
-              icon: React.createElement(DownOutlined),
-              "aria-label": isExpanded ? "Contraer documento" : "Expandir documento",
-              onClick: () => toggle(documentItem.id),
-              style: { transform: isExpanded ? "none" : "rotate(-90deg)" }
-            }),
-            React.createElement(
-              "button",
-              {
-                className: "workspace-browser-document-button",
-                type: "button",
-                title: documentItem.name,
-                onClick: () => onDocumentSelect(documentItem)
-              },
-              React.createElement(FolderOpenOutlined),
-              React.createElement("span", null, documentItem.name)
-            )
-          ),
-          isExpanded ? React.createElement(
-            "div",
-            { className: "workspace-browser-sheets" },
-            ...(documentItem.sheets?.length
-              ? documentItem.sheets.map((sheet) => React.createElement(
-                "button",
-                {
-                  className: `workspace-browser-sheet ${isCurrent && String(sheet.gid) === String(selectedSheetGid) ? "is-active" : ""}`.trim(),
-                  type: "button",
-                  key: `${documentItem.id}:${sheet.gid}`,
-                  onClick: () => isCurrent ? onSheetSelect(sheet) : onDocumentSelect(documentItem, sheet)
-                },
-                React.createElement(TableOutlined),
-                React.createElement("span", null, sheet.name)
-              ))
-              : [React.createElement("span", { className: "workspace-browser-no-sheets", key: "empty" }, "Sin hojas configuradas")])
-          ) : null
-        );
-      })
-    )
-  );
 }
 
 function Filters({ columns, filters, onChange }) {
@@ -487,18 +406,14 @@ function TableView({ columns, hiddenColumnIds, table, renderEditor, renderTypeIc
 
 export function WorkspaceSheetView({
   columns,
-  currentDocumentId,
-  documents,
   error,
   hiddenColumnIds,
   loading,
   onAddRow,
   onCellChange,
   onClearRows,
-  onDocumentSelect,
   onHiddenColumnIdsChange,
   onOpenRow,
-  onSheetSelect,
   renderCalendar,
   renderEditor,
   renderTypeIcon,
@@ -528,13 +443,6 @@ export function WorkspaceSheetView({
   return React.createElement(
     "div",
     { className: "workspace-browser", "data-workspace-browser": "" },
-    React.createElement(Sidebar, {
-      documents,
-      currentDocumentId,
-      selectedSheetGid,
-      onDocumentSelect,
-      onSheetSelect
-    }),
     React.createElement(
       "section",
       { className: "workspace-browser-main" },

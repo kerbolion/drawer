@@ -43,7 +43,8 @@ const webServer = http.createServer((request, response) => {
   if (url.pathname.endsWith("/edit")) {
     response.end(`<!doctype html><html><body>
       <input id="t-name-box" value="A2">
-      <div class="docs-sheet-tab docs-sheet-active-tab"><span class="docs-sheet-tab-name">Contactos</span></div>
+      <div class="docs-sheet-tab docs-sheet-active-tab" data-gid="0"><span class="docs-sheet-tab-name">Contactos</span></div>
+      <div class="docs-sheet-tab" data-gid="1"><span class="docs-sheet-tab-name">Servicios</span></div>
       <script>
         globalThis.__lastPaste = null;
         globalThis.__pastes = [];
@@ -225,7 +226,9 @@ try {
         viewZIndex: Number(getComputedStyle(viewFrame).zIndex),
         launcherZIndex: Number(getComputedStyle(root.querySelector(".reopen")).zIndex),
         browser: Boolean(view.querySelector("[data-workspace-browser]")),
-        documents: Array.from(view.querySelectorAll(".workspace-browser-document-button"), item => item.textContent.trim()),
+        browserWidth: view.querySelector("[data-workspace-browser]")?.getBoundingClientRect().width || 0,
+        sidebar: Boolean(view.querySelector(".workspace-browser-sidebar")),
+        documentName: view.querySelector(".workspace-document-name")?.textContent.trim() || "",
         sheets: Array.from(view.querySelectorAll(".workspace-browser-sheet"), item => item.textContent.trim()),
         activeView: view.querySelector("[data-workspace-view].ant-btn-primary")?.dataset.workspaceView || "",
         deckRows: Array.from(view.querySelectorAll("[data-workspace-deck-row]"), row => row.dataset.workspaceDeckRow),
@@ -235,8 +238,28 @@ try {
     if (workspaceTable.deckRows?.length === 3) break;
     await delay(100);
   }
-  if (!workspaceTable.mainHidden || !workspaceTable.viewOpen || workspaceTable.viewWidth !== workspaceTable.viewportWidth || workspaceTable.launcherZIndex >= workspaceTable.viewZIndex || workspaceTable.antDrawer || !workspaceTable.browser || workspaceTable.documents.length !== 1 || !workspaceTable.sheets.includes("Contactos") || workspaceTable.activeView !== "deck" || JSON.stringify(workspaceTable.deckRows) !== JSON.stringify(["2", "3", "4"])) {
+  if (!workspaceTable.mainHidden || !workspaceTable.viewOpen || workspaceTable.viewWidth !== workspaceTable.viewportWidth || workspaceTable.browserWidth !== workspaceTable.viewportWidth || workspaceTable.launcherZIndex >= workspaceTable.viewZIndex || workspaceTable.antDrawer || !workspaceTable.browser || workspaceTable.sidebar || workspaceTable.documentName !== "Documento actual" || JSON.stringify(workspaceTable.sheets) !== JSON.stringify(["Contactos", "Servicios"]) || workspaceTable.activeView !== "deck" || JSON.stringify(workspaceTable.deckRows) !== JSON.stringify(["2", "3", "4"])) {
     throw new Error(`La vista Deck no cargo el documento, la hoja y sus registros: ${JSON.stringify(workspaceTable)}`);
+  }
+
+  await cdp.evaluate(viewExpression(`Array.from(view.querySelectorAll(".workspace-browser-sheet"))
+    .find((button) => button.textContent.trim() === "Servicios")?.click();`));
+  const secondSheetDeadline = Date.now() + 5_000;
+  let selectedSecondSheet = "";
+  while (Date.now() < secondSheetDeadline) {
+    selectedSecondSheet = await cdp.evaluate(viewExpression('return view.querySelector(".workspace-browser-sheet.is-active")?.textContent.trim() || "";'));
+    if (selectedSecondSheet === "Servicios") break;
+    await delay(80);
+  }
+  if (selectedSecondSheet !== "Servicios") throw new Error(`Los botones superiores no cambiaron de hoja: ${selectedSecondSheet}`);
+
+  await cdp.evaluate(viewExpression(`Array.from(view.querySelectorAll(".workspace-browser-sheet"))
+    .find((button) => button.textContent.trim() === "Contactos")?.click();`));
+  const firstSheetDeadline = Date.now() + 5_000;
+  while (Date.now() < firstSheetDeadline) {
+    const selected = await cdp.evaluate(viewExpression('return view.querySelector(".workspace-browser-sheet.is-active")?.textContent.trim() || "";'));
+    if (selected === "Contactos") break;
+    await delay(80);
   }
 
   await cdp.evaluate(viewExpression('view.querySelector(".workspace-browser-sheet.is-active").click();'));

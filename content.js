@@ -812,30 +812,20 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     .sheet-view-root { width: 100%; height: 100%; }
     .sheet-view-panel { display: flex; width: 100%; height: 100%; min-width: 0; min-height: 0; flex-direction: column; background: var(--workspace-bg); }
     .sheet-view-panel-header { display: flex; flex: 0 0 auto; min-height: 54px; align-items: center; justify-content: space-between; gap: 16px; padding: 10px 18px; border-bottom: 1px solid var(--workspace-border); background: var(--workspace-surface); }
-    .sheet-view-panel-title { display: flex; min-width: 0; align-items: center; gap: 10px; color: var(--workspace-text); font-size: 16px; font-weight: 700; }
-    .sheet-view-panel-title > span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .sheet-view-panel-title { display: flex; flex: 1 1 auto; min-width: 0; align-items: center; gap: 10px; color: var(--workspace-text); font-size: 16px; font-weight: 700; }
+    .workspace-document-name { flex: 0 1 auto; max-width: min(320px, 28vw); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .sheet-view-panel-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 8px; }
     .sheet-view-panel-actions .save-state { margin: 0 2px; }
     .sheet-view-panel.is-saving .sheet-view-panel-body { pointer-events: none; }
     .sheet-view-panel-body { display: flex; flex: 1; min-width: 0; min-height: 0; overflow: hidden; }
     .sheet-view-surface { display: flex; width: 100%; height: 100%; min-width: 0; min-height: 0; flex-direction: column; }
-    .workspace-browser { display: grid; width: 100%; height: 100%; min-width: 0; min-height: 0; grid-template-columns: 248px minmax(0, 1fr); background: var(--workspace-bg); }
-    .workspace-browser-sidebar { min-width: 0; overflow: auto; padding: 14px 10px; border-right: 1px solid var(--workspace-border); background: var(--workspace-surface); }
-    .workspace-browser-sidebar-title { padding: 0 10px 10px; color: var(--workspace-text-muted); font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
-    .workspace-browser-tree { display: grid; gap: 5px; }
-    .workspace-browser-document { min-width: 0; }
-    .workspace-browser-document-row { display: flex; min-width: 0; align-items: center; border-radius: 6px; }
-    .workspace-browser-document-row:hover, .workspace-browser-document-row.is-current { background: var(--workspace-surface-muted); }
-    .workspace-browser-tree-toggle { flex: 0 0 auto; transition: transform 140ms ease; }
-    .workspace-browser-document-button, .workspace-browser-sheet { display: flex; min-width: 0; align-items: center; gap: 8px; border: 0; background: transparent; color: var(--workspace-text-body); cursor: pointer; text-align: left; }
-    .workspace-browser-document-button { flex: 1; padding: 8px 8px 8px 0; font-weight: 700; }
-    .workspace-browser-document-button span, .workspace-browser-sheet span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .workspace-browser-sheets { display: grid; gap: 3px; padding: 3px 0 5px 34px; }
-    .workspace-browser-sheet { width: 100%; padding: 8px 10px; border-radius: 6px; color: var(--workspace-text-secondary); }
+    .workspace-browser { display: flex; width: 100%; height: 100%; min-width: 0; min-height: 0; background: var(--workspace-bg); }
+    .workspace-browser-sheets { display: flex; flex: 1 1 auto; min-width: 0; align-items: center; gap: 4px; overflow-x: auto; padding: 2px 0; }
+    .workspace-browser-sheet { display: inline-flex; flex: 0 0 auto; min-width: 0; max-width: 220px; align-items: center; gap: 7px; border: 0; border-radius: 6px; padding: 7px 10px; background: transparent; color: var(--workspace-text-secondary); cursor: pointer; }
+    .workspace-browser-sheet span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .workspace-browser-sheet:hover { background: var(--workspace-surface-muted); color: var(--workspace-primary); }
     .workspace-browser-sheet.is-active { background: var(--workspace-primary-soft); color: var(--workspace-primary); font-weight: 700; }
-    .workspace-browser-no-sheets { padding: 7px 10px; color: var(--workspace-text-disabled); font-size: 11px; }
-    .workspace-browser-main { position: relative; display: flex; min-width: 0; min-height: 0; flex-direction: column; overflow: hidden; }
+    .workspace-browser-main { position: relative; display: flex; width: 100%; min-width: 0; min-height: 0; flex-direction: column; overflow: hidden; }
     .workspace-board-header { display: flex; flex: 0 0 auto; min-height: 60px; align-items: center; justify-content: space-between; gap: 18px; padding: 10px 16px; border-bottom: 1px solid var(--workspace-border); background: var(--workspace-surface); }
     .workspace-board-heading { display: flex; min-width: 0; align-items: baseline; gap: 10px; }
     .workspace-board-heading h2 { margin: 0; overflow: hidden; color: var(--workspace-text); font-size: 17px; text-overflow: ellipsis; white-space: nowrap; }
@@ -891,7 +881,9 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     .workspace-deck-field > span:not(.property-type-icon), .workspace-deck-empty { color: var(--workspace-text-muted); font-size: 11px; }
     .workspace-deck-field strong { overflow: hidden; color: var(--workspace-text); font-size: 13px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
     @media (max-width: 820px) {
-      .workspace-browser { grid-template-columns: 190px minmax(0, 1fr); }
+      .sheet-view-panel-header { align-items: flex-start; flex-wrap: wrap; }
+      .sheet-view-panel-title { flex-basis: 100%; }
+      .workspace-document-name { max-width: 40vw; }
       .workspace-board-header { align-items: flex-start; flex-direction: column; }
       .workspace-deck-toolbar { align-items: stretch; flex-direction: column; }
       .workspace-deck-toolbar .ant-input-affix-wrapper { width: 100% !important; }
@@ -2225,11 +2217,6 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     const [workspaceTarget, setWorkspaceTarget] = React.useState(() => ({ gid: drawerGid(), name: sheetName }));
     const [workspaceColumns, setWorkspaceColumns] = React.useState(columns);
     const [workspaceLoadRevision, setWorkspaceLoadRevision] = React.useState(0);
-    const [documents, setDocuments] = React.useState(() => [{
-      id: spreadsheetId(),
-      name: workspaceDocumentName(),
-      sheets: workspaceSheetList()
-    }]);
     const sheetViewDraftsRef = React.useRef(new Map());
     const sourceSheetKeyRef = React.useRef(sheetKey);
     const [, setSheetViewDraftVersion] = React.useState(0);
@@ -2252,11 +2239,6 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
       setSheetViewSaveError(false);
       setWorkspaceTarget({ gid: drawerGid(), name: sheetName });
       setWorkspaceColumns(columns);
-      setDocuments((current) => [{
-        id: spreadsheetId(),
-        name: current.find((item) => item.id === spreadsheetId())?.name || workspaceDocumentName(),
-        sheets: workspaceSheetList()
-      }, ...current.filter((item) => item.id !== spreadsheetId())]);
     }, [sheetKey, view]);
 
     const activeTarget = view === "table" ? workspaceTarget : { gid: drawerGid(), name: sheetName };
@@ -2445,7 +2427,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
 
     React.useLayoutEffect(() => {
       const title = view === "table"
-        ? `Tabla · ${workspaceTarget.name}`
+        ? workspaceDocumentName()
         : `${view === "kanban" ? "Kanban" : "Calendario"} · ${sheetName}`;
       setSheetViewHostOpen(Boolean(view), title);
       return () => setSheetViewHostOpen(false);
@@ -2454,7 +2436,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     React.useEffect(() => {
       if (!view) return;
       sheetViewFrame.title = view === "table"
-        ? `Tabla · ${workspaceTarget.name}`
+        ? workspaceDocumentName()
         : `${view === "kanban" ? "Kanban" : "Calendario"} · ${sheetName}`;
     }, [view, workspaceTarget.name, sheetName]);
 
@@ -2486,34 +2468,6 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
         setActivity("views", false);
       };
     }, [view, refreshKey, activeTarget.gid, activeTarget.name, workspaceLoadRevision]);
-
-    React.useEffect(() => {
-      if (view !== "table") return undefined;
-      let active = true;
-      const currentId = spreadsheetId();
-      const currentDocument = { id: currentId, name: workspaceDocumentName(), sheets: workspaceSheetList() };
-      setDocuments((items) => [currentDocument, ...items.filter((item) => item.id !== currentId)]);
-      void (async () => {
-        const result = await cloudMessage("workspace.list");
-        if (!active || !result?.ok || !Array.isArray(result.workspaces)) return;
-        const remoteDocuments = await Promise.all(result.workspaces.map(async (item) => {
-          const id = String(item.spreadsheet_id || item.spreadsheetId || "");
-          if (!id || id === currentId) return currentDocument;
-          const detail = await cloudMessage("workspace.get", { spreadsheetId: id });
-          const remoteWorkspace = detail?.ok && detail.found ? normalizeWorkspace(detail.workspace) : null;
-          return {
-            id,
-            name: String(item.name || detail?.name || "Documento sin nombre"),
-            sheets: Object.entries(remoteWorkspace?.sheets || {}).map(([gid, sheet]) => ({ gid, name: sheet.name }))
-          };
-        }));
-        if (!active) return;
-        const unique = new Map([[currentId, currentDocument]]);
-        for (const item of remoteDocuments) if (item?.id) unique.set(item.id, item.id === currentId ? currentDocument : item);
-        setDocuments([...unique.values()]);
-      })();
-      return () => { active = false; };
-    }, [view]);
 
     React.useEffect(() => {
       if (view === "kanban" && !statusColumns.length) setView("");
@@ -2639,31 +2593,17 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
       setError("");
     };
 
-    const selectWorkspaceDocument = (documentItem, targetSheet = null) => {
-      if (!documentItem?.id || documentItem.id === spreadsheetId()) return;
-      if (hasSheetViewChanges || sheetViewSaving) {
-        setError("Guarda o cancela los cambios pendientes antes de cambiar de documento.");
-        return;
-      }
-      const gid = targetSheet?.gid ? `#gid=${encodeURIComponent(targetSheet.gid)}` : "";
-      location.assign(`https://docs.google.com/spreadsheets/d/${encodeURIComponent(documentItem.id)}/edit${gid}`);
-    };
-
     const content = view === "table"
       ? React.createElement(WorkspaceSheetView, {
         columns: workspaceColumns,
-        currentDocumentId: spreadsheetId(),
-        documents,
         error,
         hiddenColumnIds: sheetHiddenColumnIds(workspaceTarget.gid, workspaceTarget.name),
         loading: loading && !table,
         onAddRow: addWorkspaceRow,
         onCellChange: editWorkspaceCell,
         onClearRows: clearWorkspaceRows,
-        onDocumentSelect: selectWorkspaceDocument,
         onHiddenColumnIdsChange: (hiddenColumnIds) => changeHiddenColumnIds(workspaceTarget.gid, workspaceTarget.name, hiddenColumnIds),
         onOpenRow: openSheetViewRow,
-        onSheetSelect: selectWorkspaceSheet,
         renderCalendar: (openWorkspaceRow, visibleColumns) => React.createElement(SheetCalendar, {
           table,
           columns: workspaceColumns,
@@ -2786,9 +2726,28 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
               "div",
               { className: "sheet-view-panel-title" },
               React.createElement(view === "table" ? TableOutlined : view === "kanban" ? AppstoreOutlined : CalendarOutlined),
-              React.createElement("span", null, view === "table"
-                ? `Tabla · ${workspaceTarget.name}`
-                : `${view === "kanban" ? "Kanban" : "Calendario"} · ${sheetName}`)
+              React.createElement("span", { className: view === "table" ? "workspace-document-name" : undefined }, view === "table"
+                ? workspaceDocumentName()
+                : `${view === "kanban" ? "Kanban" : "Calendario"} · ${sheetName}`),
+              view === "table" ? React.createElement(
+                "nav",
+                { className: "workspace-browser-sheets", "aria-label": "Hojas del documento" },
+                ...workspaceSheetList().map((sheet) => {
+                  const active = String(sheet.gid) === String(workspaceTarget.gid)
+                    && normalizedColumn(sheet.name) === normalizedColumn(workspaceTarget.name);
+                  return React.createElement(
+                    "button",
+                    {
+                      className: `workspace-browser-sheet ${active ? "is-active" : ""}`.trim(),
+                      type: "button",
+                      key: `${sheet.gid}:${sheet.name}`,
+                      onClick: () => selectWorkspaceSheet(sheet)
+                    },
+                    React.createElement(TableOutlined),
+                    React.createElement("span", null, sheet.name)
+                  );
+                })
+              ) : null
             ),
             React.createElement(
               "div",
