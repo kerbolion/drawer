@@ -837,7 +837,7 @@ try {
     { operator: "lte", value: 7, color: "#ffe58f" },
     { operator: "gt", value: 7, color: "#b7eb8f" }
   ])) {
-    throw new Error(`Fecha final no mostro sus colores por duracion: ${JSON.stringify(finalDateRules)}`);
+    throw new Error(`Fecha final no mostro sus colores por dias restantes: ${JSON.stringify(finalDateRules)}`);
   }
   await cdp.evaluate(panelExpression(`
     const input = panel.querySelector('.days-rule-row input[role="spinbutton"]');
@@ -852,19 +852,52 @@ try {
     panel.querySelector('#srd-property-form').requestSubmit();
     return rules;
   `));
-  if (editedDateRules[0]?.value !== 2) throw new Error(`Editar una regla de duracion no actualizo el formulario: ${JSON.stringify(editedDateRules)}`);
+  if (editedDateRules[0]?.value !== 2) throw new Error(`Editar una regla de dias restantes no actualizo el formulario: ${JSON.stringify(editedDateRules)}`);
   await delay(180);
   const persistedDateRule = await cdp.evaluate(panelExpression(`
     panel.querySelector('[data-configure-column="2"]').click();
     return JSON.parse(panel.querySelector('[name="dateRangeRules"]')?.value || '[]')[0]?.value;
   `));
-  if (persistedDateRule !== 2) throw new Error(`La regla de duracion de Fecha final no persistio: ${persistedDateRule}`);
+  if (persistedDateRule !== 2) throw new Error(`La regla de dias restantes de Fecha final no persistio: ${persistedDateRule}`);
   await cdp.evaluate(panelExpression('panel.querySelector(".property-actions .secondary-button").click();'));
   const timelineViews = await cdp.evaluate(panelExpression('return Array.from(panel.querySelectorAll("[data-sheet-view]"), button => button.dataset.sheetView);'));
   if (JSON.stringify(timelineViews) !== JSON.stringify(["table", "kanban", "calendar", "timeline", "charts"])) {
     throw new Error(`Cronograma aparecio sin sus dos claves de fecha: ${JSON.stringify(timelineViews)}`);
   }
   await cdp.evaluate(`window.postMessage({ source: "sheets-row-drawer", type: "sheet-change" }, location.origin)`, isolated.executionContextId);
+  await delay(5_100);
+  await cdp.evaluate(panelExpression('panel.querySelector("[data-sheet-view=calendar]").click();'));
+  await delay(180);
+  await cdp.evaluate(viewExpression(`
+    view.querySelector('.calendar-view .ant-select-selector').dispatchEvent(new MouseEvent('mousedown', {
+      bubbles: true,
+      button: 0
+    }));
+  `));
+  await delay(80);
+  await cdp.evaluate(viewExpression(`
+    const option = Array.from(view.querySelectorAll('.ant-select-item-option')).find(item => item.textContent.trim() === 'Nombre');
+    option?.dispatchEvent(new MouseEvent('click', { bubbles: true, button: 0 }));
+  `));
+  const remainingColorsDeadline = Date.now() + 5_000;
+  let calendarRemainingColors;
+  while (Date.now() < remainingColorsDeadline) {
+    calendarRemainingColors = await cdp.evaluate(viewExpression(`return Object.fromEntries(
+      Array.from(view.querySelectorAll('.calendar-item'), item => [item.dataset.sheetRow, item.style.backgroundColor])
+    );`));
+    if (calendarRemainingColors?.["2"] && calendarRemainingColors?.["3"]) break;
+    await delay(80);
+  }
+  if (calendarRemainingColors?.["2"] !== "rgb(145, 202, 255)" || calendarRemainingColors?.["3"] !== "rgb(183, 235, 143)") {
+    const calendarDiagnostics = await cdp.evaluate(viewExpression(`return {
+      text: view.querySelector('.calendar-view')?.textContent || '',
+      selection: view.querySelector('.calendar-view .ant-select-selection-item')?.textContent || '',
+      options: Array.from(view.querySelectorAll('.ant-select-item-option'), item => item.textContent.trim())
+    };`));
+    throw new Error(`Calendario no calculo los colores desde los dias restantes: ${JSON.stringify({ calendarRemainingColors, calendarDiagnostics })}`);
+  }
+  await cdp.evaluate(viewExpression('view.querySelector("[data-close-sheet-view]").click();'));
+  await delay(150);
   const timelineButtonDeadline = Date.now() + 5_000;
   while (Date.now() < timelineButtonDeadline) {
     const ready = await cdp.evaluate(panelExpression('return Boolean(panel.querySelector("[data-sheet-view=timeline]"));'));
@@ -888,7 +921,7 @@ try {
     if (timeline?.rows?.length === 2) break;
     await delay(80);
   }
-  if (timeline.panel !== "timeline" || !timeline.title.includes("Cronograma") || JSON.stringify(timeline.roles) !== JSON.stringify(["Inicio: Fecha", "Fin: Nombre"]) || timeline.month !== "octubre 2026" || JSON.stringify(timeline.rows) !== JSON.stringify(["2", "3"]) || JSON.stringify(timeline.colors) !== JSON.stringify(["rgb(255, 229, 143)", "rgb(255, 229, 143)"]) || timeline.handles !== 4) {
+  if (timeline.panel !== "timeline" || !timeline.title.includes("Cronograma") || JSON.stringify(timeline.roles) !== JSON.stringify(["Inicio: Fecha", "Fin: Nombre"]) || timeline.month !== "octubre 2026" || JSON.stringify(timeline.rows) !== JSON.stringify(["2", "3"]) || JSON.stringify(timeline.colors) !== JSON.stringify(["rgb(145, 202, 255)", "rgb(183, 235, 143)"]) || timeline.handles !== 4) {
     throw new Error(`Cronograma no uso las claves de fecha configuradas: ${JSON.stringify(timeline)}`);
   }
   const timelineResize = await cdp.evaluate(viewExpression(`

@@ -1363,7 +1363,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
       React.createElement(
         "div",
         { className: "option-editor-header" },
-        React.createElement("span", null, "Colores por duración en días"),
+        React.createElement("span", null, "Colores por días restantes"),
         React.createElement(Button, {
           type: "link",
           htmlType: "button",
@@ -2268,7 +2268,6 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     ));
     const [currentMonth, setCurrentMonth] = React.useState(() => dayjs().startOf("month"));
     const dateColumn = dateColumns.find((column) => column.id === columnId) || dateColumns[0];
-    const { start: timelineStartColumn } = timelineDateColumns(columns);
 
     React.useEffect(() => {
       if (!dateColumns.some((column) => column.id === columnId)) {
@@ -2287,13 +2286,8 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
       const key = dateInputValue(row.cells[dateColumn.index], dateColumn.dateFormat);
       if (!key) continue;
       if (!rowsByDate[key]) rowsByDate[key] = [];
-      const color = dateColumn.dateTimelineRole === "end" && timelineStartColumn
-        ? matchingDateRangeRule(
-          timelineStartColumn,
-          dateColumn,
-          row.cells[timelineStartColumn.index],
-          row.cells[dateColumn.index]
-        )?.color
+      const color = dateColumn.dateTimelineRole === "end"
+        ? matchingRemainingDaysRule(dateColumn, row.cells[dateColumn.index])?.color
         : "";
       rowsByDate[key].push({ row, color });
     }
@@ -2404,11 +2398,10 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     return false;
   }
 
-  function matchingDateRangeRule(startColumn, endColumn, startValue, endValue) {
-    const start = dayjs(dateInputValue(startValue, startColumn.dateFormat));
-    const end = dayjs(dateInputValue(endValue, endColumn.dateFormat));
-    if (!start.isValid() || !end.isValid() || end.isBefore(start, "day")) return null;
-    const days = end.diff(start, "day") + 1;
+  function matchingRemainingDaysRule(endColumn, endValue) {
+    const end = dayjs(dateInputValue(endValue, endColumn.dateFormat)).startOf("day");
+    if (!end.isValid()) return null;
+    const days = end.diff(dayjs().startOf("day"), "day");
     return (endColumn.dateRangeRules || []).find((rule) => matchesDateRangeRule(rule, days)) || null;
   }
 
@@ -2445,7 +2438,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
         row,
         start,
         end,
-        color: matchingDateRangeRule(startColumn, endColumn, startValue, endValue)?.color || "",
+        color: matchingRemainingDaysRule(endColumn, endValue)?.color || "",
         left: visibleStart.diff(monthStart, "day") * dayWidth,
         width: Math.max(44, (visibleEnd.diff(visibleStart, "day") + 1) * dayWidth),
         startsBefore: start.isBefore(monthStart, "day"),
