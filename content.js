@@ -5,6 +5,7 @@ import { StyleProvider } from "@ant-design/cssinjs";
 import Button from "antd/es/button/index.js";
 import Card from "antd/es/card/index.js";
 import Checkbox from "antd/es/checkbox/index.js";
+import ColorPicker from "antd/es/color-picker/index.js";
 import ConfigProvider from "antd/es/config-provider/index.js";
 import DatePicker from "antd/es/date-picker/index.js";
 import Drawer from "antd/es/drawer/index.js";
@@ -724,11 +725,9 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     .option-row:last-of-type { margin-bottom: 0; }
     .option-row .ant-space-item:nth-child(2) { flex: 1; min-width: 0; }
     .option-row .ant-input { min-width: 0; }
-    .color-swatch { display: block; width: 42px; height: 18px; border-radius: 999px; }
-    .color-select .ant-select-selection-item {
-      display: flex; align-items: center; justify-content: center; padding-inline-end: 0;
-    }
-    .color-select .ant-select-selection-item-content { display: flex; max-width: none; overflow: visible; }
+    .color-picker-field { display: flex; flex: 0 0 132px; width: 132px; align-items: center; gap: 6px; }
+    .color-picker-field .ant-color-picker-trigger { flex: 0 0 auto; }
+    .color-picker-field .color-hex-input { min-width: 0; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; text-transform: uppercase; }
     .option-tag.ant-tag { margin-inline-end: 0; }
     .property-source {
       margin-bottom: 22px; border-radius: ${antdTokens.borderRadius}px; padding: 10px 12px;
@@ -1205,6 +1204,54 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     return /^#[0-9a-f]{6}$/i.test(color) ? color : fallback;
   }
 
+  function normalizedHexColor(value, fallback = "") {
+    const raw = String(value || "").trim();
+    const candidate = raw.startsWith("#") ? raw : `#${raw}`;
+    return validOptionColor(candidate, fallback)?.toUpperCase() || "";
+  }
+
+  function ColorValuePicker({ value, onChange, label }) {
+    const color = normalizedHexColor(value, OPTION_PALETTE[0]);
+    const [draft, setDraft] = React.useState(color);
+    React.useEffect(() => setDraft(color), [color]);
+    const commit = (nextValue) => {
+      const nextColor = normalizedHexColor(nextValue);
+      if (!nextColor) {
+        setDraft(color);
+        return;
+      }
+      setDraft(nextColor);
+      onChange(nextColor);
+    };
+    const choose = (nextColor) => commit(nextColor.toHexString());
+
+    return React.createElement(
+      "div",
+      { className: "color-picker-field" },
+      React.createElement(ColorPicker, {
+        value: color,
+        format: "hex",
+        disabledAlpha: true,
+        presets: [{ label: "Colores sugeridos", colors: OPTION_PALETTE }],
+        onChange: choose,
+        "aria-label": label
+      }),
+      React.createElement(Input, {
+        className: "color-hex-input",
+        value: draft,
+        maxLength: 7,
+        spellCheck: false,
+        "aria-label": `${label} hexadecimal`,
+        onChange: (event) => setDraft(event.target.value),
+        onBlur: (event) => commit(event.target.value),
+        onPressEnter: (event) => {
+          commit(event.currentTarget.value);
+          event.currentTarget.blur();
+        }
+      })
+    );
+  }
+
   function propertyOptionEntries(property) {
     return (property.options || []).map((label, index) => ({
       label: String(label),
@@ -1246,10 +1293,6 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
       }
     ]);
     const removeEntry = (index) => setEntries((current) => current.filter((_, entryIndex) => entryIndex !== index));
-    const colorOptions = OPTION_PALETTE.map((color) => ({
-      value: color,
-      label: React.createElement("span", { className: "color-swatch", style: { backgroundColor: color } })
-    }));
     const colors = Object.fromEntries(entries.map((entry, index) => [
       entry.label.trim(),
       validOptionColor(entry.color, OPTION_PALETTE[index % OPTION_PALETTE.length])
@@ -1272,13 +1315,10 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
       ...entries.map((entry, index) => React.createElement(
         Space,
         { key: index, align: "baseline", className: "option-row", size: 8 },
-        React.createElement(Select, {
-          className: "color-select",
-          popupMatchSelectWidth: false,
+        React.createElement(ColorValuePicker, {
           value: entry.color,
           onChange: (color) => updateEntry(index, { color }),
-          options: colorOptions,
-          style: { width: 82 }
+          label: `Color de opción ${index + 1}`
         }),
         React.createElement(Input, {
           value: entry.label,
@@ -1352,11 +1392,6 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
         color: OPTION_PALETTE[current.length % OPTION_PALETTE.length]
       }, current.length)
     ]);
-    const colorOptions = OPTION_PALETTE.map((color) => ({
-      value: color,
-      label: React.createElement("span", { className: "color-swatch", style: { backgroundColor: color } })
-    }));
-
     return React.createElement(
       "div",
       { className: "option-editor", "data-date-range-rules": "" },
@@ -1387,13 +1422,10 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
           onChange: (value) => updateRule(index, { value }),
           style: { width: 92 }
         }),
-        React.createElement(Select, {
-          className: "color-select",
-          popupMatchSelectWidth: false,
+        React.createElement(ColorValuePicker, {
           value: rule.color,
-          options: colorOptions,
           onChange: (color) => updateRule(index, { color }),
-          style: { width: 82 }
+          label: `Color de regla ${index + 1}`
         }),
         React.createElement(Button, {
           htmlType: "button",

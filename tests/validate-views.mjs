@@ -829,10 +829,12 @@ try {
     panel.querySelector('[data-configure-column="2"]').click();
     return {
       visible: !panel.querySelector('[data-date-range-rules]')?.closest('.date-range-rules-host')?.hidden,
+      colorPickers: panel.querySelectorAll('[data-date-range-rules] .ant-color-picker-trigger').length,
+      hexadecimalInputs: panel.querySelectorAll('[data-date-range-rules] .color-hex-input').length,
       rules: JSON.parse(panel.querySelector('[name="dateRangeRules"]')?.value || '[]')
     };
   `));
-  if (!finalDateRules.visible || JSON.stringify(finalDateRules.rules.map(({ operator, value, color }) => ({ operator, value, color }))) !== JSON.stringify([
+  if (!finalDateRules.visible || finalDateRules.colorPickers !== 3 || finalDateRules.hexadecimalInputs !== 3 || JSON.stringify(finalDateRules.rules.map(({ operator, value, color }) => ({ operator, value, color }))) !== JSON.stringify([
     { operator: "lte", value: 1, color: "#91caff" },
     { operator: "lte", value: 7, color: "#ffe58f" },
     { operator: "gt", value: 7, color: "#b7eb8f" }
@@ -847,18 +849,29 @@ try {
     input.dispatchEvent(new panel.defaultView.Event('change', { bubbles: true }));
   `));
   await delay(80);
+  await cdp.evaluate(panelExpression(`
+    const input = panel.querySelector('.days-rule-row .color-hex-input');
+    const setter = Object.getOwnPropertyDescriptor(panel.defaultView.HTMLInputElement.prototype, 'value').set;
+    input.focus();
+    setter.call(input, '#123456');
+    input.dispatchEvent(new panel.defaultView.Event('input', { bubbles: true }));
+  `));
+  await delay(80);
+  await cdp.evaluate(panelExpression(`panel.querySelector('.days-rule-row .color-hex-input').blur();`));
+  await delay(80);
   const editedDateRules = await cdp.evaluate(panelExpression(`
     const rules = JSON.parse(panel.querySelector('[name="dateRangeRules"]')?.value || '[]');
     panel.querySelector('#srd-property-form').requestSubmit();
     return rules;
   `));
-  if (editedDateRules[0]?.value !== 2) throw new Error(`Editar una regla de dias restantes no actualizo el formulario: ${JSON.stringify(editedDateRules)}`);
+  if (editedDateRules[0]?.value !== 2 || editedDateRules[0]?.color !== "#123456") throw new Error(`Editar una regla de dias restantes no actualizo el formulario: ${JSON.stringify(editedDateRules)}`);
   await delay(180);
   const persistedDateRule = await cdp.evaluate(panelExpression(`
     panel.querySelector('[data-configure-column="2"]').click();
-    return JSON.parse(panel.querySelector('[name="dateRangeRules"]')?.value || '[]')[0]?.value;
+    const rule = JSON.parse(panel.querySelector('[name="dateRangeRules"]')?.value || '[]')[0];
+    return { value: rule?.value, color: rule?.color };
   `));
-  if (persistedDateRule !== 2) throw new Error(`La regla de dias restantes de Fecha final no persistio: ${persistedDateRule}`);
+  if (persistedDateRule.value !== 2 || persistedDateRule.color !== "#123456") throw new Error(`La regla de dias restantes de Fecha final no persistio: ${JSON.stringify(persistedDateRule)}`);
   await cdp.evaluate(panelExpression('panel.querySelector(".property-actions .secondary-button").click();'));
   const timelineViews = await cdp.evaluate(panelExpression('return Array.from(panel.querySelectorAll("[data-sheet-view]"), button => button.dataset.sheetView);'));
   if (JSON.stringify(timelineViews) !== JSON.stringify(["table", "kanban", "calendar", "timeline", "charts"])) {
@@ -888,7 +901,7 @@ try {
     if (calendarRemainingColors?.["2"] && calendarRemainingColors?.["3"]) break;
     await delay(80);
   }
-  if (calendarRemainingColors?.["2"] !== "rgb(145, 202, 255)" || calendarRemainingColors?.["3"] !== "rgb(183, 235, 143)") {
+  if (calendarRemainingColors?.["2"] !== "rgb(18, 52, 86)" || calendarRemainingColors?.["3"] !== "rgb(183, 235, 143)") {
     const calendarDiagnostics = await cdp.evaluate(viewExpression(`return {
       text: view.querySelector('.calendar-view')?.textContent || '',
       selection: view.querySelector('.calendar-view .ant-select-selection-item')?.textContent || '',
@@ -921,7 +934,7 @@ try {
     if (timeline?.rows?.length === 2) break;
     await delay(80);
   }
-  if (timeline.panel !== "timeline" || !timeline.title.includes("Cronograma") || JSON.stringify(timeline.roles) !== JSON.stringify(["Inicio: Fecha", "Fin: Nombre"]) || timeline.month !== "octubre 2026" || JSON.stringify(timeline.rows) !== JSON.stringify(["2", "3"]) || JSON.stringify(timeline.colors) !== JSON.stringify(["rgb(145, 202, 255)", "rgb(183, 235, 143)"]) || timeline.handles !== 4) {
+  if (timeline.panel !== "timeline" || !timeline.title.includes("Cronograma") || JSON.stringify(timeline.roles) !== JSON.stringify(["Inicio: Fecha", "Fin: Nombre"]) || timeline.month !== "octubre 2026" || JSON.stringify(timeline.rows) !== JSON.stringify(["2", "3"]) || JSON.stringify(timeline.colors) !== JSON.stringify(["rgb(18, 52, 86)", "rgb(183, 235, 143)"]) || timeline.handles !== 4) {
     throw new Error(`Cronograma no uso las claves de fecha configuradas: ${JSON.stringify(timeline)}`);
   }
   const timelineResize = await cdp.evaluate(viewExpression(`

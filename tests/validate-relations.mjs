@@ -859,16 +859,34 @@ try {
   const statusEditor = await cdp.evaluate(`(() => {
     const panel = document.getElementById("sheets-session-probe").shadowRoot.querySelector(".panel-frame").contentDocument;
     return {
-      colorSelectors: panel.querySelectorAll(".option-editor .color-select").length,
+      colorPickers: panel.querySelectorAll(".option-editor .color-picker-field .ant-color-picker-trigger").length,
+      hexadecimalInputs: panel.querySelectorAll(".option-editor .color-hex-input").length,
       colors: JSON.parse(panel.querySelector('[name="optionColors"]')?.value || "{}")
     };
   })()`);
-  if (statusEditor.colorSelectors !== 3 || Object.keys(statusEditor.colors).length !== 3) {
+  if (statusEditor.colorPickers !== 3 || statusEditor.hexadecimalInputs !== 3 || Object.keys(statusEditor.colors).length !== 3) {
     throw new Error(`El editor de Estado no conservÃ³ colores: ${JSON.stringify(statusEditor)}`);
   }
-  await clickPanelNode(".option-row:last-of-type .color-select .ant-select-selector");
-  await waitForPanelPopup(".ant-select-dropdown:not(.ant-select-dropdown-hidden)");
-  await clickPanelNode(".ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option");
+  await cdp.evaluate(`(() => {
+    const panel = document.getElementById("sheets-session-probe").shadowRoot.querySelector(".panel-frame").contentDocument;
+    panel.querySelector(".option-row .ant-color-picker-trigger").click();
+  })()`);
+  await waitForPanelPopup(".ant-color-picker", "Colores sugeridos");
+  await closePanelPopup();
+  await cdp.evaluate(`(() => {
+    const panel = document.getElementById("sheets-session-probe").shadowRoot.querySelector(".panel-frame").contentDocument;
+    const input = panel.querySelector(".option-row:last-of-type .color-hex-input");
+    const setter = Object.getOwnPropertyDescriptor(panel.defaultView.HTMLInputElement.prototype, "value").set;
+    input.focus();
+    setter.call(input, "#123456");
+    input.dispatchEvent(new panel.defaultView.Event("input", { bubbles: true }));
+  })()`);
+  await delay(80);
+  await cdp.evaluate(`(() => {
+    const panel = document.getElementById("sheets-session-probe").shadowRoot.querySelector(".panel-frame").contentDocument;
+    panel.querySelector(".option-row:last-of-type .color-hex-input").blur();
+  })()`);
+  await delay(80);
   await clickPanelNode(".property-actions .primary-button");
   await delay(100);
   await cdp.evaluate(`(() => {
@@ -879,7 +897,7 @@ try {
     const panel = document.getElementById("sheets-session-probe").shadowRoot.querySelector(".panel-frame").contentDocument;
     return JSON.parse(panel.querySelector('[name="optionColors"]')?.value || "{}");
   })()`);
-  if (persistedStatusColors.Cerrado !== "#d9d9d9") {
+  if (persistedStatusColors.Cerrado !== "#123456") {
     throw new Error(`El color de Estado no persistiÃ³: ${JSON.stringify(persistedStatusColors)}`);
   }
   await clickPanelNode(".property-actions .secondary-button");
