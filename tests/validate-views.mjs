@@ -715,7 +715,7 @@ try {
   await cdp.evaluate(viewExpression('view.querySelector("[data-close-sheet-view]")?.click();'));
   await delay(180);
 
-  async function configureColumn(column, type, options = "") {
+  async function configureColumn(column, type, options = "", timelineRole = "") {
     await cdp.evaluate(panelExpression(`
       panel.querySelector('[data-configure-column="${column}"]').click();
       const typeInput = panel.querySelector("#srd-property-type");
@@ -723,6 +723,8 @@ try {
       typeInput.dispatchEvent(new Event("change", { bubbles: true }));
       const optionInput = panel.querySelector('[name="options"]');
       if (optionInput) optionInput.value = ${JSON.stringify(options)};
+      const timelineRoleInput = panel.querySelector('[name="dateTimelineRole"]');
+      if (timelineRoleInput) timelineRoleInput.value = ${JSON.stringify(timelineRole)};
       panel.querySelector("#srd-property-form").requestSubmit();
     `));
     await delay(150);
@@ -764,7 +766,99 @@ try {
     staleVisualizationRows[index][3] = originalStaleDates[index];
   });
 
+  const originalNames = sheet.rows.map((row) => row[1]);
+  const originalStaleNames = staleVisualizationRows.map((row) => row[1]);
+  ["07/10/2026", "18/10/2026", "06/11/2026"].forEach((value, index) => {
+    sheet.rows[index][1] = value;
+    staleVisualizationRows[index][1] = value;
+  });
+  await configureColumn(4, "date", "", "start");
+  await configureColumn(2, "date", "", "end");
+  const timelineViews = await cdp.evaluate(panelExpression('return Array.from(panel.querySelectorAll("[data-sheet-view]"), button => button.dataset.sheetView);'));
+  if (JSON.stringify(timelineViews) !== JSON.stringify(["table", "kanban", "calendar", "timeline"])) {
+    throw new Error(`Cronograma aparecio sin sus dos claves de fecha: ${JSON.stringify(timelineViews)}`);
+  }
+  await cdp.evaluate(`window.postMessage({ source: "sheets-row-drawer", type: "sheet-change" }, location.origin)`, isolated.executionContextId);
+  const timelineButtonDeadline = Date.now() + 5_000;
+  while (Date.now() < timelineButtonDeadline) {
+    const ready = await cdp.evaluate(panelExpression('return Boolean(panel.querySelector("[data-sheet-view=timeline]"));'));
+    if (ready) break;
+    await delay(80);
+  }
+  await delay(5_100);
+  await cdp.evaluate(panelExpression('panel.querySelector("[data-sheet-view=timeline]").click();'));
+  const timelineDeadline = Date.now() + 5_000;
+  let timeline;
+  while (Date.now() < timelineDeadline) {
+    timeline = await cdp.evaluate(viewExpression(`return {
+      panel: view.querySelector('[data-sheet-view-panel]')?.dataset.sheetViewPanel || '',
+      title: view.querySelector('.sheet-view-panel-title')?.textContent || '',
+      roles: Array.from(view.querySelectorAll('.timeline-property-key'), item => item.textContent.trim()),
+      month: view.querySelector('.timeline-label-cell')?.textContent.trim() || '',
+      rows: Array.from(view.querySelectorAll('.timeline-bar'), item => item.dataset.sheetRow),
+      handles: view.querySelectorAll('.timeline-range-handle').length
+    };`));
+    if (timeline?.rows?.length === 2) break;
+    await delay(80);
+  }
+  if (timeline.panel !== "timeline" || !timeline.title.includes("Cronograma") || JSON.stringify(timeline.roles) !== JSON.stringify(["Inicio: Fecha", "Fin: Nombre"]) || timeline.month !== "octubre 2026" || JSON.stringify(timeline.rows) !== JSON.stringify(["2", "3"]) || timeline.handles !== 4) {
+    throw new Error(`Cronograma no uso las claves de fecha configuradas: ${JSON.stringify(timeline)}`);
+  }
+  const timelineResize = await cdp.evaluate(viewExpression(`
+    const bar = view.querySelector('.timeline-bar[data-sheet-row="2"]');
+    const handle = bar.querySelector('.timeline-range-handle.start');
+    const before = { left: bar.style.left, width: bar.style.width };
+    const x = bar.getBoundingClientRect().left;
+    handle.dispatchEvent(new view.defaultView.PointerEvent('pointerdown', { bubbles: true, button: 0, clientX: x }));
+    view.dispatchEvent(new view.defaultView.PointerEvent('pointermove', { bubbles: true, button: 0, clientX: x + 80 }));
+    view.dispatchEvent(new view.defaultView.PointerEvent('pointerup', { bubbles: true, button: 0, clientX: x + 80 }));
+    return before;
+  `));
+  await delay(120);
+  const resizedTimeline = await cdp.evaluate(viewExpression(`return {
+    left: view.querySelector('.timeline-bar[data-sheet-row="2"]')?.style.left || '',
+    width: view.querySelector('.timeline-bar[data-sheet-row="2"]')?.style.width || '',
+    pending: !view.querySelector('[data-sheet-view-save]').disabled
+  };`));
+  if (!resizedTimeline.pending || resizedTimeline.left === timelineResize.left || resizedTimeline.width === timelineResize.width) {
+    throw new Error(`Ajustar el inicio no quedo pendiente en Cronograma: ${JSON.stringify({ timelineResize, resizedTimeline })}`);
+  }
+  await cdp.evaluate(viewExpression('view.querySelector("[data-sheet-view-cancel]").click();'));
+  await delay(120);
+  const restoredTimelineRange = await cdp.evaluate(viewExpression(`return {
+    left: view.querySelector('.timeline-bar[data-sheet-row="2"]')?.style.left || '',
+    width: view.querySelector('.timeline-bar[data-sheet-row="2"]')?.style.width || '',
+    saveDisabled: view.querySelector('[data-sheet-view-save]').disabled
+  };`));
+  if (!restoredTimelineRange.saveDisabled || restoredTimelineRange.left !== timelineResize.left || restoredTimelineRange.width !== timelineResize.width) {
+    throw new Error(`Cancelar no restauro el rango del Cronograma: ${JSON.stringify(restoredTimelineRange)}`);
+  }
+  await cdp.evaluate(viewExpression('view.querySelector("[data-close-sheet-view]").click();'));
+  await delay(150);
+  await cdp.evaluate(`(() => {
+    document.getElementById("t-name-box").value = "A2";
+    location.hash = "#gid=0&range=A2";
+  })()`);
+  const restoredDrawerDeadline = Date.now() + 5_000;
+  while (Date.now() < restoredDrawerDeadline) {
+    const ready = await cdp.evaluate(panelExpression('return Boolean(panel.querySelector(\'[data-configure-column="2"]\'));'));
+    if (ready) break;
+    await delay(80);
+  }
+  originalNames.forEach((value, index) => {
+    sheet.rows[index][1] = value;
+    staleVisualizationRows[index][1] = originalStaleNames[index];
+  });
+  await configureColumn(2, "text");
+
   await configureColumn(4, "date");
+  await cdp.evaluate(`window.postMessage({ source: "sheets-row-drawer", type: "sheet-change" }, location.origin)`, isolated.executionContextId);
+  const restoredViewButtonsDeadline = Date.now() + 5_000;
+  while (Date.now() < restoredViewButtonsDeadline) {
+    const ready = await cdp.evaluate(panelExpression('return panel.querySelectorAll("[data-sheet-view]").length === 3;'));
+    if (ready) break;
+    await delay(80);
+  }
   const viewButtons = await cdp.evaluate(panelExpression(`
     return {
       views: Array.from(panel.querySelectorAll("[data-sheet-view]"), button => button.dataset.sheetView),
@@ -1500,7 +1594,7 @@ try {
   }
   if (!rectangularClearSaved) throw new Error("Tabla no verifico el borrado rectangular de varias filas");
 
-  console.log("VISTAS_OK: Tabla, Kanban y Calendario usan una superficie independiente; sus registros reutilizan el drawer original.");
+  console.log("VISTAS_OK: Tabla, Kanban, Calendario y Cronograma usan una superficie independiente; sus registros reutilizan el drawer original.");
 } finally {
   cdp?.close();
   if (browser.pid) spawnSync("taskkill", ["/PID", String(browser.pid), "/T", "/F"], { stdio: "ignore", windowsHide: true });

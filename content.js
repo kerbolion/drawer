@@ -405,6 +405,10 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
       --workspace-primary-hover: ${surfaces.primaryHover};
       --workspace-shadow: ${surfaces.shadow};
       --workspace-shadow-soft: ${surfaces.shadowSoft};
+      --workspace-timeline-bar: ${surfaces.timelineBar};
+      --workspace-timeline-bar-border: ${surfaces.timelineBarBorder};
+      --workspace-timeline-bar-text: ${surfaces.timelineBarText};
+      --workspace-handle-contrast: ${surfaces.handleContrast};
       --antd-bg-container: ${tokens.colorBgContainer};
       --antd-bg-container-disabled: ${tokens.colorBgContainerDisabled};
       --antd-bg-elevated: ${tokens.colorBgElevated};
@@ -901,7 +905,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     .kanban-view-mode { min-width: 180px; }
     .kanban-setting { display: inline-flex; align-items: center; gap: 6px; color: var(--workspace-text-secondary); font-size: 12px; white-space: nowrap; }
     .kanban-setting .ant-input-number { width: 72px; }
-    .kanban-view, .calendar-view { display: flex; min-width: 0; min-height: 0; flex: 1; flex-direction: column; }
+    .kanban-view, .calendar-view, .timeline-view { display: flex; min-width: 0; min-height: 0; flex: 1; flex-direction: column; }
     .kanban-board {
       flex: 1; min-height: 0; gap: 12px; overflow: auto; padding: 12px; background: var(--workspace-surface-muted);
     }
@@ -993,6 +997,49 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
       cursor: pointer; font-size: 12px; text-align: left; text-overflow: ellipsis; white-space: nowrap;
     }
     .calendar-item:hover { background: var(--workspace-primary-hover); }
+    .timeline-scroll { flex: 1; min-width: 0; min-height: 0; overflow: auto; background: var(--workspace-surface); }
+    .timeline-fields { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+    .timeline-property-key { min-width: 180px; padding: 6px 11px; border: 1px solid var(--workspace-border); border-radius: 6px; background: var(--workspace-surface); color: var(--workspace-text-secondary); font-size: 13px; }
+    .timeline-canvas { min-width: 100%; }
+    .timeline-header-row { position: sticky; z-index: 4; top: 0; display: flex; border-bottom: 1px solid var(--workspace-border); background: var(--workspace-surface); }
+    .timeline-label-cell {
+      position: sticky; z-index: 5; left: 0; display: flex; min-height: 44px; flex: 0 0 180px; align-items: center;
+      padding: 0 12px; border-right: 1px solid var(--workspace-border); background: var(--workspace-surface); color: var(--workspace-text); font-weight: 700;
+      text-transform: capitalize;
+    }
+    .timeline-days, .timeline-grid { display: grid; grid-auto-flow: column; grid-auto-columns: 80px; }
+    .timeline-days { position: relative; }
+    .timeline-day { display: flex; min-height: 44px; align-items: center; justify-content: center; border-right: 1px solid var(--workspace-border-soft); color: var(--workspace-text-muted); font-size: 12px; }
+    .timeline-day.is-weekend, .timeline-grid-day.is-weekend { background: var(--workspace-surface-subtle); }
+    .timeline-body { position: relative; }
+    .timeline-grid { position: absolute; top: 0; bottom: 0; }
+    .timeline-grid-day { border-right: 1px solid var(--workspace-border-soft); }
+    .timeline-record-row { position: absolute; right: 0; left: 0; height: 42px; border-bottom: 1px solid var(--workspace-border-subtle); }
+    .timeline-record-label {
+      position: sticky; z-index: 3; left: 0; display: flex; width: 180px; height: 42px; align-items: center; overflow: hidden;
+      padding: 0 12px; border-right: 1px solid var(--workspace-border); background: var(--workspace-surface); color: var(--workspace-text-muted);
+      font-size: 13px; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .timeline-bar {
+      position: absolute; z-index: 2; top: 6px; display: flex; height: 30px; align-items: center; overflow: hidden; padding: 0 10px;
+      border: 1px solid var(--workspace-timeline-bar-border); border-radius: 6px; background: var(--workspace-timeline-bar);
+      color: var(--workspace-timeline-bar-text); cursor: grab; font-weight: 700; text-align: left; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .timeline-bar:active { cursor: grabbing; }
+    .timeline-bar:hover { border-color: var(--workspace-primary); }
+    .timeline-range-handle { position: absolute; top: 0; bottom: 0; width: 12px; cursor: ew-resize; }
+    .timeline-range-handle.start { left: 0; }
+    .timeline-range-handle.end { right: 0; }
+    .timeline-range-handle::after { position: absolute; top: 6px; width: 2px; height: 16px; border-radius: 999px; background: var(--workspace-handle-contrast); content: ""; }
+    .timeline-range-handle.start::after { left: 4px; }
+    .timeline-range-handle.end::after { right: 4px; }
+    .timeline-range-handle:hover::after { background: var(--workspace-primary); }
+    .timeline-bar.starts-before { border-top-left-radius: 0; border-bottom-left-radius: 0; }
+    .timeline-bar.ends-after { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+    .timeline-today-line { position: absolute; z-index: 3; top: 0; bottom: 0; width: 1px; background: #ff4d4f; }
+    .timeline-today-line::before { position: absolute; top: -4px; left: -4px; width: 8px; height: 8px; border-radius: 999px; background: #ff7875; content: ""; }
+    .timeline-today-line.body { z-index: 1; }
+    .timeline-empty { position: absolute; top: 0; right: 0; bottom: 0; left: 180px; display: flex; align-items: center; justify-content: center; }
     .workspace-date-picker-popup .ant-picker-panel-container { max-width: calc(100vw - 16px); }
     .drawer > footer { min-width: 0; padding: 12px 24px 16px; border-top: 1px solid var(--antd-border-secondary); background: var(--antd-bg-container); }
     .meta { margin-bottom: 9px; color: var(--antd-text-tertiary); font-size: 11px; }
@@ -2205,6 +2252,217 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     );
   }
 
+  function timelineDateColumns(columns) {
+    return {
+      start: columns.find((column) => column.type === "date" && column.dateTimelineRole === "start"),
+      end: columns.find((column) => column.type === "date" && column.dateTimelineRole === "end")
+    };
+  }
+
+  function SheetTimeline({ table, columns, visibleColumnIds, onDateChange, onOpenRow }) {
+    const dayWidth = 80;
+    const rowHeight = 42;
+    const labelWidth = 180;
+    const { start: startColumn, end: endColumn } = timelineDateColumns(columns);
+    const visibleIds = Array.isArray(visibleColumnIds) ? new Set(visibleColumnIds) : null;
+    const displayColumns = visibleIds ? columns.filter((column) => visibleIds.has(column.id)) : columns;
+    const [currentMonth, setCurrentMonth] = React.useState(() => dayjs().startOf("month"));
+    const suppressOpenRef = React.useRef(false);
+
+    if (!startColumn || !endColumn) {
+      return React.createElement(SheetViewEmpty, {
+        description: "Configura una Fecha inicial y una Fecha final para usar Cronograma"
+      });
+    }
+
+    const monthStart = currentMonth.startOf("month");
+    const monthEnd = currentMonth.endOf("month");
+    const days = Array.from({ length: currentMonth.daysInMonth() }, (_, index) => currentMonth.date(index + 1));
+    const timelineRows = sheetViewRows(table).map((row) => {
+      const startValue = dateInputValue(row.cells[startColumn.index], startColumn.dateFormat);
+      const endValue = dateInputValue(row.cells[endColumn.index], endColumn.dateFormat);
+      if (!startValue || !endValue) return null;
+      const start = dayjs(startValue);
+      const end = dayjs(endValue);
+      if (!start.isValid() || !end.isValid() || end.isBefore(start, "day")) return null;
+      if (end.isBefore(monthStart, "day") || start.isAfter(monthEnd, "day")) return null;
+      const visibleStart = start.isBefore(monthStart, "day") ? monthStart : start;
+      const visibleEnd = end.isAfter(monthEnd, "day") ? monthEnd : end;
+      return {
+        row,
+        start,
+        end,
+        left: visibleStart.diff(monthStart, "day") * dayWidth,
+        width: Math.max(44, (visibleEnd.diff(visibleStart, "day") + 1) * dayWidth),
+        startsBefore: start.isBefore(monthStart, "day"),
+        endsAfter: end.isAfter(monthEnd, "day")
+      };
+    }).filter(Boolean);
+    const todayIndex = dayjs().isSame(currentMonth, "month") ? dayjs().date() - 1 : -1;
+    const gridWidth = days.length * dayWidth;
+
+    const beginPointerChange = (event, item, mode) => {
+      if (event.button !== 0) return;
+      const changesStart = mode !== "end";
+      const changesEnd = mode !== "start";
+      if ((changesStart && startColumn.protected) || (changesEnd && endColumn.protected)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const eventDocument = event.currentTarget.ownerDocument;
+      const eventWindow = eventDocument.defaultView;
+      const startX = event.clientX;
+      const originalStart = item.start;
+      const originalEnd = item.end;
+      const previousCursor = eventDocument.body.style.cursor;
+      const previousUserSelect = eventDocument.body.style.userSelect;
+      let lastDelta = 0;
+      let dragged = false;
+      eventDocument.body.style.cursor = mode === "move" ? "grabbing" : "ew-resize";
+      eventDocument.body.style.userSelect = "none";
+
+      const move = (moveEvent) => {
+        const distance = moveEvent.clientX - startX;
+        if (Math.abs(distance) < 4) return;
+        const delta = Math.round(distance / dayWidth);
+        if (delta === lastDelta) return;
+        const nextStart = changesStart ? originalStart.add(delta, "day") : originalStart;
+        const nextEnd = changesEnd ? originalEnd.add(delta, "day") : originalEnd;
+        if (nextStart.isAfter(nextEnd, "day")) return;
+        lastDelta = delta;
+        dragged = true;
+        if (changesStart) onDateChange(item.row, startColumn, nextStart.format("YYYY-MM-DD"));
+        if (changesEnd) onDateChange(item.row, endColumn, nextEnd.format("YYYY-MM-DD"));
+      };
+      const stop = () => {
+        eventDocument.removeEventListener("pointermove", move);
+        eventDocument.removeEventListener("pointerup", stop);
+        eventDocument.body.style.cursor = previousCursor;
+        eventDocument.body.style.userSelect = previousUserSelect;
+        if (!dragged) return;
+        suppressOpenRef.current = true;
+        eventWindow.setTimeout(() => { suppressOpenRef.current = false; }, 0);
+      };
+      eventDocument.addEventListener("pointermove", move);
+      eventDocument.addEventListener("pointerup", stop);
+    };
+
+    return React.createElement(
+      "div",
+      { className: "timeline-view" },
+      React.createElement(
+        "div",
+        { className: "view-controls" },
+        React.createElement(
+          "div",
+          { className: "timeline-fields" },
+          React.createElement("span", { className: "timeline-property-key" }, `Inicio: ${startColumn.name}`),
+          React.createElement("span", { className: "timeline-property-key" }, `Fin: ${endColumn.name}`)
+        ),
+        React.createElement(
+          "div",
+          { className: "month-controls" },
+          React.createElement(Button, {
+            icon: React.createElement(LeftOutlined),
+            "aria-label": "Mes anterior",
+            onClick: () => setCurrentMonth((month) => month.subtract(1, "month"))
+          }),
+          React.createElement("strong", null, currentMonth.format("MMMM YYYY")),
+          React.createElement(Button, { onClick: () => setCurrentMonth(dayjs().startOf("month")) }, "Hoy"),
+          React.createElement(Button, {
+            icon: React.createElement(RightOutlined),
+            "aria-label": "Mes siguiente",
+            onClick: () => setCurrentMonth((month) => month.add(1, "month"))
+          })
+        )
+      ),
+      React.createElement(
+        "div",
+        { className: "timeline-scroll" },
+        React.createElement(
+          "div",
+          { className: "timeline-canvas", style: { width: labelWidth + gridWidth } },
+          React.createElement(
+            "div",
+            { className: "timeline-header-row" },
+            React.createElement("div", { className: "timeline-label-cell" }, currentMonth.format("MMMM YYYY")),
+            React.createElement(
+              "div",
+              { className: "timeline-days", style: { width: gridWidth } },
+              ...days.map((day) => React.createElement(
+                "div",
+                { className: `timeline-day ${[0, 6].includes(day.day()) ? "is-weekend" : ""}`.trim(), key: day.format("YYYY-MM-DD") },
+                React.createElement("span", null, String(day.date()))
+              )),
+              todayIndex >= 0 ? React.createElement("div", {
+                className: "timeline-today-line",
+                style: { left: todayIndex * dayWidth + dayWidth / 2 }
+              }) : null
+            )
+          ),
+          React.createElement(
+            "div",
+            { className: "timeline-body", style: { minHeight: Math.max(260, timelineRows.length * rowHeight) } },
+            React.createElement(
+              "div",
+              { className: "timeline-grid", style: { left: labelWidth, width: gridWidth } },
+              ...days.map((day) => React.createElement("div", {
+                className: `timeline-grid-day ${[0, 6].includes(day.day()) ? "is-weekend" : ""}`.trim(),
+                key: day.format("YYYY-MM-DD")
+              })),
+              todayIndex >= 0 ? React.createElement("div", {
+                className: "timeline-today-line body",
+                style: { left: todayIndex * dayWidth + dayWidth / 2 }
+              }) : null
+            ),
+            ...timelineRows.map((item, index) => {
+              const title = sheetViewRowTitle(item.row, displayColumns);
+              return React.createElement(
+                "div",
+                { className: "timeline-record-row", key: item.row.number, style: { top: index * rowHeight } },
+                React.createElement("div", { className: "timeline-record-label", title }, title),
+                React.createElement(
+                  "button",
+                  {
+                    className: ["timeline-bar", item.startsBefore ? "starts-before" : "", item.endsAfter ? "ends-after" : ""].filter(Boolean).join(" "),
+                    "data-sheet-row": String(item.row.number),
+                    onClick: (clickEvent) => {
+                      if (suppressOpenRef.current) clickEvent.preventDefault();
+                    },
+                    onDoubleClick: () => {
+                      if (!suppressOpenRef.current) onOpenRow(item.row.number);
+                    },
+                    onKeyDown: (keyEvent) => {
+                      if (keyEvent.key === "Enter" || keyEvent.key === " ") onOpenRow(item.row.number);
+                    },
+                    onPointerDown: (pointerEvent) => beginPointerChange(pointerEvent, item, "move"),
+                    style: { left: labelWidth + Math.max(0, Math.min(item.left, gridWidth)), width: item.width },
+                    type: "button"
+                  },
+                  React.createElement("span", {
+                    className: "timeline-range-handle start",
+                    "aria-label": "Ajustar inicio",
+                    onPointerDown: (pointerEvent) => beginPointerChange(pointerEvent, item, "start")
+                  }),
+                  title,
+                  React.createElement("span", {
+                    className: "timeline-range-handle end",
+                    "aria-label": "Ajustar fin",
+                    onPointerDown: (pointerEvent) => beginPointerChange(pointerEvent, item, "end")
+                  })
+                )
+              );
+            }),
+            timelineRows.length ? null : React.createElement(
+              "div",
+              { className: "timeline-empty" },
+              React.createElement(Empty, { image: Empty.PRESENTED_IMAGE_SIMPLE, description: "Sin registros en este mes" })
+            )
+          )
+        )
+      )
+    );
+  }
+
   function workspaceDocumentName() {
     const title = String(document.title || "").replace(/\s+-\s+Hojas de c[aá]lculo de Google.*$/i, "").trim();
     return title || "Documento actual";
@@ -2251,6 +2509,8 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     const sourceColumns = visibleColumnsForSheet(drawerGid(), columns, sheetName);
     const statusColumns = columns.filter((column) => column.type === "status");
     const dateColumns = columns.filter((column) => column.type === "date");
+    const sourceTimelineColumns = timelineDateColumns(columns);
+    const hasTimeline = Boolean(sourceTimelineColumns.start && sourceTimelineColumns.end);
 
     React.useEffect(() => {
       if (sourceSheetKeyRef.current === sheetKey || view) return;
@@ -2453,7 +2713,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     React.useLayoutEffect(() => {
       const title = view === "table"
         ? workspaceDocumentName()
-        : `${view === "kanban" ? "Kanban" : "Calendario"} · ${sheetName}`;
+        : `${view === "kanban" ? "Kanban" : view === "calendar" ? "Calendario" : "Cronograma"} · ${sheetName}`;
       setSheetViewHostOpen(Boolean(view), title);
       return () => setSheetViewHostOpen(false);
     }, [Boolean(view)]);
@@ -2462,7 +2722,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
       if (!view) return;
       sheetViewFrame.title = view === "table"
         ? workspaceDocumentName()
-        : `${view === "kanban" ? "Kanban" : "Calendario"} · ${sheetName}`;
+        : `${view === "kanban" ? "Kanban" : view === "calendar" ? "Calendario" : "Cronograma"} · ${sheetName}`;
     }, [view, workspaceTarget.name, sheetName]);
 
     React.useEffect(() => {
@@ -2497,7 +2757,8 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     React.useEffect(() => {
       if (view === "kanban" && !statusColumns.length) setView("");
       if (view === "calendar" && !dateColumns.length) setView("");
-    }, [view, statusColumns.length, dateColumns.length]);
+      if (view === "timeline" && !hasTimeline) setView("");
+    }, [view, statusColumns.length, dateColumns.length, hasTimeline]);
 
     const openSheetViewRow = async (rowNumber, target = workspaceTarget) => {
       if (hasSheetViewChanges || sheetViewSaving) {
@@ -2656,6 +2917,13 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
           onMoveRow: moveRow,
           onOpenRow: openWorkspaceRow
         }),
+        renderTimeline: (openWorkspaceRow, visibleColumns) => React.createElement(SheetTimeline, {
+          table,
+          columns: workspaceColumns,
+          visibleColumnIds: visibleColumns.map((column) => column.id),
+          onDateChange: editWorkspaceCell,
+          onOpenRow: openWorkspaceRow
+        }),
         selectedSheetGid: workspaceTarget.gid,
         sheetName: workspaceTarget.name,
         table,
@@ -2692,6 +2960,17 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
               onColumnChange: (columnId) => setCurrentSheetViewSetting("calendarColumnId", columnId),
               onOpenRow: (rowNumber) => openSheetViewRow(rowNumber, activeTarget)
             })
+            : view === "timeline"
+              ? React.createElement(SheetTimeline, {
+                table,
+                columns,
+                visibleColumnIds: sourceColumns.map((column) => column.id),
+                onDateChange: (row, property, value) => {
+                  if (property.protected) return;
+                  stageSheetViewValue(row, property, serializeEditorValue(value, property), activeTarget);
+                },
+                onOpenRow: (rowNumber) => openSheetViewRow(rowNumber, activeTarget)
+              })
             : null;
 
     return React.createElement(
@@ -2737,6 +3016,16 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
         "data-sheet-view": "calendar",
         onClick: () => setView("calendar")
       }) : null,
+      hasTimeline ? React.createElement(Button, {
+        type: "text",
+        shape: "circle",
+        size: "small",
+        icon: React.createElement(UnorderedListOutlined),
+        title: "Abrir vista Cronograma",
+        "aria-label": "Abrir vista Cronograma",
+        "data-sheet-view": "timeline",
+        onClick: () => setView("timeline")
+      }) : null,
       view ? createPortal(
         sheetViewTree(React.createElement(
           "section",
@@ -2750,10 +3039,10 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
             React.createElement(
               "div",
               { className: "sheet-view-panel-title" },
-              React.createElement(view === "table" ? TableOutlined : view === "kanban" ? AppstoreOutlined : CalendarOutlined),
+              React.createElement(view === "table" ? TableOutlined : view === "kanban" ? AppstoreOutlined : view === "calendar" ? CalendarOutlined : UnorderedListOutlined),
               React.createElement("span", { className: view === "table" ? "workspace-document-name" : undefined }, view === "table"
                 ? workspaceDocumentName()
-                : `${view === "kanban" ? "Kanban" : "Calendario"} · ${sheetName}`),
+                : `${view === "kanban" ? "Kanban" : view === "calendar" ? "Calendario" : "Cronograma"} · ${sheetName}`),
               view === "table" ? React.createElement(
                 "nav",
                 { className: "workspace-browser-sheets", "aria-label": "Hojas del documento" },
@@ -3686,6 +3975,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
       currencySymbol: "$",
       currencyDecimals: 2,
       dateFormat: "DD/MM/YYYY",
+      dateTimelineRole: "",
       timeFormat: "24",
       checkedValue: "TRUE",
       uncheckedValue: "FALSE"
@@ -3725,6 +4015,9 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
       dateFormat: ["DD/MM/YYYY", "MM/DD/YYYY", "YYYY-MM-DD"].includes(source.dateFormat)
         ? source.dateFormat
         : "DD/MM/YYYY",
+      dateTimelineRole: source.type === "date" && ["start", "end"].includes(source.dateTimelineRole)
+        ? source.dateTimelineRole
+        : "",
       timeFormat: source.timeFormat === "12" ? "12" : "24",
       checkedValue: normalizedCheckboxConfiguredValue(source.checkedValue, true),
       uncheckedValue: normalizedCheckboxConfiguredValue(source.uncheckedValue, false)
@@ -5937,6 +6230,17 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
       }));
     }
 
+    if (type === "date") {
+      ui.propertySettings.appendChild(propertyFormItem("dateTimelineRole", "Uso en cronograma", property.dateTimelineRole, {
+        kind: "select",
+        choices: [
+          { value: "", label: "Sin asignar" },
+          { value: "start", label: "Fecha inicial" },
+          { value: "end", label: "Fecha final" }
+        ]
+      }));
+    }
+
     if (["time", "datetime"].includes(type)) {
       ui.propertySettings.appendChild(propertyFormItem("timeFormat", "Formato de hora", property.timeFormat, {
         kind: "select",
@@ -6028,6 +6332,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
       currencySymbol: formData.get("currencySymbol") ?? previous.currencySymbol,
       currencyDecimals: formData.get("currencyDecimals") ?? previous.currencyDecimals,
       dateFormat: formData.get("dateFormat") ?? previous.dateFormat,
+      dateTimelineRole: formData.get("dateTimelineRole") ?? previous.dateTimelineRole,
       timeFormat: formData.get("timeFormat") ?? previous.timeFormat,
       checkedValue: formData.get("checkedValue") ?? previous.checkedValue,
       uncheckedValue: formData.get("uncheckedValue") ?? previous.uncheckedValue
@@ -6041,6 +6346,14 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     }
     sheet.columns[index] = next;
     if (!sheet.propertyDefinitions) sheet.propertyDefinitions = {};
+    if (next.dateTimelineRole) {
+      sheet.columns.forEach((candidate, candidateIndex) => {
+        if (candidateIndex === index || candidate.dateTimelineRole !== next.dateTimelineRole) return;
+        const cleared = normalizeProperty({ ...candidate, dateTimelineRole: "" }, candidateIndex, candidate.sourceHeader);
+        sheet.columns[candidateIndex] = cleared;
+        rememberPropertyDefinition(sheet.propertyDefinitions, cleared);
+      });
+    }
     rememberPropertyDefinition(sheet.propertyDefinitions, next);
     sheet.updatedAt = Date.now();
     state.activity.config = true;

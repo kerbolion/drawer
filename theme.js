@@ -54,7 +54,11 @@ export const workspaceTokens = Object.freeze({
   primarySoft: "#e6f4ff",
   primaryHover: "#bae0ff",
   shadow: "rgba(15, 23, 42, 0.08)",
-  shadowSoft: "rgba(15, 23, 42, 0.04)"
+  shadowSoft: "rgba(15, 23, 42, 0.04)",
+  timelineBar: "#262626",
+  timelineBarBorder: "#404040",
+  timelineBarText: "#ffffff",
+  handleContrast: "rgba(255, 255, 255, 0.45)"
 });
 
 export const workspaceDarkTokens = Object.freeze({
@@ -76,5 +80,9 @@ export const workspaceDarkTokens = Object.freeze({
   primarySoft: "rgba(22, 119, 255, 0.18)",
   primaryHover: "rgba(22, 119, 255, 0.28)",
   shadow: "rgba(0, 0, 0, 0.32)",
-  shadowSoft: "rgba(0, 0, 0, 0.22)"
+  shadowSoft: "rgba(0, 0, 0, 0.22)",
+  timelineBar: "#0958d9",
+  timelineBarBorder: "#4096ff",
+  timelineBarText: "#ffffff",
+  handleContrast: "rgba(17, 24, 39, 0.78)"
 });

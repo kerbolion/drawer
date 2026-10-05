@@ -1358,6 +1358,15 @@ try {
     box.dispatchEvent(new Event("input", { bubbles: true }));
   })()`);
   await waitForRelation("Servicios");
+  const relatedCreationReadyDeadline = Date.now() + 5_000;
+  while (Date.now() < relatedCreationReadyDeadline) {
+    const ready = await cdp.evaluate(`(() => {
+      const host = document.getElementById("sheets-session-probe");
+      return host.dataset.hasPendingChanges !== "true" && host.dataset.saveState === "saved";
+    })()`);
+    if (ready) break;
+    await delay(80);
+  }
   await cdp.evaluate(`(() => {
     window.__createRelatedPastes = [];
     document.addEventListener("paste", event => {

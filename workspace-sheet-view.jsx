@@ -16,7 +16,8 @@ import {
   ProfileOutlined,
   PlusOutlined,
   SearchOutlined,
-  TableOutlined
+  TableOutlined,
+  UnorderedListOutlined
 } from "@ant-design/icons";
 
 const PAGE_SIZES = [10, 20, 30, 50];
@@ -419,6 +420,7 @@ export function WorkspaceSheetView({
   renderTypeIcon,
   toEditorValue,
   renderKanban,
+  renderTimeline,
   selectedSheetGid,
   sheetName,
   table
@@ -427,6 +429,8 @@ export function WorkspaceSheetView({
   const visibleColumns = columns.filter((column) => !hiddenColumns.includes(column.id));
   const hasKanban = columns.some((column) => column.type === "status");
   const hasCalendar = columns.some((column) => column.type === "date");
+  const hasTimeline = columns.some((column) => column.type === "date" && column.dateTimelineRole === "start")
+    && columns.some((column) => column.type === "date" && column.dateTimelineRole === "end");
   const [activeView, setActiveView] = React.useState("deck");
 
   React.useEffect(() => {
@@ -436,7 +440,8 @@ export function WorkspaceSheetView({
   React.useEffect(() => {
     if (activeView === "kanban" && !hasKanban) setActiveView("deck");
     if (activeView === "calendar" && !hasCalendar) setActiveView("deck");
-  }, [activeView, hasKanban, hasCalendar]);
+    if (activeView === "timeline" && !hasTimeline) setActiveView("deck");
+  }, [activeView, hasKanban, hasCalendar, hasTimeline]);
 
   const openRow = (number) => onOpenRow(Number(number));
 
@@ -481,7 +486,13 @@ export function WorkspaceSheetView({
             icon: React.createElement(CalendarOutlined),
             "data-workspace-view": "calendar",
             onClick: () => setActiveView("calendar")
-          }, "Calendario") : null
+          }, "Calendario") : null,
+          hasTimeline ? React.createElement(Button, {
+            type: activeView === "timeline" ? "primary" : "text",
+            icon: React.createElement(UnorderedListOutlined),
+            "data-workspace-view": "timeline",
+            onClick: () => setActiveView("timeline")
+          }, "Cronograma") : null
         )
       ),
       error ? React.createElement("div", { className: "status error workspace-browser-error" }, error) : null,
@@ -496,6 +507,8 @@ export function WorkspaceSheetView({
               ? renderKanban(openRow, visibleColumns)
               : activeView === "calendar"
                 ? renderCalendar(openRow, visibleColumns)
+                : activeView === "timeline"
+                  ? renderTimeline(openRow, visibleColumns)
                 : activeView === "table" ? React.createElement(TableView, {
                   columns,
                   hiddenColumnIds: hiddenColumns,
