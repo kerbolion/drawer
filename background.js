@@ -319,9 +319,7 @@
       void (async () => {
         const bridgePayload = {
           ...message.payload,
-          extensionVersion: chrome.runtime.getManifest().version,
-          tabId: sender.tab?.id ?? null,
-          tabActive: sender.tab?.active ?? null
+          extensionVersion: chrome.runtime.getManifest().version
         };
         const result = await bridgePost(route, bridgePayload);
         if (message.type !== "poll" || !result?.command) {
@@ -341,9 +339,7 @@
           ok: false,
           error,
           code: "CLOUD_ACCESS_REQUIRED",
-          extensionVersion: chrome.runtime.getManifest().version,
-          tabId: sender.tab?.id ?? null,
-          tabActive: sender.tab?.active ?? null
+          extensionVersion: chrome.runtime.getManifest().version
         });
         sendResponse({
           command: null,

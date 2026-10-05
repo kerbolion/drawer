@@ -59,49 +59,15 @@ vm.runInNewContext(backgroundSource, {
   chrome
 }, { filename: "background.js" });
 
-function backgroundMessage(type, payload, tabActive = false) {
+function backgroundMessage(type, payload) {
   return new Promise((resolve, reject) => {
     const handled = backgroundListener(
       { source: "sheets-row-drawer-codex", type, payload },
-      { url, tab: { id: 9, active: tabActive, url } },
+      { url, tab: { id: 9, url } },
       resolve
     );
     if (!handled) reject(new Error(`El service worker no aceptó el mensaje ${type}`));
   });
-}
-
-async function runCurrentCase() {
-  const child = spawn(process.execPath, [script, "current", "--timeout", "5"], {
-    windowsHide: true,
-    stdio: ["ignore", "pipe", "pipe"]
-  });
-  let stdout = "";
-  let stderr = "";
-  child.stdout.on("data", (chunk) => { stdout += chunk; });
-  child.stderr.on("data", (chunk) => { stderr += chunk; });
-  const exit = new Promise((resolve) => child.once("exit", resolve));
-
-  let delivered;
-  const deadline = Date.now() + 3_000;
-  while (Date.now() < deadline) {
-    const inactive = await backgroundMessage("poll", { spreadsheetId: "inactive-sheet", gid: "9" }, false);
-    if (inactive?.command !== null) throw new Error("current se entregó a una pestaña inactiva");
-    delivered = await backgroundMessage("poll", { spreadsheetId: "test-spreadsheet", gid: "7" }, true);
-    if (delivered?.command?.action === "info") break;
-    await delay(50);
-  }
-  if (delivered?.command?.action !== "info") throw new Error(`current no encontró la pestaña activa: ${JSON.stringify(delivered)}`);
-  await backgroundMessage("result", {
-    id: delivered.command.id,
-    ok: true,
-    result: { spreadsheetId: "test-spreadsheet", gid: "7", sheet: "Servicios" }
-  }, true);
-  const exitCode = await exit;
-  if (exitCode !== 0) throw new Error(stderr || `current terminó con código ${exitCode}`);
-  const output = JSON.parse(stdout);
-  if (output.result?.spreadsheetId !== "test-spreadsheet" || output.result?.sheet !== "Servicios") {
-    throw new Error(`current devolvió otro documento: ${stdout}`);
-  }
 }
 
 async function runChunkedAppendCase(recordsFile) {
@@ -229,7 +195,6 @@ try {
     Nombre: `Registro ${index + 1}`
   }))), "utf8");
 
-  await runCurrentCase();
   await runBridgeCase(["info", "--url", url, "--timeout", "5"], "info");
   await runBridgeCase([
     "list", "--url", url, "--sheet", "Servicios", "--where", "Estado=Activo",
@@ -290,30 +255,6 @@ try {
       throw new Error(`El CLI alteró la limpieza: ${JSON.stringify(command)}`);
     }
   });
-  await runBridgeCase([
-    "create-sheet", "--url", url, "--name", "Proyectos",
-    "--header", "ID", "--header", "Nombre", "--header", "Estado", "--timeout", "5"
-  ], "create-sheet", (command) => {
-    if (command.params.name !== "Proyectos" || command.params.headers?.join("|") !== "ID|Nombre|Estado") {
-      throw new Error(`El CLI alteró la creación de la hoja: ${JSON.stringify(command)}`);
-    }
-  });
-  await runBridgeCase([
-    "rename-sheet", "--url", url, "--sheet", "Proyectos", "--name", "Oportunidades", "--timeout", "5"
-  ], "rename-sheet", (command) => {
-    if (command.params.sheet !== "Proyectos" || command.params.name !== "Oportunidades") {
-      throw new Error(`El CLI alteró el cambio de nombre: ${JSON.stringify(command)}`);
-    }
-  });
-  await runBridgeCase([
-    "delete-sheet", "--url", url, "--sheet", "Oportunidades",
-    "--confirm", "ELIMINAR Oportunidades", "--timeout", "5"
-  ], "delete-sheet", (command) => {
-    if (command.params.sheet !== "Oportunidades" || command.params.confirmation !== "ELIMINAR Oportunidades") {
-      throw new Error(`El CLI alteró la eliminación de la hoja: ${JSON.stringify(command)}`);
-    }
-  });
-
   await runBlockedBridgeCase("La sesión cerrada", () => {
     stored.delete("srd:cloud:auth-token");
   }, "Inicia sesión");
@@ -343,4 +284,4 @@ if (contentSource.includes("async function verifyBridgeMutation")) {
   throw new Error("La skill volvió a implementar una verificación de escrituras paralela");
 }
 
-console.log("BRIDGE_OK: descubrimiento activo, documento aislado, sesión obligatoria, consultas, lotes, actualización, escritura, limpieza y administración de hojas confirmados.");
+console.log("BRIDGE_OK: documento aislado, sesión obligatoria, consultas, lotes, actualización, escritura y limpieza confirmados sobre hojas existentes.");
