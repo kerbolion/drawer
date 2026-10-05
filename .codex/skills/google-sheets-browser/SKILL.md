@@ -51,7 +51,7 @@ Use `info` first when the active tab or available sheet names matter. Use bounde
 
 Use `inspect` only for a small range in the active sheet when a displayed value cannot be explained by `read`. It reports the sanitized HTML cell representation and Google Visualization value metadata, and accepts at most 100 cells.
 
-`write` uses one synthetic TSV paste and verifies the resulting range through the authenticated HTML view. `clear` removes cell contents while preserving the rows, columns, and formatting. Inspect the returned `verified` field and report a verification failure instead of assuming success.
+The skill keeps its own read-only discovery logic for headers, IDs, record matching, and the next append row. All changes from `write`, `append`, `update`, `clear`, and headers created by `create-sheet` must use the drawer's shared cell-mutation engine. That engine chooses horizontal, vertical, rectangular, or exact operations; consolidates adjacent empty cells into rectangular `clear` operations; safely batches large areas; verifies propagation; and retries only unconfirmed cells. Do not add a separate paste, clear, batching, or verification path for skill commands. Inspect the returned `verified` field and report a verification failure instead of assuming success.
 
 ## Limitations
 

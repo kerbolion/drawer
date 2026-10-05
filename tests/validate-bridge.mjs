@@ -327,4 +327,20 @@ try {
   await rm(tempDirectory, { recursive: true, force: true });
 }
 
+const contentSource = await readFile(path.resolve(import.meta.dirname, "..", "content.js"), "utf8");
+for (const requiredSource of [
+  "async function executeBridgeMutations",
+  "await writeRanges(cellMutationOperations(mutations), selectionReference)",
+  "return verifyCellMutations(mutations",
+  "const valuesEqual = options.valuesEqual || valuesEqualForProperty",
+  "valuesEqual: bridgeValueEquivalent"
+]) {
+  if (!contentSource.includes(requiredSource)) {
+    throw new Error(`La skill dejó de usar el motor único de mutaciones: falta ${requiredSource}`);
+  }
+}
+if (contentSource.includes("async function verifyBridgeMutation")) {
+  throw new Error("La skill volvió a implementar una verificación de escrituras paralela");
+}
+
 console.log("BRIDGE_OK: descubrimiento activo, documento aislado, sesión obligatoria, consultas, lotes, actualización, escritura, limpieza y administración de hojas confirmados.");

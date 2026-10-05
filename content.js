@@ -6303,6 +6303,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
   async function verifyCellMutations(mutations, options = {}) {
     const delays = options.delays || [400, 800, 1_200];
     const isActive = options.isActive || (() => true);
+    const valuesEqual = options.valuesEqual || valuesEqualForProperty;
     const confirmed = new Set();
     const observedRows = new Map();
     let verificationError = null;
@@ -6337,7 +6338,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
               if (!isActive(mutation)) continue;
               const values = valuesByRow.get(mutation.row) || [];
               const columnIndex = Number(mutation.columnIndex ?? mutation.property?.index);
-              if (!valuesEqualForProperty(values[columnIndex], mutation.value, mutation.property)) continue;
+              if (!valuesEqual(values[columnIndex], mutation.value, mutation.property)) continue;
               confirmed.add(mutation);
               options.onConfirm?.(mutation, values);
             }
@@ -6363,7 +6364,8 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
       confirmed: mutations.filter((mutation) => confirmed.has(mutation)),
       unconfirmed: activeMutations(),
       observedRows,
-      error: verificationError
+      error: verificationError,
+      retried: missingBeforeRetry.length
     };
   }
 
@@ -7316,25 +7318,61 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     };
   }
 
-  function bridgeResultValues(result, expectedRows) {
-    return expectedRows.map((row, rowIndex) => row.map((_, columnIndex) =>
-      String(result.rows[rowIndex]?.values[columnIndex] ?? "")
-    ));
+  function bridgeMutationGid(params, sheetName) {
+    return String(
+      visibleSheets().find((sheet) => normalizedColumn(sheet.name) === normalizedColumn(sheetName))?.gid
+      || params.gid
+      || currentGid()
+    );
   }
 
-  async function verifyBridgeMutation(params, range, expectedRows) {
-    let lastResult = null;
-    for (const delay of [500, 1_000, 2_000]) {
-      await wait(delay);
-      lastResult = await readBridgeRange({ ...params, range }, undefined);
-      const actualRows = bridgeResultValues(lastResult, expectedRows);
-      if (actualRows.every((row, rowIndex) => row.every((value, columnIndex) =>
-        bridgeValueEquivalent(value, expectedRows[rowIndex][columnIndex])
-      ))) {
-        return { verified: true, values: expectedRows };
+  function bridgeRangeMutations(params, sheetName, range, rows) {
+    const bounds = bridgeRangeBounds(range);
+    const gid = bridgeMutationGid(params, sheetName);
+    return rows.flatMap((row, rowOffset) => row.map((value, columnOffset) => ({
+      gid,
+      sheetName,
+      row: bounds.firstRow + rowOffset,
+      columnIndex: bounds.firstColumn - 1 + columnOffset,
+      value: String(value ?? "")
+    })));
+  }
+
+  function bridgeMutationValues(verification, mutations, range, expectedRows) {
+    if (!verification.unconfirmed.length) return expectedRows;
+    const bounds = bridgeRangeBounds(range);
+    const groupKey = `${mutations[0]?.gid || ""}:${encodeURIComponent(mutations[0]?.sheetName || "")}`;
+    return expectedRows.map((row, rowOffset) => {
+      const observed = verification.observedRows.get(`${groupKey}:${bounds.firstRow + rowOffset}`) || [];
+      return row.map((_, columnOffset) => String(observed[bounds.firstColumn - 1 + columnOffset] ?? ""));
+    });
+  }
+
+  async function executeBridgeMutations(params, sheetName, mutations, selectionReference = "") {
+    await writeRanges(cellMutationOperations(mutations), selectionReference);
+    state.headerCache.clear();
+    state.sheetCache.clear();
+    return verifyCellMutations(mutations, {
+      delays: [500, 1_000, 2_000],
+      valuesEqual: bridgeValueEquivalent,
+      selectionReference,
+      readGroup: async (_group, firstRow, lastRow) => {
+        const result = await readBridgeRange({
+          ...params,
+          sheet: sheetName,
+          range: `A${firstRow}:${MAX_COLUMN}${lastRow}`
+        }, undefined);
+        return new Map(result.rows.map((row) => [row.row, row.values]));
       }
-    }
-    return { verified: false, values: bridgeResultValues(lastResult || { rows: [] }, expectedRows) };
+    });
+  }
+
+  function bridgeMutationResult(verification, mutations, range, expectedRows) {
+    return {
+      verified: verification.unconfirmed.length === 0,
+      values: bridgeMutationValues(verification, mutations, range, expectedRows),
+      retried: verification.retried
+    };
   }
 
   function visibleBridgeSheets() {
@@ -7376,10 +7414,14 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
       let range = "";
       if (headers.length) {
         range = bridgeWriteRange("A1", [headers]);
-        await writeRanges([{ reference: qualifiedReference(name, "A1"), rows: [headers] }]);
-        state.headerCache.clear();
-        state.sheetCache.clear();
-        verified = (await verifyBridgeMutation({ sheet: name }, range, [headers])).verified;
+        const mutations = bridgeRangeMutations(params, name, range, [headers]);
+        const verification = await executeBridgeMutations(
+          params,
+          name,
+          mutations,
+          qualifiedReference(name, "A1")
+        );
+        verified = verification.unconfirmed.length === 0;
       }
       await ensureWorkspaceLoaded();
       const createdSheet = visibleSheets().find((sheet) => normalizedColumn(sheet.name) === normalizedColumn(name));
@@ -7467,17 +7509,20 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
       const startRow = await nextBridgeAppendRow(targetSheet);
       const start = `A${startRow}`;
       const range = bridgeWriteRange(start, expectedRows);
-      await writeRanges([{ reference: qualifiedReference(targetSheet, start), rows: expectedRows }]);
-      state.headerCache.clear();
-      state.sheetCache.clear();
-      const verification = await verifyBridgeMutation({ ...params, sheet: targetSheet }, range, expectedRows);
+      const mutations = bridgeRangeMutations(params, targetSheet, range, expectedRows);
+      const verification = await executeBridgeMutations(
+        params,
+        targetSheet,
+        mutations,
+        qualifiedReference(targetSheet, start)
+      );
       return {
         spreadsheetId: spreadsheetId(),
         gid: currentGid(),
         sheet: targetSheet,
         start,
         range,
-        ...verification
+        ...bridgeMutationResult(verification, mutations, range, expectedRows)
       };
     }
 
@@ -7505,52 +7550,45 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
           value: value === null || value === undefined ? "" : String(value)
         };
       });
-      await writeRanges(cellMutationOperations(cells.map((cell) => ({
-        gid: String(params.gid || currentGid()),
+      const targetGid = bridgeMutationGid(params, targetSheet);
+      const mutations = cells.map((cell) => ({
+        gid: targetGid,
         sheetName: targetSheet,
         row: rowNumber,
         columnIndex: cell.columnIndex,
         value: cell.value
-      }))));
-      state.headerCache.clear();
-      state.sheetCache.clear();
-      let actualValues = {};
-      let verified = false;
-      for (const delay of [500, 1_000, 2_000]) {
-        await wait(delay);
-        const firstColumn = Math.min(...cells.map((cell) => cell.columnIndex));
-        const lastColumn = Math.max(...cells.map((cell) => cell.columnIndex));
-        const range = `${columnName(firstColumn + 1)}${rowNumber}:${columnName(lastColumn + 1)}${rowNumber}`;
-        const result = await readBridgeRange({ ...params, sheet: targetSheet, range }, undefined);
-        const values = result.rows[0]?.values || [];
-        actualValues = Object.fromEntries(cells.map((cell) => [
-          cell.column,
-          String(values[cell.columnIndex - firstColumn] ?? "")
-        ]));
-        verified = cells.every((cell) => bridgeValueEquivalent(actualValues[cell.column], cell.value));
-        if (verified) break;
-      }
+      }));
+      const firstColumn = Math.min(...cells.map((cell) => cell.columnIndex));
+      const lastColumn = Math.max(...cells.map((cell) => cell.columnIndex));
+      const range = `${columnName(firstColumn + 1)}${rowNumber}:${columnName(lastColumn + 1)}${rowNumber}`;
+      const verification = await executeBridgeMutations(
+        params,
+        targetSheet,
+        mutations,
+        qualifiedReference(targetSheet, `${columnName(lastColumn + 1)}${rowNumber}`)
+      );
+      const groupKey = `${mutations[0].gid}:${encodeURIComponent(targetSheet)}:${rowNumber}`;
+      const observed = verification.observedRows.get(groupKey) || [];
+      const actualValues = Object.fromEntries(cells.map((cell) => [
+        cell.column,
+        String(observed[cell.columnIndex] ?? "")
+      ]));
       return {
         spreadsheetId: spreadsheetId(),
         gid: currentGid(),
         sheet: targetSheet,
         row: rowNumber,
-        verified,
-        values: actualValues
+        verified: verification.unconfirmed.length === 0,
+        retried: verification.retried,
+        values: verification.unconfirmed.length ? actualValues : Object.fromEntries(cells.map((cell) => [cell.column, cell.value]))
       };
     }
 
     let range;
     let expectedRows;
-    let operation;
-
     if (command.action === "write") {
       expectedRows = bridgeRows(params.values);
       range = bridgeWriteRange(params.start, expectedRows);
-      operation = {
-        reference: qualifiedReference(targetSheet, range.split(":")[0]),
-        rows: expectedRows
-      };
     } else {
       range = normalizedBridgeRange(params.range);
       const [start, end = start] = range.split(":");
@@ -7560,19 +7598,21 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
       const height = Number(endMatch[2]) - Number(startMatch[2]) + 1;
       if (width <= 0 || height <= 0) throw new Error("El rango de limpieza está invertido");
       expectedRows = Array.from({ length: height }, () => Array(width).fill(""));
-      operation = { action: "clear", reference: qualifiedReference(targetSheet, range) };
     }
 
-    await writeRanges([operation]);
-    state.headerCache.clear();
-    state.sheetCache.clear();
-    const verification = await verifyBridgeMutation({ ...params, sheet: targetSheet }, range, expectedRows);
+    const mutations = bridgeRangeMutations(params, targetSheet, range, expectedRows);
+    const verification = await executeBridgeMutations(
+      params,
+      targetSheet,
+      mutations,
+      qualifiedReference(targetSheet, range.split(":").pop())
+    );
     return {
       spreadsheetId: spreadsheetId(),
       gid: String(params.gid || currentGid()),
       sheet: targetSheet,
       range,
-      ...verification
+      ...bridgeMutationResult(verification, mutations, range, expectedRows)
     };
   }
 
