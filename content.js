@@ -23,6 +23,7 @@ import Tooltip from "antd/es/tooltip/index.js";
 import {
   CalculatorOutlined,
   AppstoreOutlined,
+  BarChartOutlined,
   CalendarOutlined,
   CheckOutlined,
   CheckCircleOutlined,
@@ -32,11 +33,13 @@ import {
   DeleteOutlined,
   DownOutlined,
   DragOutlined,
+  FilterOutlined,
   LeftOutlined,
   LinkOutlined,
   MailOutlined,
   MoonOutlined,
   PhoneOutlined,
+  PieChartOutlined,
   PlusOutlined,
   RightOutlined,
   SearchOutlined,
@@ -905,7 +908,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     .kanban-view-mode { min-width: 180px; }
     .kanban-setting { display: inline-flex; align-items: center; gap: 6px; color: var(--workspace-text-secondary); font-size: 12px; white-space: nowrap; }
     .kanban-setting .ant-input-number { width: 72px; }
-    .kanban-view, .calendar-view, .timeline-view { display: flex; min-width: 0; min-height: 0; flex: 1; flex-direction: column; }
+    .kanban-view, .calendar-view, .timeline-view, .charts-view { display: flex; min-width: 0; min-height: 0; flex: 1; flex-direction: column; }
     .kanban-board {
       flex: 1; min-height: 0; gap: 12px; overflow: auto; padding: 12px; background: var(--workspace-surface-muted);
     }
@@ -974,6 +977,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     @media (max-width: 820px) {
       .view-controls { align-items: stretch; flex-direction: column; }
       .kanban-settings { flex-wrap: wrap; justify-content: flex-start; }
+      .charts-controls { justify-content: flex-start; }
     }
     .kanban-footer { display: flex; flex: 0 0 auto; justify-content: flex-end; padding: 10px 12px; border-top: 1px solid var(--workspace-border); background: var(--workspace-surface); }
     .month-controls { display: flex; align-items: center; gap: 8px; }
@@ -1040,6 +1044,20 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     .timeline-today-line::before { position: absolute; top: -4px; left: -4px; width: 8px; height: 8px; border-radius: 999px; background: #ff7875; content: ""; }
     .timeline-today-line.body { z-index: 1; }
     .timeline-empty { position: absolute; top: 0; right: 0; bottom: 0; left: 180px; display: flex; align-items: center; justify-content: center; }
+    .charts-controls { display: flex; min-width: 0; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; }
+    .charts-scroll { flex: 1; min-width: 0; min-height: 0; overflow: auto; padding: 12px; background: var(--workspace-surface-muted); }
+    .charts-surface { min-height: 420px; padding: 16px; border: 1px solid var(--workspace-border); border-radius: 6px; background: var(--workspace-surface); }
+    .charts-canvas { display: flex; min-height: 360px; align-items: center; justify-content: center; }
+    .charts-graphic { display: block; width: 100%; max-width: 1100px; height: auto; overflow: visible; }
+    .charts-summary {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px 16px;
+      margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--workspace-border);
+    }
+    .charts-summary-item { display: flex; min-width: 0; align-items: flex-start; gap: 10px; }
+    .charts-summary-swatch { width: 12px; height: 12px; flex: 0 0 12px; margin-top: 4px; border-radius: 4px; }
+    .charts-summary-copy { display: flex; min-width: 0; flex-direction: column; gap: 2px; }
+    .charts-summary-copy strong { color: var(--workspace-text); font-size: 12px; line-height: 1.35; overflow-wrap: anywhere; }
+    .charts-summary-copy span { color: var(--workspace-text-muted); font-size: 12px; line-height: 1.35; }
     .workspace-date-picker-popup .ant-picker-panel-container { max-width: calc(100vw - 16px); }
     .drawer > footer { min-width: 0; padding: 12px 24px 16px; border-top: 1px solid var(--antd-border-secondary); background: var(--antd-bg-container); }
     .meta { margin-bottom: 9px; color: var(--antd-text-tertiary); font-size: 11px; }
@@ -2463,9 +2481,284 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     );
   }
 
+  const CHART_TYPES = [
+    { value: "bar", label: "Barras", icon: React.createElement(BarChartOutlined) },
+    { value: "column", label: "Columnas", icon: React.createElement(AppstoreOutlined) },
+    { value: "pie", label: "Dona", icon: React.createElement(PieChartOutlined) },
+    { value: "funnel", label: "Embudo", icon: React.createElement(FilterOutlined) }
+  ];
+  const CHART_TYPE_VALUES = new Set(CHART_TYPES.map((type) => type.value));
+  const CHART_METRIC_TYPES = new Set(["currency", "number"]);
+  const CHART_PALETTE = [
+    "#13c2c2", "#fa8c16", "#9254de", "#2f54eb", "#52c41a", "#faad14",
+    "#eb2f96", "#08979c", "#722ed1", "#389e0d", "#d48806", "#096dd9"
+  ];
+
+  function chartMetricLabel(column) {
+    if (!column) return "Registros";
+    return column.type === "currency" ? `Suma de ${column.name}` : `Total de ${column.name}`;
+  }
+
+  function chartMetricValue(row, column) {
+    if (!column) return 1;
+    return parseNumber(row.cells[column.index], column) ?? 0;
+  }
+
+  function formatChartMetric(value, column) {
+    if (!column) return String(value);
+    if (column.type === "currency") {
+      return `${column.currencySymbol || "$"}${value.toFixed(Number(column.currencyDecimals ?? 2))}`;
+    }
+    return String(value);
+  }
+
+  function chartSvgTitle(item, metricLabel) {
+    return React.createElement("title", null, `${item.label} · ${metricLabel}: ${item.displayValue}`);
+  }
+
+  function SheetChartGraphic({ type, data, metricLabel, metricColumn }) {
+    const width = 960;
+    const minValue = Math.min(0, ...data.map((item) => item.value));
+    const maxValue = Math.max(0, ...data.map((item) => item.value));
+    const valueSpan = maxValue - minValue || 1;
+    const common = {
+      className: `charts-graphic charts-graphic--${type}`,
+      role: "img",
+      "aria-label": `${CHART_TYPES.find((item) => item.value === type)?.label || "Gráfico"}: ${metricLabel}`,
+      viewBox: `0 0 ${width} 360`
+    };
+    const shortLabel = (label, limit = 18) => label.length > limit ? `${label.slice(0, limit - 1)}…` : label;
+
+    if (type === "pie") {
+      const total = data.reduce((sum, item) => sum + Math.max(0, item.value), 0);
+      let offset = 0;
+      const segments = data.map((item) => {
+        const percent = total ? Math.max(0, item.value) / total * 100 : 0;
+        const segment = React.createElement(
+          "circle",
+          {
+            key: item.label,
+            cx: 480,
+            cy: 178,
+            r: 112,
+            fill: "none",
+            stroke: item.color,
+            strokeWidth: 72,
+            pathLength: 100,
+            strokeDasharray: `${percent} ${100 - percent}`,
+            strokeDashoffset: -offset,
+            transform: "rotate(-90 480 178)"
+          },
+          chartSvgTitle(item, metricLabel)
+        );
+        offset += percent;
+        return segment;
+      });
+      return React.createElement(
+        "svg",
+        common,
+        React.createElement("circle", { cx: 480, cy: 178, r: 112, fill: "none", stroke: "var(--workspace-border-soft)", strokeWidth: 72 }),
+        ...segments,
+        React.createElement("text", { x: 480, y: 174, textAnchor: "middle", fill: "var(--workspace-text-muted)", fontSize: 13 }, metricLabel),
+        React.createElement("text", { x: 480, y: 199, textAnchor: "middle", fill: "var(--workspace-text)", fontSize: 20, fontWeight: 700 }, formatChartMetric(total, metricColumn))
+      );
+    }
+
+    if (type === "column") {
+      const left = 54;
+      const top = 20;
+      const chartHeight = 270;
+      const availableWidth = width - left - 24;
+      const slot = availableWidth / Math.max(data.length, 1);
+      const barWidth = Math.min(72, slot * 0.68);
+      const zeroY = top + maxValue / valueSpan * chartHeight;
+      return React.createElement(
+        "svg",
+        common,
+        React.createElement("line", { x1: left, y1: zeroY, x2: width - 16, y2: zeroY, stroke: "var(--workspace-border)" }),
+        ...data.flatMap((item, index) => {
+          const valueY = top + (maxValue - item.value) / valueSpan * chartHeight;
+          const height = Math.abs(zeroY - valueY);
+          const x = left + slot * index + (slot - barWidth) / 2;
+          const y = Math.min(zeroY, valueY);
+          return [
+            React.createElement("rect", { key: `${item.label}:bar`, x, y, width: barWidth, height, rx: 4, fill: item.color }, chartSvgTitle(item, metricLabel)),
+            React.createElement("text", { key: `${item.label}:value`, x: x + barWidth / 2, y: item.value >= 0 ? Math.max(14, y - 7) : Math.min(306, y + height + 15), textAnchor: "middle", fill: "var(--workspace-text)", fontSize: 11 }, item.displayValue),
+            React.createElement("text", { key: `${item.label}:label`, x: x + barWidth / 2, y: top + chartHeight + 20, textAnchor: "middle", fill: "var(--workspace-text-muted)", fontSize: 11 }, shortLabel(item.label, 13))
+          ];
+        })
+      );
+    }
+
+    if (type === "funnel") {
+      const center = width / 2;
+      const top = 16;
+      const itemHeight = 320 / Math.max(data.length, 1);
+      const funnelMax = Math.max(1, ...data.map((item) => Math.max(0, item.value)));
+      return React.createElement(
+        "svg",
+        common,
+        ...data.flatMap((item, index) => {
+          const currentWidth = Math.max(10, Math.max(0, item.value) / funnelMax * 760);
+          const nextValue = data[index + 1]?.value ?? item.value;
+          const nextWidth = Math.max(10, Math.max(0, nextValue) / funnelMax * 760);
+          const y = top + index * itemHeight;
+          const points = `${center - currentWidth / 2},${y} ${center + currentWidth / 2},${y} ${center + nextWidth / 2},${y + itemHeight - 3} ${center - nextWidth / 2},${y + itemHeight - 3}`;
+          return [
+            React.createElement("polygon", { key: `${item.label}:shape`, points, fill: item.color }, chartSvgTitle(item, metricLabel)),
+            React.createElement("text", { key: `${item.label}:text`, x: center, y: y + itemHeight / 2 + 4, textAnchor: "middle", fill: "#fff", fontSize: 12, fontWeight: 700 }, `${shortLabel(item.label, 28)} · ${item.displayValue}`)
+          ];
+        })
+      );
+    }
+
+    const labelWidth = 170;
+    const rowHeight = 360 / Math.max(data.length, 1);
+    const chartWidth = width - labelWidth - 90;
+    const zeroX = labelWidth + (-minValue / valueSpan) * chartWidth;
+    return React.createElement(
+      "svg",
+      common,
+      ...data.flatMap((item, index) => {
+        const y = index * rowHeight + Math.max(5, rowHeight * 0.16);
+        const height = Math.max(10, rowHeight * 0.68);
+        const barWidth = Math.abs(item.value) / valueSpan * chartWidth;
+        const x = item.value >= 0 ? zeroX : zeroX - barWidth;
+        return [
+          React.createElement("text", { key: `${item.label}:label`, x: labelWidth - 12, y: y + height / 2 + 4, textAnchor: "end", fill: "var(--workspace-text-muted)", fontSize: 12 }, shortLabel(item.label)),
+          React.createElement("rect", { key: `${item.label}:bar`, x, y, width: barWidth, height, rx: 4, fill: item.color }, chartSvgTitle(item, metricLabel)),
+          React.createElement("text", { key: `${item.label}:value`, x: item.value >= 0 ? Math.min(width - 8, x + barWidth + 8) : Math.max(labelWidth + 4, x - 8), y: y + height / 2 + 4, textAnchor: item.value >= 0 ? "start" : "end", fill: "var(--workspace-text)", fontSize: 12 }, item.displayValue)
+        ];
+      })
+    );
+  }
+
+  function SheetCharts({
+    table,
+    columns,
+    visibleColumnIds,
+    initialChartType,
+    initialDimensionColumnId,
+    initialMetricColumnId,
+    onSettingChange
+  }) {
+    const visibleIds = Array.isArray(visibleColumnIds) ? new Set(visibleColumnIds) : null;
+    const displayColumns = visibleIds ? columns.filter((column) => visibleIds.has(column.id)) : columns;
+    const dimensionColumns = displayColumns.filter((column) => !CHART_METRIC_TYPES.has(column.type));
+    const metricColumns = displayColumns.filter((column) => CHART_METRIC_TYPES.has(column.type));
+    const [chartType, setChartType] = React.useState(() => CHART_TYPE_VALUES.has(initialChartType) ? initialChartType : "bar");
+    const [dimensionColumnId, setDimensionColumnId] = React.useState(() => String(initialDimensionColumnId || ""));
+    const [metricColumnId, setMetricColumnId] = React.useState(() => String(initialMetricColumnId || ""));
+    const dimensionColumn = dimensionColumns.find((column) => column.id === dimensionColumnId) || dimensionColumns[0];
+    const metricColumn = metricColumns.find((column) => column.id === metricColumnId) || null;
+    const metricLabel = chartMetricLabel(metricColumn);
+    const groups = new Map();
+
+    for (const row of sheetViewRows(table)) {
+      const label = dimensionColumn
+        ? sheetViewCellLabel(row.cells[dimensionColumn.index], dimensionColumn) || "Sin valor"
+        : "Registros";
+      groups.set(label, (groups.get(label) || 0) + chartMetricValue(row, metricColumn));
+    }
+    const data = Array.from(groups, ([label, value]) => ({
+      label,
+      value: Number(value.toFixed(6)),
+      displayValue: formatChartMetric(value, metricColumn)
+    }))
+      .sort((first, second) => second.value - first.value)
+      .map((item, index) => ({ ...item, color: CHART_PALETTE[index % CHART_PALETTE.length] }));
+    const changeSetting = (name, value, setter) => {
+      setter(value);
+      onSettingChange?.(name, value);
+    };
+    const chart = !data.length
+      ? React.createElement(Empty, { description: "Sin datos para graficar" })
+      : React.createElement(SheetChartGraphic, { type: chartType, data, metricLabel, metricColumn });
+
+    return React.createElement(
+      "div",
+      { className: "charts-view" },
+      React.createElement(
+        "div",
+        { className: "view-controls" },
+        React.createElement("strong", { className: "view-title" }, "Charts"),
+        React.createElement(
+          "div",
+          { className: "charts-controls" },
+          React.createElement(Segmented, {
+            options: CHART_TYPES,
+            value: chartType,
+            onChange: (value) => changeSetting("chartType", value, setChartType)
+          }),
+          React.createElement(Select, {
+            value: dimensionColumn?.id,
+            placeholder: "Agrupar por",
+            style: { minWidth: 190 },
+            options: dimensionColumns.map((column) => ({ value: column.id, label: column.name })),
+            onChange: (value) => changeSetting("chartDimensionColumnId", value, setDimensionColumnId)
+          }),
+          React.createElement(Select, {
+            allowClear: true,
+            value: metricColumn?.id,
+            placeholder: "Contar registros",
+            style: { minWidth: 190 },
+            options: metricColumns.map((column) => ({ value: column.id, label: chartMetricLabel(column) })),
+            onChange: (value) => changeSetting("chartMetricColumnId", value || "", setMetricColumnId)
+          })
+        )
+      ),
+      React.createElement(
+        "div",
+        { className: "charts-scroll" },
+        React.createElement(
+          "div",
+          { className: "charts-surface" },
+          dimensionColumns.length
+            ? React.createElement(
+              React.Fragment,
+              null,
+              React.createElement("div", { className: "charts-canvas", "data-chart-type": chartType }, chart),
+              data.length ? React.createElement(
+                "div",
+                { className: "charts-summary" },
+                ...data.map((item) => React.createElement(
+                  "div",
+                  { className: "charts-summary-item", key: item.label },
+                  React.createElement("span", { className: "charts-summary-swatch", style: { backgroundColor: item.color } }),
+                  React.createElement(
+                    "div",
+                    { className: "charts-summary-copy" },
+                    React.createElement("strong", null, item.label),
+                    React.createElement("span", null, `${metricLabel}: ${item.displayValue}`)
+                  )
+                ))
+              ) : null
+            )
+            : React.createElement(Empty, { description: "Agrega una propiedad para agrupar" })
+        )
+      )
+    );
+  }
+
   function workspaceDocumentName() {
     const title = String(document.title || "").replace(/\s+-\s+Hojas de c[aá]lculo de Google.*$/i, "").trim();
     return title || "Documento actual";
+  }
+
+  function sheetViewName(view) {
+    return view === "kanban" ? "Kanban"
+      : view === "calendar" ? "Calendario"
+        : view === "timeline" ? "Cronograma"
+          : view === "charts" ? "Charts"
+            : "Tabla";
+  }
+
+  function sheetViewIcon(view) {
+    return view === "table" ? TableOutlined
+      : view === "kanban" ? AppstoreOutlined
+        : view === "calendar" ? CalendarOutlined
+          : view === "charts" ? BarChartOutlined
+            : UnorderedListOutlined;
   }
 
   function workspaceSheetList() {
@@ -2713,7 +3006,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     React.useLayoutEffect(() => {
       const title = view === "table"
         ? workspaceDocumentName()
-        : `${view === "kanban" ? "Kanban" : view === "calendar" ? "Calendario" : "Cronograma"} · ${sheetName}`;
+        : `${sheetViewName(view)} · ${sheetName}`;
       setSheetViewHostOpen(Boolean(view), title);
       return () => setSheetViewHostOpen(false);
     }, [Boolean(view)]);
@@ -2722,7 +3015,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
       if (!view) return;
       sheetViewFrame.title = view === "table"
         ? workspaceDocumentName()
-        : `${view === "kanban" ? "Kanban" : view === "calendar" ? "Calendario" : "Cronograma"} · ${sheetName}`;
+        : `${sheetViewName(view)} · ${sheetName}`;
     }, [view, workspaceTarget.name, sheetName]);
 
     React.useEffect(() => {
@@ -2890,6 +3183,19 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
         onClearRows: clearWorkspaceRows,
         onHiddenColumnIdsChange: (hiddenColumnIds) => changeHiddenColumnIds(workspaceTarget.gid, workspaceTarget.name, hiddenColumnIds),
         onOpenRow: openSheetViewRow,
+        renderCharts: (visibleColumns) => {
+          const chartSettings = state.workspace?.sheetViews?.[workspaceTarget.gid] || {};
+          return React.createElement(SheetCharts, {
+            key: String(workspaceTarget.gid),
+            table,
+            columns: workspaceColumns,
+            visibleColumnIds: visibleColumns.map((column) => column.id),
+            initialChartType: chartSettings.chartType,
+            initialDimensionColumnId: chartSettings.chartDimensionColumnId,
+            initialMetricColumnId: chartSettings.chartMetricColumnId,
+            onSettingChange: (name, value) => setSheetViewSetting(workspaceTarget.gid, name, value)
+          });
+        },
         renderCalendar: (openWorkspaceRow, visibleColumns) => React.createElement(SheetCalendar, {
           table,
           columns: workspaceColumns,
@@ -2971,7 +3277,17 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
                 },
                 onOpenRow: (rowNumber) => openSheetViewRow(rowNumber, activeTarget)
               })
-            : null;
+              : view === "charts"
+                ? React.createElement(SheetCharts, {
+                  table,
+                  columns,
+                  visibleColumnIds: sourceColumns.map((column) => column.id),
+                  initialChartType: currentSheetViewSettings().chartType || settings.chartType,
+                  initialDimensionColumnId: currentSheetViewSettings().chartDimensionColumnId || settings.chartDimensionColumnId,
+                  initialMetricColumnId: currentSheetViewSettings().chartMetricColumnId || settings.chartMetricColumnId,
+                  onSettingChange: setCurrentSheetViewSetting
+                })
+                : null;
 
     return React.createElement(
       React.Fragment,
@@ -3026,6 +3342,16 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
         "data-sheet-view": "timeline",
         onClick: () => setView("timeline")
       }) : null,
+      React.createElement(Button, {
+        type: "text",
+        shape: "circle",
+        size: "small",
+        icon: React.createElement(BarChartOutlined),
+        title: "Abrir vista Charts",
+        "aria-label": "Abrir vista Charts",
+        "data-sheet-view": "charts",
+        onClick: () => setView("charts")
+      }),
       view ? createPortal(
         sheetViewTree(React.createElement(
           "section",
@@ -3039,10 +3365,10 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
             React.createElement(
               "div",
               { className: "sheet-view-panel-title" },
-              React.createElement(view === "table" ? TableOutlined : view === "kanban" ? AppstoreOutlined : view === "calendar" ? CalendarOutlined : UnorderedListOutlined),
+              React.createElement(sheetViewIcon(view)),
               React.createElement("span", { className: view === "table" ? "workspace-document-name" : undefined }, view === "table"
                 ? workspaceDocumentName()
-                : `${view === "kanban" ? "Kanban" : view === "calendar" ? "Calendario" : "Cronograma"} · ${sheetName}`),
+                : `${sheetViewName(view)} · ${sheetName}`),
               view === "table" ? React.createElement(
                 "nav",
                 { className: "workspace-browser-sheets", "aria-label": "Hojas del documento" },
@@ -4088,8 +4414,13 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
       const ids = new Set(columns.map((column) => column.id));
       const calendarColumnId = String(view.calendarColumnId || "");
       const kanbanColumnId = String(view.kanbanColumnId || "");
+      const chartDimensionColumnId = String(view.chartDimensionColumnId || "");
+      const chartMetricColumnId = String(view.chartMetricColumnId || "");
       clean.sheetViews[String(key)] = {
         calendarColumnId: columns.some((column) => column.id === calendarColumnId && column.type === "date") ? calendarColumnId : "",
+        chartDimensionColumnId: columns.some((column) => column.id === chartDimensionColumnId && !CHART_METRIC_TYPES.has(column.type)) ? chartDimensionColumnId : "",
+        chartMetricColumnId: columns.some((column) => column.id === chartMetricColumnId && CHART_METRIC_TYPES.has(column.type)) ? chartMetricColumnId : "",
+        chartType: CHART_TYPE_VALUES.has(view.chartType) ? view.chartType : "bar",
         kanbanColumnId: columns.some((column) => column.id === kanbanColumnId && column.type === "status") ? kanbanColumnId : "",
         kanbanColumns: Math.min(10, Math.max(1, Math.round(Number(view.kanbanColumns) || 3))),
         kanbanGroupOrder: [...new Set((Array.isArray(view.kanbanGroupOrder) ? view.kanbanGroupOrder : [])

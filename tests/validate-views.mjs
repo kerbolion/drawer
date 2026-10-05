@@ -205,7 +205,7 @@ try {
   }
 
   const initialViews = await cdp.evaluate(panelExpression('return Array.from(panel.querySelectorAll("[data-sheet-view]"), button => button.dataset.sheetView);'));
-  if (JSON.stringify(initialViews) !== JSON.stringify(["table"])) {
+  if (JSON.stringify(initialViews) !== JSON.stringify(["table", "charts"])) {
     throw new Error(`La tabla no quedo disponible como vista base: ${JSON.stringify(initialViews)}`);
   }
 
@@ -272,6 +272,28 @@ try {
   if (JSON.stringify(repeatedActiveSheet.rows) !== JSON.stringify(["2", "3", "4"]) || repeatedActiveSheet.empty || repeatedActiveSheet.selected !== "Contactos") {
     throw new Error(`Volver a elegir la hoja activa vacio sus datos: ${JSON.stringify(repeatedActiveSheet)}`);
   }
+
+  await cdp.evaluate(viewExpression('view.querySelector("[data-workspace-view=charts]").click();'));
+  const workspaceChartsDeadline = Date.now() + 5_000;
+  let workspaceCharts;
+  while (Date.now() < workspaceChartsDeadline) {
+    workspaceCharts = await cdp.evaluate(viewExpression(`return {
+      activeView: view.querySelector('[data-workspace-view].ant-btn-primary')?.dataset.workspaceView || '',
+      type: view.querySelector('.charts-canvas')?.dataset.chartType || '',
+      types: Array.from(view.querySelectorAll('.ant-segmented-item-label'), item => item.textContent.trim()),
+      summary: Array.from(view.querySelectorAll('.charts-summary-item'), item => item.textContent.trim())
+    };`));
+    if (workspaceCharts?.summary?.length === 3) break;
+    await delay(80);
+  }
+  if (workspaceCharts.activeView !== "charts" || workspaceCharts.type !== "bar" || JSON.stringify(workspaceCharts.types) !== JSON.stringify(["Barras", "Columnas", "Dona", "Embudo"]) || JSON.stringify(workspaceCharts.summary) !== JSON.stringify(["1Registros: 1", "2Registros: 1", "3Registros: 1"])) {
+    throw new Error(`Charts no agrupo los registros como Workspace: ${JSON.stringify(workspaceCharts)}`);
+  }
+  await cdp.evaluate(viewExpression(`Array.from(view.querySelectorAll('.ant-segmented-item'))
+    .find(item => item.textContent.trim() === 'Dona')?.click();`));
+  await delay(150);
+  const changedChartType = await cdp.evaluate(viewExpression('return view.querySelector(".charts-canvas")?.dataset.chartType || "";'));
+  if (changedChartType !== "pie") throw new Error(`Charts no cambio a Dona: ${changedChartType}`);
 
   await cdp.evaluate(viewExpression('view.querySelector("[data-workspace-view=table]").click();'));
   const workspaceRowsDeadline = Date.now() + 3_000;
@@ -715,7 +737,32 @@ try {
   await cdp.evaluate(viewExpression('view.querySelector("[data-close-sheet-view]")?.click();'));
   await delay(180);
 
+  await cdp.evaluate(panelExpression('panel.querySelector("[data-sheet-view=charts]").click();'));
+  const directChartsDeadline = Date.now() + 5_000;
+  let directCharts;
+  while (Date.now() < directChartsDeadline) {
+    directCharts = await cdp.evaluate(viewExpression(`return {
+      panel: view.querySelector('[data-sheet-view-panel]')?.dataset.sheetViewPanel || '',
+      title: view.querySelector('.sheet-view-panel-title')?.textContent.trim() || '',
+      type: view.querySelector('.charts-canvas')?.dataset.chartType || '',
+      summaryCount: view.querySelectorAll('.charts-summary-item').length
+    };`));
+    if (directCharts?.summaryCount === 3) break;
+    await delay(80);
+  }
+  if (directCharts.panel !== "charts" || !directCharts.title.includes("Charts") || directCharts.type !== "pie" || directCharts.summaryCount !== 3) {
+    throw new Error(`La vista directa de Charts no reutilizo su configuracion: ${JSON.stringify(directCharts)}`);
+  }
+  await cdp.evaluate(viewExpression('view.querySelector("[data-close-sheet-view]")?.click();'));
+  await delay(180);
+
   async function configureColumn(column, type, options = "", timelineRole = "") {
+    const configureDeadline = Date.now() + 5_000;
+    while (Date.now() < configureDeadline) {
+      const ready = await cdp.evaluate(panelExpression(`return Boolean(panel.querySelector('[data-configure-column="${column}"]'));`));
+      if (ready) break;
+      await delay(80);
+    }
     await cdp.evaluate(panelExpression(`
       panel.querySelector('[data-configure-column="${column}"]').click();
       const typeInput = panel.querySelector("#srd-property-type");
@@ -732,7 +779,7 @@ try {
 
   await configureColumn(3, "status", "Nuevo\nEn proceso\nCerrado");
   const statusButtons = await cdp.evaluate(panelExpression(`return Array.from(panel.querySelectorAll("[data-sheet-view]"), button => button.dataset.sheetView);`));
-  if (JSON.stringify(statusButtons) !== JSON.stringify(["table", "kanban"])) {
+  if (JSON.stringify(statusButtons) !== JSON.stringify(["table", "kanban", "charts"])) {
     throw new Error(`La condicion de Kanban no se aplico: ${JSON.stringify(statusButtons)}`);
   }
 
@@ -743,6 +790,7 @@ try {
     staleVisualizationRows[index][3] = value;
   });
   await configureColumn(4, "currency");
+  await delay(5_100);
   await cdp.evaluate(panelExpression('panel.querySelector("[data-sheet-view=kanban]").click();'));
   const kanbanTotalsDeadline = Date.now() + 5_000;
   let kanbanTotals;
@@ -775,7 +823,7 @@ try {
   await configureColumn(4, "date", "", "start");
   await configureColumn(2, "date", "", "end");
   const timelineViews = await cdp.evaluate(panelExpression('return Array.from(panel.querySelectorAll("[data-sheet-view]"), button => button.dataset.sheetView);'));
-  if (JSON.stringify(timelineViews) !== JSON.stringify(["table", "kanban", "calendar", "timeline"])) {
+  if (JSON.stringify(timelineViews) !== JSON.stringify(["table", "kanban", "calendar", "timeline", "charts"])) {
     throw new Error(`Cronograma aparecio sin sus dos claves de fecha: ${JSON.stringify(timelineViews)}`);
   }
   await cdp.evaluate(`window.postMessage({ source: "sheets-row-drawer", type: "sheet-change" }, location.origin)`, isolated.executionContextId);
@@ -865,7 +913,7 @@ try {
       beforeCheck: panel.querySelector(".sheet-view-actions")?.nextElementSibling?.classList.contains("save-state") || false
     };
   `));
-  if (JSON.stringify(viewButtons.views) !== JSON.stringify(["table", "kanban", "calendar"]) || !viewButtons.beforeCheck) {
+  if (JSON.stringify(viewButtons.views) !== JSON.stringify(["table", "kanban", "calendar", "charts"]) || !viewButtons.beforeCheck) {
     throw new Error(`Los botones no quedaron antes de la validacion: ${JSON.stringify(viewButtons)}`);
   }
 
@@ -1594,7 +1642,7 @@ try {
   }
   if (!rectangularClearSaved) throw new Error("Tabla no verifico el borrado rectangular de varias filas");
 
-  console.log("VISTAS_OK: Tabla, Kanban, Calendario y Cronograma usan una superficie independiente; sus registros reutilizan el drawer original.");
+  console.log("VISTAS_OK: Tabla, Kanban, Calendario, Cronograma y Charts usan una superficie independiente; sus registros reutilizan el drawer original.");
 } finally {
   cdp?.close();
   if (browser.pid) spawnSync("taskkill", ["/PID", String(browser.pid), "/T", "/F"], { stdio: "ignore", windowsHide: true });

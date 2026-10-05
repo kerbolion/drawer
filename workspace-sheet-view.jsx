@@ -8,6 +8,7 @@ import Select from "antd/es/select/index.js";
 import Spin from "antd/es/spin/index.js";
 import {
   AppstoreOutlined,
+  BarChartOutlined,
   CalendarOutlined,
   CloseOutlined,
   DeleteOutlined,
@@ -416,6 +417,7 @@ export function WorkspaceSheetView({
   onHiddenColumnIdsChange,
   onOpenRow,
   renderCalendar,
+  renderCharts,
   renderEditor,
   renderTypeIcon,
   toEditorValue,
@@ -492,7 +494,13 @@ export function WorkspaceSheetView({
             icon: React.createElement(UnorderedListOutlined),
             "data-workspace-view": "timeline",
             onClick: () => setActiveView("timeline")
-          }, "Cronograma") : null
+          }, "Cronograma") : null,
+          React.createElement(Button, {
+            type: activeView === "charts" ? "primary" : "text",
+            icon: React.createElement(BarChartOutlined),
+            "data-workspace-view": "charts",
+            onClick: () => setActiveView("charts")
+          }, "Charts")
         )
       ),
       error ? React.createElement("div", { className: "status error workspace-browser-error" }, error) : null,
@@ -509,7 +517,9 @@ export function WorkspaceSheetView({
                 ? renderCalendar(openRow, visibleColumns)
                 : activeView === "timeline"
                   ? renderTimeline(openRow, visibleColumns)
-                : activeView === "table" ? React.createElement(TableView, {
+                  : activeView === "charts"
+                    ? renderCharts(visibleColumns)
+                    : activeView === "table" ? React.createElement(TableView, {
                   columns,
                   hiddenColumnIds: hiddenColumns,
                   table,
