@@ -815,7 +815,7 @@ try {
     if (kanban.rows?.length === 3) break;
     await delay(100);
   }
-  if (!kanban.title.includes("Kanban") || kanban.rows.length !== 3 || kanban.groups[0]?.id !== "__empty__" || !kanban.groups.some((group) => group.id === "Nuevo" && group.count === 1) || !kanban.groups.some((group) => group.id === "__empty__" && group.count === 1) || kanban.groups.some((group) => group.id === "Cerrado")) {
+  if (!kanban.title.includes("Kanban") || kanban.rows.length !== 3 || kanban.groups[0]?.id !== "__empty__" || !kanban.groups.some((group) => group.id === "Nuevo" && group.count === 1) || !kanban.groups.some((group) => group.id === "__empty__" && group.count === 1) || !kanban.groups.some((group) => group.id === "Cerrado" && group.count === 0)) {
     throw new Error(`Kanban no represento toda la hoja: ${JSON.stringify(kanban)}`);
   }
 
@@ -1103,8 +1103,8 @@ try {
     view.querySelectorAll('[data-kanban-group]'),
     (group) => group.dataset.kanbanGroup
   );`));
-  if (!groupsAfterSave.includes("__empty__") || groupsAfterSave.includes("Cerrado")) {
-    throw new Error(`Kanban conservo etapas ausentes del documento: ${JSON.stringify(groupsAfterSave)}`);
+  if (!groupsAfterSave.includes("__empty__") || !groupsAfterSave.includes("Cerrado")) {
+    throw new Error(`Kanban oculto etapas configuradas sin registros: ${JSON.stringify(groupsAfterSave)}`);
   }
   const emptyDropHintHidden = await cdp.evaluate(viewExpression(`
     const card = view.querySelector('.kanban-card-shell[data-sheet-row="2"]');

@@ -1695,13 +1695,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     const documentValues = typeof getDocumentColumnValues === "function"
       ? getDocumentColumnValues(statusColumn)
       : rows.map((row) => row.cells[statusColumn.index]);
-    const documentGroups = new Set();
-    for (const documentValue of documentValues) {
-      const value = String(documentValue || "").trim();
-      if (value) documentGroups.add(value);
-    }
     const configuredGroups = propertyOptionEntries(statusColumn)
-      .filter((option) => documentGroups.has(option.label))
       .map((option) => ({
         id: option.label,
         label: option.label,
