@@ -1308,6 +1308,109 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     );
   }
 
+  const DATE_RANGE_OPERATORS = [
+    { value: "lt", label: "Menor que" },
+    { value: "lte", label: "Menor o igual" },
+    { value: "eq", label: "Igual" },
+    { value: "gte", label: "Mayor o igual" },
+    { value: "gt", label: "Mayor que" }
+  ];
+
+  function defaultDateRangeRules() {
+    return [
+      { id: "duration-lte-1", operator: "lte", value: 1, color: "#91caff" },
+      { id: "duration-lte-7", operator: "lte", value: 7, color: "#ffe58f" },
+      { id: "duration-gt-7", operator: "gt", value: 7, color: "#b7eb8f" }
+    ];
+  }
+
+  function normalizeDateRangeRule(rule, index) {
+    return {
+      id: String(rule?.id || `rule-${Date.now()}-${index + 1}`),
+      operator: DATE_RANGE_OPERATORS.some((option) => option.value === rule?.operator) ? rule.operator : "lte",
+      value: Math.max(1, Math.round(Number(rule?.value) || 1)),
+      color: validOptionColor(rule?.color, OPTION_PALETTE[index % OPTION_PALETTE.length])
+    };
+  }
+
+  function DateRangeRulesEditor({ property }) {
+    const [rules, setRules] = React.useState(() => (
+      Array.isArray(property.dateRangeRules)
+        ? property.dateRangeRules.map(normalizeDateRangeRule)
+        : defaultDateRangeRules()
+    ));
+    const updateRule = (index, patch) => setRules((current) => current.map((rule, ruleIndex) => (
+      ruleIndex === index ? normalizeDateRangeRule({ ...rule, ...patch }, ruleIndex) : rule
+    )));
+    const removeRule = (index) => setRules((current) => current.filter((_, ruleIndex) => ruleIndex !== index));
+    const addRule = () => setRules((current) => [
+      ...current,
+      normalizeDateRangeRule({
+        id: `rule-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+        operator: "lte",
+        value: 1,
+        color: OPTION_PALETTE[current.length % OPTION_PALETTE.length]
+      }, current.length)
+    ]);
+    const colorOptions = OPTION_PALETTE.map((color) => ({
+      value: color,
+      label: React.createElement("span", { className: "color-swatch", style: { backgroundColor: color } })
+    }));
+
+    return React.createElement(
+      "div",
+      { className: "option-editor", "data-date-range-rules": "" },
+      React.createElement(
+        "div",
+        { className: "option-editor-header" },
+        React.createElement("span", null, "Colores por duración en días"),
+        React.createElement(Button, {
+          type: "link",
+          htmlType: "button",
+          icon: React.createElement(PlusOutlined),
+          onClick: addRule
+        }, "Agregar")
+      ),
+      ...rules.map((rule, index) => React.createElement(
+        Space,
+        { key: rule.id, align: "baseline", className: "option-row days-rule-row", size: 8 },
+        React.createElement(Select, {
+          value: rule.operator,
+          options: DATE_RANGE_OPERATORS,
+          onChange: (operator) => updateRule(index, { operator }),
+          style: { width: 140 }
+        }),
+        React.createElement(InputNumber, {
+          min: 1,
+          precision: 0,
+          value: rule.value,
+          onChange: (value) => updateRule(index, { value }),
+          style: { width: 92 }
+        }),
+        React.createElement(Select, {
+          className: "color-select",
+          popupMatchSelectWidth: false,
+          value: rule.color,
+          options: colorOptions,
+          onChange: (color) => updateRule(index, { color }),
+          style: { width: 82 }
+        }),
+        React.createElement(Button, {
+          htmlType: "button",
+          icon: React.createElement(DeleteOutlined),
+          "aria-label": `Eliminar regla ${index + 1}`,
+          onClick: () => removeRule(index)
+        })
+      )),
+      React.createElement("input", {
+        name: "dateRangeRules",
+        type: "hidden",
+        value: JSON.stringify(rules),
+        readOnly: true
+      })
+    );
+  }
+
   function typeIcon(type, size = 14) {
     const lucideProps = { size, strokeWidth: 2 };
     const icons = {
@@ -2165,6 +2268,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     ));
     const [currentMonth, setCurrentMonth] = React.useState(() => dayjs().startOf("month"));
     const dateColumn = dateColumns.find((column) => column.id === columnId) || dateColumns[0];
+    const { start: timelineStartColumn } = timelineDateColumns(columns);
 
     React.useEffect(() => {
       if (!dateColumns.some((column) => column.id === columnId)) {
@@ -2183,7 +2287,15 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
       const key = dateInputValue(row.cells[dateColumn.index], dateColumn.dateFormat);
       if (!key) continue;
       if (!rowsByDate[key]) rowsByDate[key] = [];
-      rowsByDate[key].push(row);
+      const color = dateColumn.dateTimelineRole === "end" && timelineStartColumn
+        ? matchingDateRangeRule(
+          timelineStartColumn,
+          dateColumn,
+          row.cells[timelineStartColumn.index],
+          row.cells[dateColumn.index]
+        )?.color
+        : "";
+      rowsByDate[key].push({ row, color });
     }
     const selectColumn = (nextColumnId) => {
       setColumnId(nextColumnId);
@@ -2248,13 +2360,18 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
               React.createElement(
                 "div",
                 { className: "calendar-items" },
-                ...rows.map((row) => React.createElement(
+                ...rows.map(({ row, color }) => React.createElement(
                   "button",
                   {
                     className: "calendar-item",
                     "data-sheet-row": String(row.number),
                     key: row.number,
                     type: "button",
+                    style: validOptionColor(color) ? {
+                      backgroundColor: color,
+                      borderColor: "transparent",
+                      color: readableTagTextColor(color)
+                    } : undefined,
                     onDoubleClick: () => onOpenRow(row.number),
                     onKeyDown: (event) => {
                       if (event.key === "Enter" || event.key === " ") onOpenRow(row.number);
@@ -2275,6 +2392,24 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
       start: columns.find((column) => column.type === "date" && column.dateTimelineRole === "start"),
       end: columns.find((column) => column.type === "date" && column.dateTimelineRole === "end")
     };
+  }
+
+  function matchesDateRangeRule(rule, days) {
+    const value = Number(rule?.value || 0);
+    if (rule?.operator === "lt") return days < value;
+    if (rule?.operator === "lte") return days <= value;
+    if (rule?.operator === "eq") return days === value;
+    if (rule?.operator === "gte") return days >= value;
+    if (rule?.operator === "gt") return days > value;
+    return false;
+  }
+
+  function matchingDateRangeRule(startColumn, endColumn, startValue, endValue) {
+    const start = dayjs(dateInputValue(startValue, startColumn.dateFormat));
+    const end = dayjs(dateInputValue(endValue, endColumn.dateFormat));
+    if (!start.isValid() || !end.isValid() || end.isBefore(start, "day")) return null;
+    const days = end.diff(start, "day") + 1;
+    return (endColumn.dateRangeRules || []).find((rule) => matchesDateRangeRule(rule, days)) || null;
   }
 
   function SheetTimeline({ table, columns, visibleColumnIds, onDateChange, onOpenRow }) {
@@ -2310,6 +2445,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
         row,
         start,
         end,
+        color: matchingDateRangeRule(startColumn, endColumn, startValue, endValue)?.color || "",
         left: visibleStart.diff(monthStart, "day") * dayWidth,
         width: Math.max(44, (visibleEnd.diff(visibleStart, "day") + 1) * dayWidth),
         startsBefore: start.isBefore(monthStart, "day"),
@@ -2453,7 +2589,15 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
                       if (keyEvent.key === "Enter" || keyEvent.key === " ") onOpenRow(item.row.number);
                     },
                     onPointerDown: (pointerEvent) => beginPointerChange(pointerEvent, item, "move"),
-                    style: { left: labelWidth + Math.max(0, Math.min(item.left, gridWidth)), width: item.width },
+                    style: {
+                      left: labelWidth + Math.max(0, Math.min(item.left, gridWidth)),
+                      width: item.width,
+                      ...(validOptionColor(item.color) ? {
+                        backgroundColor: item.color,
+                        borderColor: "transparent",
+                        color: readableTagTextColor(item.color)
+                      } : {})
+                    },
                     type: "button"
                   },
                   React.createElement("span", {
@@ -4302,6 +4446,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
       currencyDecimals: 2,
       dateFormat: "DD/MM/YYYY",
       dateTimelineRole: "",
+      dateRangeRules: defaultDateRangeRules(),
       timeFormat: "24",
       checkedValue: "TRUE",
       uncheckedValue: "FALSE"
@@ -4344,6 +4489,9 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
       dateTimelineRole: source.type === "date" && ["start", "end"].includes(source.dateTimelineRole)
         ? source.dateTimelineRole
         : "",
+      dateRangeRules: Array.isArray(source.dateRangeRules)
+        ? source.dateRangeRules.map(normalizeDateRangeRule)
+        : fallback.dateRangeRules,
       timeFormat: source.timeFormat === "12" ? "12" : "24",
       checkedValue: normalizedCheckboxConfiguredValue(source.checkedValue, true),
       uncheckedValue: normalizedCheckboxConfiguredValue(source.uncheckedValue, false)
@@ -6507,9 +6655,11 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
       ? property.randomIdLength
       : existingRandomIdLength.value;
     ui.propertySettings._optionsRoot?.unmount();
+    ui.propertySettings._dateRangeRulesRoot?.unmount();
     ui.propertySettings._protectionRoot?.unmount();
     ui.propertySettings._randomIdRoot?.unmount();
     delete ui.propertySettings._optionsRoot;
+    delete ui.propertySettings._dateRangeRulesRoot;
     delete ui.propertySettings._protectionRoot;
     delete ui.propertySettings._randomIdRoot;
     ui.propertySettings.replaceChildren();
@@ -6562,14 +6712,35 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     }
 
     if (type === "date") {
-      ui.propertySettings.appendChild(propertyFormItem("dateTimelineRole", "Uso en cronograma", property.dateTimelineRole, {
+      const timelineRoleItem = propertyFormItem("dateTimelineRole", "Uso en cronograma", property.dateTimelineRole, {
         kind: "select",
         choices: [
           { value: "", label: "Sin asignar" },
           { value: "start", label: "Fecha inicial" },
           { value: "end", label: "Fecha final" }
         ]
-      }));
+      });
+      const rulesHost = element("div", "property-form-item date-range-rules-host");
+      const roleSelect = timelineRoleItem.querySelector('[name="dateTimelineRole"]');
+      let dateRangeRulesDraft = property.dateRangeRules;
+      const renderDateRangeRules = () => {
+        try {
+          const currentRules = JSON.parse(rulesHost.querySelector('[name="dateRangeRules"]')?.value || "null");
+          if (Array.isArray(currentRules)) dateRangeRulesDraft = currentRules;
+        } catch {}
+        ui.propertySettings._dateRangeRulesRoot?.unmount();
+        delete ui.propertySettings._dateRangeRulesRoot;
+        rulesHost.replaceChildren();
+        rulesHost.hidden = roleSelect?.value !== "end";
+        if (rulesHost.hidden) return;
+        ui.propertySettings._dateRangeRulesRoot = createRoot(rulesHost);
+        flushSync(() => ui.propertySettings._dateRangeRulesRoot.render(antdTree(
+          React.createElement(DateRangeRulesEditor, { property: { ...property, dateRangeRules: dateRangeRulesDraft } })
+        )));
+      };
+      roleSelect?.addEventListener("change", renderDateRangeRules);
+      ui.propertySettings.append(timelineRoleItem, rulesHost);
+      renderDateRangeRules();
     }
 
     if (["time", "datetime"].includes(type)) {
@@ -6643,6 +6814,11 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     try {
       submittedColors = JSON.parse(String(formData.get("optionColors") || "{}"));
     } catch {}
+    let dateRangeRules = previous.dateRangeRules;
+    try {
+      const submittedRules = JSON.parse(String(formData.get("dateRangeRules") || "null"));
+      if (Array.isArray(submittedRules)) dateRangeRules = submittedRules.map(normalizeDateRangeRule);
+    } catch {}
     const optionColors = Object.fromEntries(options.map((label, optionIndex) => [
       label,
       validOptionColor(
@@ -6664,6 +6840,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
       currencyDecimals: formData.get("currencyDecimals") ?? previous.currencyDecimals,
       dateFormat: formData.get("dateFormat") ?? previous.dateFormat,
       dateTimelineRole: formData.get("dateTimelineRole") ?? previous.dateTimelineRole,
+      dateRangeRules,
       timeFormat: formData.get("timeFormat") ?? previous.timeFormat,
       checkedValue: formData.get("checkedValue") ?? previous.checkedValue,
       uncheckedValue: formData.get("uncheckedValue") ?? previous.uncheckedValue

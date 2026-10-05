@@ -771,7 +771,10 @@ try {
       const optionInput = panel.querySelector('[name="options"]');
       if (optionInput) optionInput.value = ${JSON.stringify(options)};
       const timelineRoleInput = panel.querySelector('[name="dateTimelineRole"]');
-      if (timelineRoleInput) timelineRoleInput.value = ${JSON.stringify(timelineRole)};
+      if (timelineRoleInput) {
+        timelineRoleInput.value = ${JSON.stringify(timelineRole)};
+        timelineRoleInput.dispatchEvent(new Event("change", { bubbles: true }));
+      }
       panel.querySelector("#srd-property-form").requestSubmit();
     `));
     await delay(150);
@@ -822,6 +825,41 @@ try {
   });
   await configureColumn(4, "date", "", "start");
   await configureColumn(2, "date", "", "end");
+  const finalDateRules = await cdp.evaluate(panelExpression(`
+    panel.querySelector('[data-configure-column="2"]').click();
+    return {
+      visible: !panel.querySelector('[data-date-range-rules]')?.closest('.date-range-rules-host')?.hidden,
+      rules: JSON.parse(panel.querySelector('[name="dateRangeRules"]')?.value || '[]')
+    };
+  `));
+  if (!finalDateRules.visible || JSON.stringify(finalDateRules.rules.map(({ operator, value, color }) => ({ operator, value, color }))) !== JSON.stringify([
+    { operator: "lte", value: 1, color: "#91caff" },
+    { operator: "lte", value: 7, color: "#ffe58f" },
+    { operator: "gt", value: 7, color: "#b7eb8f" }
+  ])) {
+    throw new Error(`Fecha final no mostro sus colores por duracion: ${JSON.stringify(finalDateRules)}`);
+  }
+  await cdp.evaluate(panelExpression(`
+    const input = panel.querySelector('.days-rule-row input[role="spinbutton"]');
+    const setter = Object.getOwnPropertyDescriptor(panel.defaultView.HTMLInputElement.prototype, 'value').set;
+    setter.call(input, '2');
+    input.dispatchEvent(new panel.defaultView.Event('input', { bubbles: true }));
+    input.dispatchEvent(new panel.defaultView.Event('change', { bubbles: true }));
+  `));
+  await delay(80);
+  const editedDateRules = await cdp.evaluate(panelExpression(`
+    const rules = JSON.parse(panel.querySelector('[name="dateRangeRules"]')?.value || '[]');
+    panel.querySelector('#srd-property-form').requestSubmit();
+    return rules;
+  `));
+  if (editedDateRules[0]?.value !== 2) throw new Error(`Editar una regla de duracion no actualizo el formulario: ${JSON.stringify(editedDateRules)}`);
+  await delay(180);
+  const persistedDateRule = await cdp.evaluate(panelExpression(`
+    panel.querySelector('[data-configure-column="2"]').click();
+    return JSON.parse(panel.querySelector('[name="dateRangeRules"]')?.value || '[]')[0]?.value;
+  `));
+  if (persistedDateRule !== 2) throw new Error(`La regla de duracion de Fecha final no persistio: ${persistedDateRule}`);
+  await cdp.evaluate(panelExpression('panel.querySelector(".property-actions .secondary-button").click();'));
   const timelineViews = await cdp.evaluate(panelExpression('return Array.from(panel.querySelectorAll("[data-sheet-view]"), button => button.dataset.sheetView);'));
   if (JSON.stringify(timelineViews) !== JSON.stringify(["table", "kanban", "calendar", "timeline", "charts"])) {
     throw new Error(`Cronograma aparecio sin sus dos claves de fecha: ${JSON.stringify(timelineViews)}`);
@@ -844,12 +882,13 @@ try {
       roles: Array.from(view.querySelectorAll('.timeline-property-key'), item => item.textContent.trim()),
       month: view.querySelector('.timeline-label-cell')?.textContent.trim() || '',
       rows: Array.from(view.querySelectorAll('.timeline-bar'), item => item.dataset.sheetRow),
+      colors: Array.from(view.querySelectorAll('.timeline-bar'), item => item.style.backgroundColor),
       handles: view.querySelectorAll('.timeline-range-handle').length
     };`));
     if (timeline?.rows?.length === 2) break;
     await delay(80);
   }
-  if (timeline.panel !== "timeline" || !timeline.title.includes("Cronograma") || JSON.stringify(timeline.roles) !== JSON.stringify(["Inicio: Fecha", "Fin: Nombre"]) || timeline.month !== "octubre 2026" || JSON.stringify(timeline.rows) !== JSON.stringify(["2", "3"]) || timeline.handles !== 4) {
+  if (timeline.panel !== "timeline" || !timeline.title.includes("Cronograma") || JSON.stringify(timeline.roles) !== JSON.stringify(["Inicio: Fecha", "Fin: Nombre"]) || timeline.month !== "octubre 2026" || JSON.stringify(timeline.rows) !== JSON.stringify(["2", "3"]) || JSON.stringify(timeline.colors) !== JSON.stringify(["rgb(255, 229, 143)", "rgb(255, 229, 143)"]) || timeline.handles !== 4) {
     throw new Error(`Cronograma no uso las claves de fecha configuradas: ${JSON.stringify(timeline)}`);
   }
   const timelineResize = await cdp.evaluate(viewExpression(`
