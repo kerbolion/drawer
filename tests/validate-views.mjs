@@ -734,6 +734,36 @@ try {
     throw new Error(`La condicion de Kanban no se aplico: ${JSON.stringify(statusButtons)}`);
   }
 
+  const originalDates = sheet.rows.map((row) => row[3]);
+  const originalStaleDates = staleVisualizationRows.map((row) => row[3]);
+  ["10.5", "5", "2,25"].forEach((value, index) => {
+    sheet.rows[index][3] = value;
+    staleVisualizationRows[index][3] = value;
+  });
+  await configureColumn(4, "currency");
+  await cdp.evaluate(panelExpression('panel.querySelector("[data-sheet-view=kanban]").click();'));
+  const kanbanTotalsDeadline = Date.now() + 5_000;
+  let kanbanTotals;
+  while (Date.now() < kanbanTotalsDeadline) {
+    kanbanTotals = await cdp.evaluate(viewExpression(`return Object.fromEntries(
+      Array.from(view.querySelectorAll('[data-kanban-group]'), group => [
+        group.dataset.kanbanGroup,
+        group.querySelector('.kanban-total')?.textContent || ''
+      ])
+    );`));
+    if (kanbanTotals?.Nuevo === "$10.50" && kanbanTotals?.["En proceso"] === "$5.00" && kanbanTotals?.__empty__ === "$2.25") break;
+    await delay(80);
+  }
+  if (kanbanTotals?.Nuevo !== "$10.50" || kanbanTotals?.["En proceso"] !== "$5.00" || kanbanTotals?.__empty__ !== "$2.25") {
+    throw new Error(`Kanban no acumulo el monto por etapa: ${JSON.stringify(kanbanTotals)}`);
+  }
+  await cdp.evaluate(viewExpression('view.querySelector("[data-close-sheet-view]").click();'));
+  await delay(150);
+  originalDates.forEach((value, index) => {
+    sheet.rows[index][3] = value;
+    staleVisualizationRows[index][3] = originalStaleDates[index];
+  });
+
   await configureColumn(4, "date");
   const viewButtons = await cdp.evaluate(panelExpression(`
     return {

@@ -926,7 +926,9 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     }
     .kanban-column-title { display: flex; min-width: 0; align-items: center; gap: 6px; color: var(--workspace-text); font-weight: 700; }
     .kanban-column-title .ant-tag { max-width: 190px; margin-inline-end: 0; overflow: hidden; text-overflow: ellipsis; }
-    .kanban-count { color: var(--workspace-text-muted); font-size: 12px; }
+    .kanban-column-stats { display: grid; flex: 0 0 auto; gap: 2px; justify-items: end; }
+    .kanban-count, .kanban-total { color: var(--workspace-text-muted); font-size: 12px; }
+    .kanban-total { color: var(--workspace-text); font-weight: 700; }
     .kanban-cards { display: flex; min-height: 0; flex: 1; flex-direction: column; gap: 8px; overflow-y: auto; padding: 10px; }
     .kanban-cards:has(.kanban-card-shell.dragging) .kanban-empty-drop { display: none; }
     .kanban-card-shell {
@@ -1444,6 +1446,23 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     return String(value ?? "").trim();
   }
 
+  function sheetViewKanbanTotal(columns, rows) {
+    const totalColumn = columns.find((column) => column.type === "currency")
+      || columns.find((column) => column.type === "number");
+    if (!totalColumn) return "";
+
+    const total = rows.reduce((sum, row) => {
+      const number = parseNumber(row.cells[totalColumn.index], totalColumn);
+      return number === null ? sum : sum + number;
+    }, 0);
+    if (!total) return "";
+
+    if (totalColumn.type === "currency") {
+      return `${totalColumn.currencySymbol || "$"}${total.toFixed(Number(totalColumn.currencyDecimals ?? 2))}`;
+    }
+    return String(total);
+  }
+
   function SheetViewEmpty({ description }) {
     return React.createElement(
       "div",
@@ -1509,7 +1528,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     );
   }
 
-  function KanbanColumn({ columns, group, groupRows, movingRows, onOpenRow, statusColumn, suppressOpenRef, titleColumn, visibleRows }) {
+  function KanbanColumn({ columns, group, groupRows, movingRows, onOpenRow, statusColumn, suppressOpenRef, titleColumn, total, visibleRows }) {
     return React.createElement(
       "section",
       {
@@ -1524,7 +1543,12 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
           { className: "kanban-column-title" },
           group.color ? optionTag(group.label, group.color) : React.createElement("span", null, group.label)
         ),
-        React.createElement("span", { className: "kanban-count" }, String(groupRows.length))
+        React.createElement(
+          "div",
+          { className: "kanban-column-stats" },
+          total ? React.createElement("span", { className: "kanban-total" }, total) : null,
+          React.createElement("span", { className: "kanban-count" }, String(groupRows.length))
+        )
       ),
       React.createElement(
         "div",
@@ -2046,6 +2070,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
             statusColumn,
             suppressOpenRef,
             titleColumn,
+            total: sheetViewKanbanTotal(columns, groupRows),
             visibleRows
           });
         })
