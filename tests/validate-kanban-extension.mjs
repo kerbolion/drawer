@@ -262,7 +262,83 @@ try {
     throw new Error(`El tablero no se restauro al recargar: ${JSON.stringify(restored)}`);
   }
 
-  console.log("KANBAN_EXTENSION_OK: pestaña completa, scroll estable y persistencia en chrome.storage.local confirmados.");
+  const deletion = await cdp.evaluate(`(async()=>{
+    let initialCards=document.querySelectorAll('.card').length
+    let initialColumns=document.querySelectorAll('.column').length
+    let card=document.querySelector('.card')
+    card.dispatchEvent(new MouseEvent('contextmenu',{
+      bubbles:true,
+      cancelable:true,
+      clientX:50,
+      clientY:50
+    }))
+    let cardMenu=document.querySelector('#delete-context').textContent.trim()
+    document.querySelector('#delete-context').click()
+    await new Promise(resolve=>requestAnimationFrame(resolve))
+    let cardModal=document.querySelector('#confirm-title').textContent.trim()
+    document.querySelector('#accept-confirm').click()
+    await new Promise(resolve=>setTimeout(resolve,80))
+
+    let column=document.querySelector('.column:last-child')
+    column.querySelector('h3').dispatchEvent(new MouseEvent('contextmenu',{
+      bubbles:true,
+      cancelable:true,
+      clientX:70,
+      clientY:70
+    }))
+    let columnMenu=document.querySelector('#delete-context').textContent.trim()
+    document.querySelector('#delete-context').click()
+    await new Promise(resolve=>requestAnimationFrame(resolve))
+    let columnModal=document.querySelector('#confirm-title').textContent.trim()
+    document.querySelector('#accept-confirm').click()
+    await new Promise(resolve=>setTimeout(resolve,80))
+
+    let cards=document.querySelectorAll('.card').length
+    let columns=document.querySelectorAll('.column').length
+    let stored=(await chrome.storage.local.get(['kanban-data']))['kanban-data']
+    let board=stored.workspaces.find(workspace=>workspace.id===stored.activeWorkspace).board
+
+    return {
+      initialCards,
+      initialColumns,
+      cards,
+      columns,
+      storedCards:board.reduce((total,item)=>total+item.cards.length,0),
+      storedColumns:board.length,
+      cardMenu,
+      cardModal,
+      columnMenu,
+      columnModal
+    }
+  })()`);
+
+  if (
+    deletion.cards >= deletion.initialCards ||
+    deletion.columns !== deletion.initialColumns - 1 ||
+    deletion.storedCards !== deletion.cards ||
+    deletion.storedColumns !== deletion.columns ||
+    deletion.cardMenu !== "Eliminar tarjeta" ||
+    deletion.cardModal !== "Eliminar tarjeta" ||
+    deletion.columnMenu !== "Eliminar columna" ||
+    deletion.columnModal !== "Eliminar columna"
+  ) {
+    throw new Error(`El menu contextual no elimino correctamente: ${JSON.stringify(deletion)}`);
+  }
+
+  cdp.reload();
+  await delay(500);
+  const deletionRestored = await cdp.evaluate(`({
+    cards:document.querySelectorAll('.card').length,
+    columns:document.querySelectorAll('.column').length
+  })`);
+  if (
+    deletionRestored.cards !== deletion.cards ||
+    deletionRestored.columns !== deletion.columns
+  ) {
+    throw new Error(`Las eliminaciones no persistieron: ${JSON.stringify({ deletion, deletionRestored })}`);
+  }
+
+  console.log("KANBAN_EXTENSION_OK: pestaña completa, scroll estable, menu contextual y persistencia confirmados.");
 } finally {
   cdp?.close();
   browser.kill();

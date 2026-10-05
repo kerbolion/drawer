@@ -161,16 +161,10 @@ body{
 .settings input{
   width:75px;
   padding:5px;
-  font-size:16px;
-  border-radius: 20px;
-  text-align: center;
 }
 
 .settings select{
   padding:5px;
-  font-size:16px;
-  border-radius: 20px;
-  text-align: center;
 }
 
 button{
@@ -267,6 +261,34 @@ select{
   pointer-events:none;
   transition:none;
   will-change:transform;
+}
+
+.context-menu{
+  position:fixed;
+  z-index:9999;
+  min-width:170px;
+  padding:5px;
+  border:1px solid var(--site-border);
+  border-radius:7px;
+  background:var(--site-bg);
+  box-shadow:0 10px 30px var(--site-shadow);
+}
+
+.context-menu[hidden]{
+  display:none;
+}
+
+.context-menu button{
+  width:100%;
+  padding:8px 10px;
+  border-radius:5px;
+  background:transparent;
+  color:var(--danger);
+  text-align:left;
+}
+
+.context-menu button:hover{
+  background:color-mix(in srgb,var(--danger) 10%,var(--site-bg));
 }
 
 [contenteditable="true"]{
@@ -455,6 +477,12 @@ select{
 
   </section>
 
+</div>
+
+<div class="context-menu" id="context-menu" hidden>
+  <button id="delete-context" type="button">
+    Eliminar
+  </button>
 </div>
 
 <div class="modal-backdrop" id="confirm-modal" hidden>

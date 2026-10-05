@@ -20,7 +20,15 @@ const cancelConfirm=
 const acceptConfirm=
   document.querySelector('#accept-confirm')
 
+const contextMenu=
+  document.querySelector('#context-menu')
+
+const deleteContext=
+  document.querySelector('#delete-context')
+
 let resolveModal
+let modalMode='input'
+let contextTarget
 
 
 function cerrarModal(value=null){
@@ -33,9 +41,13 @@ function cerrarModal(value=null){
 
 function pedirNombre(title,message,value=''){
 
+  modalMode='input'
   confirmTitle.textContent=title
   confirmMessage.textContent=message
   confirmInput.value=value
+  confirmInput.hidden=false
+  acceptConfirm.textContent='Guardar'
+  acceptConfirm.className='primary'
   confirmModal.hidden=false
 
   requestAnimationFrame(()=>{
@@ -49,10 +61,42 @@ function pedirNombre(title,message,value=''){
 }
 
 
+function pedirConfirmacion(title,message){
+
+  modalMode='confirm'
+  confirmTitle.textContent=title
+  confirmMessage.textContent=message
+  confirmInput.value=''
+  confirmInput.hidden=true
+  acceptConfirm.textContent='Eliminar'
+  acceptConfirm.className='danger'
+  confirmModal.hidden=false
+
+  requestAnimationFrame(()=>{
+    acceptConfirm.focus()
+  })
+
+  return new Promise(resolve=>{
+    resolveModal=resolve
+  })
+}
+
+
+function cerrarMenuContextual(){
+
+  contextMenu.hidden=true
+  contextTarget=null
+}
+
+
 cancelConfirm.onclick=()=>cerrarModal()
 
 acceptConfirm.onclick=()=>
-  cerrarModal(confirmInput.value)
+  cerrarModal(
+    modalMode==='confirm'
+      ? true
+      : confirmInput.value
+  )
 
 confirmModal.onclick=e=>{
 
@@ -63,7 +107,11 @@ confirmModal.onclick=e=>{
 confirmInput.onkeydown=e=>{
 
   if(e.key==='Enter')
-    cerrarModal(confirmInput.value)
+    cerrarModal(
+      modalMode==='confirm'
+        ? true
+        : confirmInput.value
+    )
 
   if(e.key==='Escape')
     cerrarModal()
@@ -523,6 +571,111 @@ minWidth.oninput=()=>{
 window.addEventListener(
   'resize',
   ajustarColumnas
+)
+
+
+document.addEventListener(
+  'contextmenu',
+  e=>{
+
+    let card=e.target.closest('.card')
+    let column=e.target.closest('.column')
+
+    if(!column || !kanban.contains(column)){
+      cerrarMenuContextual()
+      return
+    }
+
+    e.preventDefault()
+    contextTarget=card || column
+
+    deleteContext.textContent=
+      card
+        ? 'Eliminar tarjeta'
+        : 'Eliminar columna'
+
+    contextMenu.hidden=false
+
+    let rect=contextMenu.getBoundingClientRect()
+
+    contextMenu.style.left=
+      Math.max(
+        6,
+        Math.min(e.clientX,innerWidth-rect.width-6)
+      )+'px'
+
+    contextMenu.style.top=
+      Math.max(
+        6,
+        Math.min(e.clientY,innerHeight-rect.height-6)
+      )+'px'
+  }
+)
+
+
+deleteContext.onclick=async()=>{
+
+  let target=contextTarget
+  let card=target?.matches('.card')
+  let label=card
+    ? target.textContent.trim()
+    : target?.querySelector('h3')
+        ?.textContent.trim()
+
+  cerrarMenuContextual()
+
+  if(!target)
+    return
+
+  let accepted=await pedirConfirmacion(
+    card ? 'Eliminar tarjeta' : 'Eliminar columna',
+    `Vas a eliminar ${card ? 'la tarjeta' : 'la columna'} "${label || ''}". Esta accion no se puede deshacer.`
+  )
+
+  if(!accepted || !target.isConnected)
+    return
+
+  target.remove()
+  ajustarColumnas()
+  guardar()
+}
+
+
+document.addEventListener(
+  'click',
+  e=>{
+
+    if(!contextMenu.contains(e.target))
+      cerrarMenuContextual()
+  },
+  true
+)
+
+
+document.addEventListener(
+  'keydown',
+  e=>{
+
+    if(e.key==='Escape'){
+      cerrarMenuContextual()
+
+      if(!confirmModal.hidden)
+        cerrarModal()
+    }
+  }
+)
+
+
+window.addEventListener(
+  'scroll',
+  cerrarMenuContextual,
+  true
+)
+
+
+window.addEventListener(
+  'resize',
+  cerrarMenuContextual
 )
 
 
