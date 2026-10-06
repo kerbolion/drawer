@@ -772,8 +772,23 @@ try {
         clientY:120
       }))
     let boardEditVisible=!document.querySelector('#edit-context').hidden
+    let boardAddColumnVisible=!document.querySelector('#add-column-context').hidden
+    let boardAddColumnLabel=document.querySelector('#add-column-context').textContent.trim()
     let boardDeleteLabel=document.querySelector('#delete-context').textContent.trim()
-    document.body.click()
+    let boardColumnsBefore=sourceBoard.querySelectorAll(
+      '.overview-columns > .column'
+    ).length
+    document.querySelector('#add-column-context').click()
+    await new Promise(resolve=>requestAnimationFrame(resolve))
+    let boardColumnsAfter=sourceBoard.querySelectorAll(
+      '.overview-columns > .column'
+    ).length
+    let addedHeading=sourceBoard.querySelector(
+      '.overview-columns > .column:last-child h3'
+    )
+    let addedColumnEditing=addedHeading.isContentEditable
+    addedHeading.blur()
+    await new Promise(resolve=>setTimeout(resolve,40))
 
     document.querySelector('#view').value='row'
     document.querySelector('#view').dispatchEvent(new Event('change',{bubbles:true}))
@@ -786,8 +801,10 @@ try {
     ).length
 
     document.querySelector('.view-button').click()
+    let addViewLabel=document.querySelector('#new-view').textContent.trim()
     document.querySelector('#new-view').click()
     await new Promise(resolve=>requestAnimationFrame(resolve))
+    let addViewModalTitle=document.querySelector('#confirm-title').textContent.trim()
     let viewCheckboxes=[...document.querySelectorAll(
       '#view-workspaces input[type="checkbox"]'
     )]
@@ -845,6 +862,11 @@ try {
       contextColumnMoved,
       countersMatch,
       boardEditVisible,
+      boardAddColumnVisible,
+      boardAddColumnLabel,
+      boardColumnsBefore,
+      boardColumnsAfter,
+      addedColumnEditing,
       boardDeleteLabel,
       moveBoards,
       moveOpensLeft,
@@ -853,6 +875,8 @@ try {
       columnMoveOptions,
       rowMode,
       viewCheckboxes:viewCheckboxes.length,
+      addViewLabel,
+      addViewModalTitle,
       customViewId,
       customWorkspaceIds,
       customKeepsRow,
@@ -879,6 +903,10 @@ try {
     !overview.contextColumnMoved ||
     !overview.countersMatch ||
     !overview.boardEditVisible ||
+    !overview.boardAddColumnVisible ||
+    overview.boardAddColumnLabel !== "Agregar columna" ||
+    overview.boardColumnsAfter !== overview.boardColumnsBefore + 1 ||
+    !overview.addedColumnEditing ||
     overview.boardDeleteLabel !== "Eliminar tablero" ||
     overview.moveBoards.length !== overview.tabs ||
     !overview.moveOpensLeft ||
@@ -888,6 +916,8 @@ try {
     overview.columnMoveOptions.some(option=>option.includes(" > ")) ||
     !overview.rowMode ||
     overview.viewCheckboxes !== overview.tabs ||
+    overview.addViewLabel !== "Agregar vista" ||
+    overview.addViewModalTitle !== "Agregar vista" ||
     !overview.customViewId ||
     JSON.stringify(overview.customWorkspaceIds) !== JSON.stringify([boardDeletion.activeId]) ||
     !overview.customKeepsRow ||

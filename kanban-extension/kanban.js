@@ -37,6 +37,9 @@ const contextMenu=
 const editContext=
   document.querySelector('#edit-context')
 
+const addColumnContext=
+  document.querySelector('#add-column-context')
+
 const copyContext=
   document.querySelector('#copy-context')
 
@@ -209,7 +212,7 @@ function mostrarMensaje(title,message){
 function pedirVista(){
 
   modalMode='view'
-  confirmTitle.textContent='Nueva vista'
+  confirmTitle.textContent='Agregar vista'
   confirmMessage.textContent=
     'Escribe un nombre y selecciona los tableros que quieres incluir.'
   confirmInput.value=`Vista ${views.length+1}`
@@ -1547,6 +1550,7 @@ document.addEventListener(
       e.preventDefault()
       contextTarget=workspaceTab
       editContext.hidden=false
+      addColumnContext.hidden=false
       copyContext.hidden=true
       pasteContext.hidden=true
       duplicateContext.hidden=true
@@ -1560,6 +1564,7 @@ document.addEventListener(
       e.preventDefault()
       contextTarget=card || column
       editContext.hidden=true
+      addColumnContext.hidden=true
       copyContext.hidden=false
       pasteContext.hidden=internalClipboard?.type!=='card'
       duplicateContext.hidden=false
@@ -1588,6 +1593,7 @@ document.addEventListener(
       contextTarget=overviewWorkspace
       seleccionarTableroVista(overviewWorkspace)
       editContext.hidden=false
+      addColumnContext.hidden=false
       copyContext.hidden=true
       pasteContext.hidden=true
       duplicateContext.hidden=true
@@ -1602,6 +1608,7 @@ document.addEventListener(
       e.preventDefault()
       contextTarget=kanban
       editContext.hidden=true
+      addColumnContext.hidden=true
       copyContext.hidden=true
       pasteContext.hidden=false
       duplicateContext.hidden=true
@@ -1675,6 +1682,56 @@ editContext.onclick=async()=>{
       overviewTitle.textContent=workspace.title
   }
 
+  guardar({tablero:false,configuracion:false})
+}
+
+
+addColumnContext.onclick=()=>{
+
+  let target=contextTarget
+  let workspaceId=target?.dataset.workspace
+  cerrarMenuContextual()
+
+  if(!workspaceId)
+    return
+
+  let workspace=workspaces.find(
+    item=>item.id===workspaceId
+  )
+
+  if(!workspace)
+    return
+
+  let visibleContainer=overviewMode
+    ? kanban.querySelector(
+        `.overview-workspace[data-workspace="${CSS.escape(workspaceId)}"] .overview-columns`
+      )
+    : workspaceId===activeWorkspace
+      ? kanban
+      : null
+
+  if(visibleContainer){
+    let count=visibleContainer.querySelectorAll(
+      ':scope > .column'
+    ).length
+    let column=crearColumna({
+      title:`Nueva columna ${count+1}`
+    })
+
+    visibleContainer.querySelector('.overview-empty')?.remove()
+    visibleContainer.append(column)
+    actualizarVaciosVistaGeneral()
+    ajustarColumnas()
+    guardar()
+    editar(column.querySelector('h3'),true)
+    return
+  }
+
+  workspace.board.push({
+    title:`Nueva columna ${workspace.board.length+1}`,
+    cards:[]
+  })
+  workspaceBoards.delete(workspaceId)
   guardar({tablero:false,configuracion:false})
 }
 
