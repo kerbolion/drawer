@@ -346,6 +346,28 @@ try {
     result.duplicateStored=active.board.some(item=>
       item.groups?.filter(value=>value.title==='Prioridad alta').length===2
     )
+
+    transfer=new DataTransfer()
+    group.dispatchEvent(new DragEvent('dragstart',{
+      bubbles:true,
+      cancelable:true,
+      dataTransfer:transfer
+    }))
+    let duplicateRect=duplicate.getBoundingClientRect()
+    duplicate.dispatchEvent(new DragEvent('dragover',{
+      bubbles:true,
+      cancelable:true,
+      clientX:duplicateRect.left+20,
+      clientY:duplicateRect.top+20,
+      dataTransfer:transfer
+    }))
+    group.dispatchEvent(new DragEvent('dragend',{
+      bubbles:true,
+      cancelable:true,
+      dataTransfer:transfer
+    }))
+    await new Promise(resolve=>setTimeout(resolve,80))
+    result.swappedLikeColumns=duplicate.nextElementSibling===group
     duplicate.remove()
 
     created.remove()
@@ -392,6 +414,7 @@ try {
     !groups.duplicateVisible ||
     !groups.duplicated ||
     !groups.duplicateStored ||
+    !groups.swappedLikeColumns ||
     groups.deleteLabel !== "Eliminar grupo" ||
     !groups.deleted ||
     !groups.deletedFromStorage

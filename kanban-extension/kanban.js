@@ -3386,21 +3386,7 @@ function puntoSobreMarcadorGrupos(x,y){
 }
 
 
-function obtenerSiguienteGrupo(container,y){
-
-  return [...container.children]
-    .filter(item=>item.matches(
-      '.card-group:not(.dragging)'
-    ))
-    .find(group=>{
-      let rect=group.getBoundingClientRect()
-
-      return y < rect.top+rect.height/2
-    }) || null
-}
-
-
-function actualizarDestinoGrupos(container,next,x,y){
+function actualizarDestinoGrupos(container,target,x,y){
 
   if(!container){
     groupDropTarget=null
@@ -3408,27 +3394,58 @@ function actualizarDestinoGrupos(container,next,x,y){
     return
   }
 
-  groupOverPlaceholder=puntoSobreMarcadorGrupos(x,y)
+  if(!target){
+    groupOverPlaceholder=puntoSobreMarcadorGrupos(x,y)
 
-  if(
-    groupOverPlaceholder &&
-    groupDropTarget?.container===container
-  )
+    if(groupOverPlaceholder)
+      return
+
+    if(
+      groupDropTarget?.container===container &&
+      groupDropTarget?.target===null
+    )
+      return
+
+    let fragment=document.createDocumentFragment()
+
+    groupPlaceholders.forEach(
+      placeholder=>fragment.append(placeholder)
+    )
+    container.append(fragment)
+    groupDropTarget={container,target:null}
     return
+  }
 
   if(
     groupDropTarget?.container===container &&
-    groupDropTarget?.next===next
+    groupDropTarget?.target===target &&
+    !groupOverPlaceholder
   )
     return
+
+  let layout=[...container.children].filter(item=>
+    item.matches('.card-group,.group-placeholder') &&
+    !item.classList.contains('group-drag-source')
+  )
+  let targetIndex=layout.indexOf(target)
+  let placeholderIndex=Math.min(
+    ...groupPlaceholders.map(
+      placeholder=>layout.indexOf(placeholder)
+    )
+  )
 
   let fragment=document.createDocumentFragment()
 
   groupPlaceholders.forEach(
     placeholder=>fragment.append(placeholder)
   )
-  container.insertBefore(fragment,next || null)
-  groupDropTarget={container,next}
+
+  if(placeholderIndex < targetIndex)
+    target.after(fragment)
+  else
+    target.before(fragment)
+
+  groupDropTarget={container,target}
   groupOverPlaceholder=false
 }
 
@@ -3897,6 +3914,7 @@ function procesarArrastre(eventTarget,clientX,clientY){
   if(drag.matches('.card-group')){
     let column=eventTarget.closest('.column')
     let container=column?.querySelector(':scope > .cards')
+    let hovered=eventTarget.closest('.card-group')
 
     if(!container){
       actualizarDestinoGrupos(null,null,clientX,clientY)
@@ -3905,7 +3923,9 @@ function procesarArrastre(eventTarget,clientX,clientY){
 
     actualizarDestinoGrupos(
       container,
-      obtenerSiguienteGrupo(container,clientY),
+      hovered?.classList.contains('dragging')
+        ? null
+        : hovered,
       clientX,
       clientY
     )
