@@ -165,6 +165,14 @@ try {
     await delay(100);
   }
 
+  const selectionPolicy = await cdp.evaluate(`({
+    board:getComputedStyle(document.body).userSelect,
+    input:getComputedStyle(document.querySelector('#confirm-input')).userSelect
+  })`);
+  if (selectionPolicy.board !== "none" || selectionPolicy.input !== "text") {
+    throw new Error(`La politica de seleccion no se aplico: ${JSON.stringify(selectionPolicy)}`);
+  }
+
   const result = await cdp.evaluate(`(async()=>{
     scrollTo(0,250)
     let initialScroll=scrollY
