@@ -831,10 +831,11 @@ try {
       visible: !panel.querySelector('[data-date-range-rules]')?.closest('.date-range-rules-host')?.hidden,
       colorPickers: panel.querySelectorAll('[data-date-range-rules] .ant-color-picker-trigger').length,
       hexadecimalInputs: panel.querySelectorAll('[data-date-range-rules] .color-hex-input').length,
+      alignedRows: Array.from(panel.querySelectorAll('[data-date-range-rules] .option-row'), row => panel.defaultView.getComputedStyle(row).alignItems),
       rules: JSON.parse(panel.querySelector('[name="dateRangeRules"]')?.value || '[]')
     };
   `));
-  if (!finalDateRules.visible || finalDateRules.colorPickers !== 3 || finalDateRules.hexadecimalInputs !== 3 || JSON.stringify(finalDateRules.rules.map(({ operator, value, color }) => ({ operator, value, color }))) !== JSON.stringify([
+  if (!finalDateRules.visible || finalDateRules.colorPickers !== 3 || finalDateRules.hexadecimalInputs !== 3 || finalDateRules.alignedRows.some(value => value !== "center") || JSON.stringify(finalDateRules.rules.map(({ operator, value, color }) => ({ operator, value, color }))) !== JSON.stringify([
     { operator: "lte", value: 1, color: "#91caff" },
     { operator: "lte", value: 7, color: "#ffe58f" },
     { operator: "gt", value: 7, color: "#b7eb8f" }

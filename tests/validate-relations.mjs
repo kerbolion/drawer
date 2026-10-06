@@ -861,10 +861,11 @@ try {
     return {
       colorPickers: panel.querySelectorAll(".option-editor .color-picker-field .ant-color-picker-trigger").length,
       hexadecimalInputs: panel.querySelectorAll(".option-editor .color-hex-input").length,
+      alignedRows: Array.from(panel.querySelectorAll(".option-editor .option-row"), row => panel.defaultView.getComputedStyle(row).alignItems),
       colors: JSON.parse(panel.querySelector('[name="optionColors"]')?.value || "{}")
     };
   })()`);
-  if (statusEditor.colorPickers !== 3 || statusEditor.hexadecimalInputs !== 3 || Object.keys(statusEditor.colors).length !== 3) {
+  if (statusEditor.colorPickers !== 3 || statusEditor.hexadecimalInputs !== 3 || statusEditor.alignedRows.some(value => value !== "center") || Object.keys(statusEditor.colors).length !== 3) {
     throw new Error(`El editor de Estado no conservÃ³ colores: ${JSON.stringify(statusEditor)}`);
   }
   await cdp.evaluate(`(() => {

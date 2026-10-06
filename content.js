@@ -1314,7 +1314,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
       ),
       ...entries.map((entry, index) => React.createElement(
         Space,
-        { key: index, align: "baseline", className: "option-row", size: 8 },
+        { key: index, align: "center", className: "option-row", size: 8 },
         React.createElement(ColorValuePicker, {
           value: entry.color,
           onChange: (color) => updateEntry(index, { color }),
@@ -1408,7 +1408,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
       ),
       ...rules.map((rule, index) => React.createElement(
         Space,
-        { key: rule.id, align: "baseline", className: "option-row days-rule-row", size: 8 },
+        { key: rule.id, align: "center", className: "option-row days-rule-row", size: 8 },
         React.createElement(Select, {
           value: rule.operator,
           options: DATE_RANGE_OPERATORS,
