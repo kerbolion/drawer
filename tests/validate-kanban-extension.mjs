@@ -657,7 +657,7 @@ try {
       !!document.querySelector('.overview-workspace-placeholder')
     let boardFocused=destinationBoard.classList.contains('selected')
     let boardPreviewBackground=getComputedStyle(
-      document.querySelector('.drag-image.overview-workspace')
+      document.querySelector('.drag-image .overview-workspace')
     ).backgroundColor
     destinationBoard.dispatchEvent(new DragEvent('dragend',{
       bubbles:true,
@@ -1038,6 +1038,31 @@ try {
     document.querySelector('#canvas-zoom-in').click()
     await new Promise(resolve=>setTimeout(resolve,300))
 
+    let previewSource=freeBoard.querySelector('.card')
+    let previewSourceText=previewSource.textContent
+    let previewSourceRect=previewSource.getBoundingClientRect().toJSON()
+    let previewTransfer=new DataTransfer()
+    previewSource.dispatchEvent(new DragEvent('dragstart',{
+      bubbles:true,
+      cancelable:true,
+      dataTransfer:previewTransfer,
+      clientX:previewSourceRect.left+10,
+      clientY:previewSourceRect.top+10
+    }))
+    await new Promise(resolve=>requestAnimationFrame(resolve))
+    let cardPlaceholderRect=document.querySelector('.card-placeholder')
+      .getBoundingClientRect().toJSON()
+    let cardPreview=document.querySelector('.drag-image > .card')
+    let cardPreviewRect=cardPreview.getBoundingClientRect().toJSON()
+    let cardPreviewText=cardPreview.textContent
+    let cardPreviewSelected=cardPreview.classList.contains('selected')
+    previewSource.dispatchEvent(new DragEvent('dragend',{
+      bubbles:true,
+      cancelable:true,
+      dataTransfer:previewTransfer
+    }))
+    await new Promise(resolve=>requestAnimationFrame(resolve))
+
     let renderedScale=document.querySelector('#kanban').getBoundingClientRect().width /
       document.querySelector('#kanban').offsetWidth
 
@@ -1079,6 +1104,7 @@ try {
       clientX:600+30*renderedScale,
       clientY:500+20*renderedScale
     }))
+    let rectBeforeRelease=freeBoard.getBoundingClientRect().toJSON()
     document.dispatchEvent(new PointerEvent('pointerup',{
       bubbles:true,
       pointerId:24,
@@ -1086,8 +1112,56 @@ try {
       clientX:600+30*renderedScale,
       clientY:500+20*renderedScale
     }))
+    await new Promise(resolve=>requestAnimationFrame(resolve))
+    let rectAfterRelease=freeBoard.getBoundingClientRect().toJSON()
 
     changedBoardLayout={
+      x:parseFloat(freeBoard.style.left),
+      y:parseFloat(freeBoard.style.top),
+      width:freeBoard.offsetWidth,
+      height:freeBoard.offsetHeight
+    }
+
+    let layoutBeforeSpace={...changedBoardLayout}
+    let panBeforeSpace=canvasPanzoom.getPan()
+    document.dispatchEvent(new KeyboardEvent('keydown',{
+      bubbles:true,
+      cancelable:true,
+      code:'Space',
+      key:' '
+    }))
+    let spaceModeEnabled=viewport.classList.contains('canvas-space-pan')
+    header.dispatchEvent(new PointerEvent('pointerdown',{
+      bubbles:true,
+      cancelable:true,
+      pointerId:25,
+      button:0,
+      clientX:240,
+      clientY:200
+    }))
+    document.dispatchEvent(new PointerEvent('pointermove',{
+      bubbles:true,
+      pointerId:25,
+      button:0,
+      clientX:320,
+      clientY:250
+    }))
+    document.dispatchEvent(new PointerEvent('pointerup',{
+      bubbles:true,
+      pointerId:25,
+      button:0,
+      clientX:320,
+      clientY:250
+    }))
+    document.dispatchEvent(new KeyboardEvent('keyup',{
+      bubbles:true,
+      cancelable:true,
+      code:'Space',
+      key:' '
+    }))
+    await new Promise(resolve=>requestAnimationFrame(resolve))
+    let panAfterSpace=canvasPanzoom.getPan()
+    let layoutAfterSpace={
       x:parseFloat(freeBoard.style.left),
       y:parseFloat(freeBoard.style.top),
       width:freeBoard.offsetWidth,
@@ -1131,6 +1205,20 @@ try {
       controlsVisible,
       boards,
       transformed,
+      previewSourceText,
+      previewSourceRect,
+      cardPlaceholderRect,
+      cardPreviewRect,
+      cardPreviewText,
+      cardPreviewSelected,
+      rectBeforeRelease,
+      rectAfterRelease,
+      spaceModeEnabled,
+      spaceModeReleased:!viewport.classList.contains('canvas-space-pan'),
+      panBeforeSpace,
+      panAfterSpace,
+      layoutBeforeSpace,
+      layoutAfterSpace,
       initialBoardLayout,
       changedBoardLayout,
       restoredBoardLayout,
@@ -1152,6 +1240,24 @@ try {
     canvasView.boards !== overview.tabs ||
     canvasView.initialScale === canvasView.zoomedScale ||
     canvasView.transformed === "none" ||
+    Math.abs(canvasView.cardPlaceholderRect.height-
+      canvasView.previewSourceRect.height) > 1 ||
+    Math.abs(canvasView.cardPreviewRect.width-
+      canvasView.previewSourceRect.width) > 1 ||
+    Math.abs(canvasView.cardPreviewRect.height-
+      canvasView.previewSourceRect.height) > 1 ||
+    canvasView.cardPreviewText !== canvasView.previewSourceText ||
+    canvasView.cardPreviewSelected ||
+    Math.abs(canvasView.rectBeforeRelease.left-
+      canvasView.rectAfterRelease.left) > .01 ||
+    Math.abs(canvasView.rectBeforeRelease.top-
+      canvasView.rectAfterRelease.top) > .01 ||
+    !canvasView.spaceModeEnabled ||
+    !canvasView.spaceModeReleased ||
+    canvasView.panAfterSpace.x === canvasView.panBeforeSpace.x ||
+    canvasView.panAfterSpace.y === canvasView.panBeforeSpace.y ||
+    JSON.stringify(canvasView.layoutAfterSpace) !==
+      JSON.stringify(canvasView.layoutBeforeSpace) ||
     Math.abs(canvasView.changedBoardLayout.x -
       (canvasView.initialBoardLayout.x - 105)) > .01 ||
     Math.abs(canvasView.changedBoardLayout.y -
@@ -1175,7 +1281,7 @@ try {
     throw new Error(`El modo lienzo no funciono correctamente: ${JSON.stringify(canvasView)}`);
   }
 
-  console.log("KANBAN_EXTENSION_OK: scroll, menus, lienzo libre, redimensionado, movimientos y persistencia confirmados.");
+  console.log("KANBAN_EXTENSION_OK: lienzo, paneo, previews escaladas, zonas de aterrizaje y persistencia confirmados.");
 } finally {
   cdp?.close();
   browser.kill();

@@ -295,7 +295,18 @@ select{
   background-size:20px 20px;
 }
 
-.canvas-viewport.canvas-active.is-panning{
+.canvas-viewport.canvas-active.is-panning,
+.canvas-viewport.canvas-active.is-panning *{
+  cursor:grabbing !important;
+}
+
+.canvas-viewport.canvas-active.canvas-space-pan,
+.canvas-viewport.canvas-active.canvas-space-pan *{
+  cursor:grab !important;
+}
+
+.canvas-viewport.canvas-active.canvas-space-pan.is-panning,
+.canvas-viewport.canvas-active.canvas-space-pan.is-panning *{
   cursor:grabbing !important;
 }
 
@@ -500,7 +511,7 @@ select{
 }
 
 .kanban.overview .overview-workspace .column,
-.drag-image.overview-workspace .column{
+.drag-image .overview-workspace .column{
   height:var(--board-height);
   min-height:0;
   border:1px solid var(--site-border);
@@ -645,6 +656,11 @@ html.is-dragging *{
   pointer-events:none;
   transition:none;
   will-change:transform;
+}
+
+.drag-image-content{
+  margin:0 !important;
+  transform-origin:top left;
 }
 
 .drag-selection-count{
@@ -976,7 +992,7 @@ html.is-dragging *{
 
 <div class="canvas-viewport" id="canvas-viewport">
   <div
-    class="canvas-controls panzoom-exclude"
+    class="canvas-controls panzoom-exclude panzoom-control"
     id="canvas-controls"
     aria-label="Controles del lienzo"
     hidden>

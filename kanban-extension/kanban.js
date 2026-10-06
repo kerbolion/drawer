@@ -122,6 +122,7 @@ let canvasSaveTimer
 let canvasActivationVersion=0
 let canvasTransform={x:0,y:0,scale:1}
 let canvasBoardGesture
+let canvasSpacePressed=false
 let overviewSettings=normalizarConfiguracion()
 let views=[]
 let activeViewId='all'
@@ -464,20 +465,39 @@ function moverDragImage(x,y){
 function crearDragImage(element,e){
 
   let rect=element.getBoundingClientRect()
+  let localWidth=element.offsetWidth || rect.width
+  let localHeight=element.offsetHeight || rect.height
+  let scaleX=rect.width/localWidth
+  let scaleY=rect.height/localHeight
+  let preview=element.cloneNode(true)
 
   dragImage?.remove()
-  dragImage=element.cloneNode(true)
-  dragImage.classList.remove('dragging')
-  dragImage.classList.add('drag-image')
+  dragImage=document.createElement('div')
+  dragImage.className='drag-image'
   dragImage.setAttribute('aria-hidden','true')
   dragImage.style.width=rect.width+'px'
   dragImage.style.height=rect.height+'px'
 
-  dragImage
+  preview.classList.remove(
+    'dragging',
+    'selected',
+    'card-drag-source',
+    'column-drag-source',
+    'overview-workspace-drag-source'
+  )
+  preview.classList.add('drag-image-content')
+  preview.style.width=`${localWidth}px`
+  preview.style.height=`${localHeight}px`
+  preview.style.transform=`scale(${scaleX},${scaleY})`
+  preview.querySelectorAll('.dragging,.selected')
+    .forEach(item=>item.classList.remove('dragging','selected'))
+
+  preview
     .querySelectorAll('[draggable]')
     .forEach(item=>item.draggable=false)
 
-  dragImage.draggable=false
+  preview.draggable=false
+  dragImage.append(preview)
 
   let selectionCount=
     draggedCards.length || draggedColumns.length
@@ -500,7 +520,7 @@ function crearDragImage(element,e){
     element.querySelector?.('.cards')
 
   let previewCards=
-    dragImage.querySelector?.('.cards')
+    preview.querySelector?.('.cards')
 
   if(sourceCards && previewCards)
     previewCards.scrollTop=sourceCards.scrollTop
@@ -1089,10 +1109,27 @@ function actualizarLimitesLienzo(){
 }
 
 
+function establecerPaneoConEspacio(active){
+
+  canvasSpacePressed=!!active && canvasMode
+  canvasViewport.classList.toggle(
+    'canvas-space-pan',
+    canvasSpacePressed
+  )
+  canvasPanzoom?.setOptions({
+    excludeClass:canvasSpacePressed
+      ? 'panzoom-control'
+      : 'panzoom-exclude'
+  })
+}
+
+
 function desactivarLienzo(){
 
   canvasActivationVersion++
   let deactivationVersion=canvasActivationVersion
+
+  establecerPaneoConEspacio(false)
 
   if(canvasPanzoom){
     canvasTransform=normalizarTransformLienzo({
@@ -2697,7 +2734,6 @@ function terminarGestoTableroLienzo(e){
       z:parseFloat(gesture.workspace.style.zIndex)
     })
 
-  actualizarLimitesLienzo()
   guardarTransformLienzo()
   e.preventDefault()
   return true
@@ -2817,7 +2853,7 @@ function prepararArrastreColumnas(){
     placeholder.className='column-placeholder'
     placeholder.setAttribute('aria-hidden','true')
     placeholder.style.height=
-      `${column.getBoundingClientRect().height}px`
+      `${column.offsetHeight}px`
     columnPlaceholders.push(placeholder)
     fragment.append(placeholder)
     column.classList.add('column-drag-source')
@@ -2835,7 +2871,7 @@ function prepararArrastreVistaGeneral(){
     'overview-workspace-placeholder'
   overviewPlaceholder.setAttribute('aria-hidden','true')
   overviewPlaceholder.style.height=
-    `${drag.getBoundingClientRect().height}px`
+    `${drag.offsetHeight}px`
   drag.before(overviewPlaceholder)
   drag.classList.add('overview-workspace-drag-source')
 }
@@ -2948,7 +2984,7 @@ function prepararArrastreTarjetas(){
     placeholder.className='card-placeholder'
     placeholder.setAttribute('aria-hidden','true')
     placeholder.style.height=
-      `${card.getBoundingClientRect().height}px`
+      `${card.offsetHeight}px`
     cardPlaceholders.push(placeholder)
     fragment.append(placeholder)
     card.classList.add('card-drag-source')
@@ -3813,6 +3849,48 @@ viewButton.onclick=()=>{
 
   viewMenu.hidden=!viewMenu.hidden
 }
+
+
+document.addEventListener(
+  'keydown',
+  e=>{
+
+    if(
+      e.code!=='Space' ||
+      e.repeat ||
+      !canvasMode ||
+      pointerGesture ||
+      canvasBoardGesture ||
+      drag ||
+      e.target.closest?.(
+        'input,textarea,select,[contenteditable="true"]'
+      )
+    )
+      return
+
+    e.preventDefault()
+    establecerPaneoConEspacio(true)
+  }
+)
+
+
+document.addEventListener(
+  'keyup',
+  e=>{
+
+    if(e.code!=='Space' || !canvasSpacePressed)
+      return
+
+    e.preventDefault()
+    establecerPaneoConEspacio(false)
+  }
+)
+
+
+window.addEventListener(
+  'blur',
+  ()=>establecerPaneoConEspacio(false)
+)
 
 
 kanban.addEventListener(
