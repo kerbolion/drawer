@@ -296,6 +296,10 @@ let draggedColumns=[]
 let cardDropTarget
 let cardPlaceholders=[]
 let cardOriginalLayouts=[]
+let cardOverPlaceholder=false
+let cardPointerY
+let cardPointerDirection=0
+let cardPointerContainer
 let columnDropTarget
 let columnPlaceholders=[]
 let columnOriginalOrder=[]
@@ -1637,6 +1641,10 @@ function iniciarArrastre(element,e){
   cardDropTarget=null
   cardPlaceholders=[]
   cardOriginalLayouts=[]
+  cardOverPlaceholder=false
+  cardPointerY=undefined
+  cardPointerDirection=0
+  cardPointerContainer=null
   workspaceDragMoved=false
 
   if(drag.matches('.card')){
@@ -1754,12 +1762,37 @@ function prepararArrastreTarjetas(){
 }
 
 
-function actualizarDestinoTarjetas(container,next){
+function puntoSobreMarcadorTarjetas(x,y){
+
+  return cardPlaceholders.some(placeholder=>{
+    let rect=placeholder.getBoundingClientRect()
+
+    return (
+      x>=rect.left &&
+      x<=rect.right &&
+      y>=rect.top &&
+      y<=rect.bottom
+    )
+  })
+}
+
+
+function actualizarDestinoTarjetas(container,next,x,y){
 
   if(!container){
     cardDropTarget=null
+    cardOverPlaceholder=false
     return
   }
+
+  cardOverPlaceholder=
+    puntoSobreMarcadorTarjetas(x,y)
+
+  if(
+    cardOverPlaceholder &&
+    cardDropTarget?.container===container
+  )
+    return
 
   if(
     cardDropTarget?.container===container &&
@@ -1774,6 +1807,7 @@ function actualizarDestinoTarjetas(container,next){
   )
   container.insertBefore(fragment,next || null)
   cardDropTarget={container,next}
+  cardOverPlaceholder=false
 }
 
 
@@ -1803,6 +1837,45 @@ function resolverArrastreTarjetas(cancelado){
   }
 
   actualizarContadoresColumnas()
+}
+
+
+function obtenerSiguienteTarjeta(container,y,direction){
+
+  let cards=[
+    ...container.querySelectorAll(
+      '.card:not(.dragging)'
+    )
+  ]
+
+  if(!cards.length)
+    return null
+
+  let positions=cards.map(card=>({
+    card,
+    rect:card.getBoundingClientRect()
+  }))
+  let hoveredIndex=positions.findIndex(({rect})=>
+    y>=rect.top && y<=rect.bottom
+  )
+
+  if(hoveredIndex>=0){
+    let hovered=positions[hoveredIndex]
+
+    if(direction<0)
+      return hovered.card
+
+    if(direction>0)
+      return positions[hoveredIndex+1]?.card || null
+
+    return y < hovered.rect.top+hovered.rect.height/2
+      ? hovered.card
+      : positions[hoveredIndex+1]?.card || null
+  }
+
+  return positions.find(({rect})=>
+    y < rect.top + rect.height/2
+  )?.card || null
 }
 
 
@@ -1947,6 +2020,10 @@ function finalizarArrastre({cancelado=false}={}){
     cardDropTarget=null
     cardPlaceholders=[]
     cardOriginalLayouts=[]
+    cardOverPlaceholder=false
+    cardPointerY=undefined
+    cardPointerDirection=0
+    cardPointerContainer=null
     columnDropTarget=null
     columnPlaceholders=[]
     columnOriginalOrder=[]
@@ -2023,28 +2100,46 @@ function procesarArrastre(eventTarget,clientX,clientY){
         eventTarget.closest('.column')
 
       if(!column){
-        actualizarDestinoTarjetas(null)
+        cardPointerY=undefined
+        cardPointerDirection=0
+        cardPointerContainer=null
+        actualizarDestinoTarjetas(
+          null,
+          null,
+          clientX,
+          clientY
+        )
         return
       }
 
       let cards=
         column.querySelector('.cards')
 
-      let next=[
-        ...cards.querySelectorAll(
-          '.card:not(.dragging)'
-        )
-      ].find(card=>{
+      if(cardPointerContainer!==cards){
+        cardPointerContainer=cards
+        cardPointerY=clientY
+        cardPointerDirection=0
+      }else{
+        let delta=clientY-cardPointerY
 
-        let rect=
-          card.getBoundingClientRect()
+        if(Math.abs(delta)>=1)
+          cardPointerDirection=Math.sign(delta)
 
-        return clientY <
-          rect.top +
-          rect.height/2
-      })
+        cardPointerY=clientY
+      }
 
-      actualizarDestinoTarjetas(cards,next)
+      let next=obtenerSiguienteTarjeta(
+        cards,
+        clientY,
+        cardPointerDirection
+      )
+
+      actualizarDestinoTarjetas(
+        cards,
+        next,
+        clientX,
+        clientY
+      )
 
       return
   }

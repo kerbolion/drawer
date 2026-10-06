@@ -295,11 +295,13 @@ try {
     let targetColumn=[...document.querySelectorAll('#kanban > .column')]
       .find(column=>column!==sourceColumn)
     let target=targetColumn.querySelector('.cards')
+    let targetCards=[...target.querySelectorAll('.card')]
+    let hovered=targetCards[0]
     let content=source.innerHTML
     let targetTitle=targetColumn.querySelector('h3').innerHTML
     let before=[...target.querySelectorAll('.card')].map(card=>card.innerHTML)
     let transfer=new DataTransfer()
-    let rect=target.getBoundingClientRect()
+    let rect=hovered.getBoundingClientRect()
 
     source.dispatchEvent(new DragEvent('dragstart',{
       bubbles:true,
@@ -310,7 +312,16 @@ try {
       bubbles:true,
       cancelable:true,
       clientX:rect.left+rect.width/2,
-      clientY:rect.bottom-1,
+      clientY:rect.top-2,
+      dataTransfer:transfer
+    }))
+    await new Promise(resolve=>requestAnimationFrame(resolve))
+    rect=hovered.getBoundingClientRect()
+    target.dispatchEvent(new DragEvent('dragover',{
+      bubbles:true,
+      cancelable:true,
+      clientX:rect.left+rect.width/2,
+      clientY:rect.top+2,
       dataTransfer:transfer
     }))
     await new Promise(resolve=>requestAnimationFrame(resolve))
@@ -349,12 +360,14 @@ try {
   })()`);
 
   const expectedCardOrder = [
-    ...cardDrop.before,
-    cardDrop.content
+    cardDrop.before[0],
+    cardDrop.content,
+    ...cardDrop.before.slice(1)
   ];
   const expectedCardPreview = [
-    ...cardDrop.before,
-    '__placeholder__'
+    cardDrop.before[0],
+    '__placeholder__',
+    ...cardDrop.before.slice(1)
   ];
 
   if (
