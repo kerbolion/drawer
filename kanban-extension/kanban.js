@@ -269,9 +269,17 @@ let drag
 let dragImage
 let dragImageOffset={x:0,y:0}
 let columnMoveAnchor
+let dragFrame
+let pendingDragPoint
 let workspaces=[]
 let activeWorkspace=''
+let workspaceBoards=new Map()
+let boardPreparationVersion=0
 let saveQueue=Promise.resolve()
+let saveTimer
+let scheduledSavePromise
+let resolveScheduledSave
+let rejectScheduledSave
 
 
 function moverDragImage(x,y){
@@ -484,11 +492,78 @@ function crearColumna(item={}){
 }
 
 
-function dibujarTablero(board){
+function prepararTablero(workspace){
 
-  kanban.replaceChildren(
-    ...(board || []).map(crearColumna)
+  if(workspaceBoards.has(workspace.id))
+    return workspaceBoards.get(workspace.id)
+
+  let nodes=(workspace.board || []).map(crearColumna)
+
+  workspaceBoards.set(workspace.id,nodes)
+  return nodes
+}
+
+
+function dibujarTablero(board,id=activeWorkspace){
+
+  let nodes=(board || []).map(crearColumna)
+
+  workspaceBoards.set(id,nodes)
+  kanban.replaceChildren(...nodes)
+}
+
+
+function mostrarTablero(id,{preservarActual=true}={}){
+
+  if(preservarActual && activeWorkspace)
+    workspaceBoards.set(
+      activeWorkspace,
+      [...kanban.children]
+    )
+
+  let workspace=workspaces.find(item=>item.id===id)
+
+  if(!workspace)
+    return null
+
+  activeWorkspace=id
+  kanban.replaceChildren(...prepararTablero(workspace))
+
+  return workspace
+}
+
+
+function prepararTablerosRestantes(){
+
+  let version=++boardPreparationVersion
+  let activeIndex=workspaces.findIndex(
+    workspace=>workspace.id===activeWorkspace
   )
+  let pending=[
+    ...workspaces.slice(activeIndex+1),
+    ...workspaces.slice(0,Math.max(activeIndex,0))
+  ].filter(workspace=>!workspaceBoards.has(workspace.id))
+
+  let schedule=window.requestIdleCallback ||
+    (callback=>setTimeout(
+      ()=>callback({didTimeout:false,timeRemaining:()=>8}),
+      0
+    ))
+
+  let prepareNext=()=>{
+
+    if(
+      version!==boardPreparationVersion ||
+      !pending.length
+    )
+      return
+
+    prepararTablero(pending.shift())
+    schedule(prepareNext,{timeout:80})
+  }
+
+  if(pending.length)
+    schedule(prepareNext,{timeout:80})
 }
 
 
@@ -530,6 +605,12 @@ function dibujarWorkspaces(){
     })
   )
 
+  asegurarWorkspaceVisible()
+}
+
+
+function asegurarWorkspaceVisible(){
+
   requestAnimationFrame(()=>{
 
     let activeTab=
@@ -557,20 +638,51 @@ function dibujarWorkspaces(){
 }
 
 
-function guardar(){
+function sincronizarWorkspaces(){
 
-  let current=
-    workspaces.find(
-      workspace=>workspace.id===activeWorkspace
+  let tabs=[
+    ...workspaceTabs.querySelectorAll('.workspace-tab')
+  ]
+
+  if(
+    tabs.length!==workspaces.length ||
+    tabs.some(
+      (tab,index)=>
+        tab.dataset.workspace!==workspaces[index]?.id
     )
-
-  if(current){
-    current.board=leerTablero()
-    current.settings=leerConfiguracion()
+  ){
+    dibujarWorkspaces()
+    return
   }
 
-  let data=structuredClone({
+  let activeChanged=false
 
+  tabs.forEach((tab,index)=>{
+
+    let workspace=workspaces[index]
+    let active=workspace.id===activeWorkspace
+
+    if(tab.classList.contains('active')!==active)
+      activeChanged=true
+
+    tab.classList.toggle('active',active)
+    tab.querySelector('span').textContent=workspace.title
+    tab.querySelector('.workspace-count').textContent=
+      (workspace.board || []).reduce(
+        (total,column)=>
+          total+(column.cards || []).length,
+        0
+      )
+  })
+
+  if(activeChanged)
+    asegurarWorkspaceVisible()
+}
+
+
+function escribirDatos(){
+
+  let data=structuredClone({
     activeWorkspace,
     workspaces
   })
@@ -581,15 +693,79 @@ function guardar(){
       [STORAGE]:data
     }))
 
-  dibujarWorkspaces()
-
   return saveQueue
+}
+
+
+function ejecutarGuardadoProgramado(){
+
+  if(saveTimer){
+    clearTimeout(saveTimer)
+    saveTimer=null
+  }
+
+  let resolve=resolveScheduledSave
+  let reject=rejectScheduledSave
+
+  scheduledSavePromise=null
+  resolveScheduledSave=null
+  rejectScheduledSave=null
+
+  let task=escribirDatos()
+
+  task.then(resolve,reject)
+  return task
+}
+
+
+function programarGuardado(){
+
+  if(!scheduledSavePromise)
+    scheduledSavePromise=new Promise((resolve,reject)=>{
+      resolveScheduledSave=resolve
+      rejectScheduledSave=reject
+    })
+
+  clearTimeout(saveTimer)
+  saveTimer=setTimeout(
+    ejecutarGuardadoProgramado,
+    30
+  )
+
+  return scheduledSavePromise
+}
+
+
+function guardar({
+  inmediato=false,
+  tablero=true,
+  configuracion=true
+}={}){
+
+  let current=
+    workspaces.find(
+      workspace=>workspace.id===activeWorkspace
+    )
+
+  if(current){
+    if(tablero)
+      current.board=leerTablero()
+
+    if(configuracion)
+      current.settings=leerConfiguracion()
+  }
+
+  sincronizarWorkspaces()
+
+  return inmediato
+    ? ejecutarGuardadoProgramado()
+    : programarGuardado()
 }
 
 
 async function exportarDatos(){
 
-  await guardar()
+  await guardar({inmediato:true})
 
   let data=JSON.stringify({
     version:1,
@@ -669,9 +845,13 @@ async function importarDatos(data){
     workspace=>workspace.id===activeWorkspace
   )
 
-  dibujarTablero(current.board)
+  workspaceBoards.clear()
+  boardPreparationVersion++
+  dibujarTablero(current.board,current.id)
   aplicarConfiguracion(current.settings)
-  await guardar()
+  dibujarWorkspaces()
+  prepararTablerosRestantes()
+  await guardar({inmediato:true})
 }
 
 
@@ -738,9 +918,13 @@ async function cargar(){
     workspace=>workspace.id===activeWorkspace
   )
 
-  dibujarTablero(current.board)
+  workspaceBoards.clear()
+  boardPreparationVersion++
+  dibujarTablero(current.board,current.id)
   aplicarConfiguracion(current.settings)
-  guardar()
+  dibujarWorkspaces()
+  prepararTablerosRestantes()
+  await guardar({inmediato:true})
 }
 
 
@@ -769,14 +953,14 @@ function editar(el,seleccionar=false){
 columns.oninput=()=>{
 
   ajustarColumnas()
-  guardar()
+  guardar({tablero:false})
 }
 
 
 view.onchange=()=>{
 
   ajustarColumnas()
-  guardar()
+  guardar({tablero:false})
 }
 
 
@@ -788,14 +972,14 @@ height.oninput=()=>{
       height.value+'px'
     )
 
-  guardar()
+  guardar({tablero:false})
 }
 
 
 minWidth.oninput=()=>{
 
   ajustarColumnas()
-  guardar()
+  guardar({tablero:false})
 }
 
 
@@ -953,6 +1137,7 @@ deleteContext.onclick=async()=>{
     workspaces=workspaces.filter(
       item=>item.id!==id
     )
+    workspaceBoards.delete(id)
 
     if(!workspaces.length)
       workspaces.push({
@@ -974,13 +1159,16 @@ deleteContext.onclick=async()=>{
         )
       ]
 
-      activeWorkspace=next.id
-      dibujarTablero(next.board)
+      mostrarTablero(
+        next.id,
+        {preservarActual:false}
+      )
       aplicarConfiguracion(next.settings)
     }else{
       ajustarColumnas()
     }
 
+    prepararTablerosRestantes()
     guardar()
     return
   }
@@ -1070,6 +1258,21 @@ document.addEventListener(
   'dragend',
   ()=>{
 
+    if(dragFrame){
+      cancelAnimationFrame(dragFrame)
+      dragFrame=null
+    }
+
+    if(pendingDragPoint){
+      let point=pendingDragPoint
+      pendingDragPoint=null
+      procesarArrastre(
+        point.target,
+        point.x,
+        point.y
+      )
+    }
+
     drag?.classList.remove('dragging')
     eliminarDragImage()
 
@@ -1081,23 +1284,15 @@ document.addEventListener(
 )
 
 
-document.addEventListener(
-  'dragover',
-  e=>{
+function procesarArrastre(eventTarget,clientX,clientY){
 
-    e.preventDefault()
+  if(!drag)
+    return
 
-    if(dragImage)
-      moverDragImage(e.clientX,e.clientY)
-
-    if(!drag)
-      return
-
-
-    if(drag.matches('.card')){
+  if(drag.matches('.card')){
 
       let column=
-        e.target.closest('.column')
+        eventTarget.closest('.column')
 
       if(!column)
         return
@@ -1114,33 +1309,37 @@ document.addEventListener(
         let rect=
           card.getBoundingClientRect()
 
-        return e.clientY <
+        return clientY <
           rect.top +
           rect.height/2
       })
 
-      cards.insertBefore(
-        drag,
-        next || null
+      if(
+        drag.parentElement!==cards ||
+        drag.nextElementSibling!==(next || null)
       )
+        cards.insertBefore(
+          drag,
+          next || null
+        )
 
       return
-    }
+  }
 
 
-    if(drag.matches('.column')){
+  if(drag.matches('.column')){
 
       if(
         columnMoveAnchor &&
         Math.hypot(
-          e.clientX-columnMoveAnchor.x,
-          e.clientY-columnMoveAnchor.y
+          clientX-columnMoveAnchor.x,
+          clientY-columnMoveAnchor.y
         ) < COLUMN_MOVE_MARGIN
       )
         return
 
       let hovered=
-        e.target.closest('.column')
+        eventTarget.closest('.column')
 
       if(hovered===drag)
         return
@@ -1164,17 +1363,17 @@ document.addEventListener(
               column.getBoundingClientRect()
 
             let dx=
-              e.clientX < rect.left
-                ? rect.left-e.clientX
-                : e.clientX > rect.right
-                  ? e.clientX-rect.right
+              clientX < rect.left
+                ? rect.left-clientX
+                : clientX > rect.right
+                  ? clientX-rect.right
                   : 0
 
             let dy=
-              e.clientY < rect.top
-                ? rect.top-e.clientY
-                : e.clientY > rect.bottom
-                  ? e.clientY-rect.bottom
+              clientY < rect.top
+                ? rect.top-clientY
+                : clientY > rect.bottom
+                  ? clientY-rect.bottom
                   : 0
 
             let distance=
@@ -1201,10 +1400,47 @@ document.addEventListener(
         target.before(drag)
 
       columnMoveAnchor={
-        x:e.clientX,
-        y:e.clientY
+        x:clientX,
+        y:clientY
       }
+  }
+}
+
+
+document.addEventListener(
+  'dragover',
+  e=>{
+
+    e.preventDefault()
+
+    if(dragImage)
+      moverDragImage(e.clientX,e.clientY)
+
+    if(!drag)
+      return
+
+    pendingDragPoint={
+      target:e.target,
+      x:e.clientX,
+      y:e.clientY
     }
+
+    if(dragFrame)
+      return
+
+    dragFrame=requestAnimationFrame(()=>{
+      dragFrame=null
+
+      let point=pendingDragPoint
+      pendingDragPoint=null
+
+      if(point)
+        procesarArrastre(
+          point.target,
+          point.x,
+          point.y
+        )
+    })
   }
 )
 
@@ -1327,15 +1563,12 @@ workspaceTabs.addEventListener(
 
     guardar()
 
-    activeWorkspace=
+    let workspace=mostrarTablero(
       tab.dataset.workspace
-
-    let workspace=workspaces.find(
-      item=>item.id===activeWorkspace
     )
 
-    dibujarTablero(workspace.board)
     aplicarConfiguracion(workspace.settings)
+    prepararTablerosRestantes()
     guardar()
   }
 )
@@ -1464,15 +1697,12 @@ document.querySelector('.add-workspace')
     settings:normalizarConfiguracion()
   })
 
-  activeWorkspace=id
-
-  dibujarTablero(
-    workspaces.at(-1).board
-  )
+  let workspace=mostrarTablero(id)
 
   aplicarConfiguracion(
-    workspaces.at(-1).settings
+    workspace.settings
   )
+  prepararTablerosRestantes()
   guardar()
 }
 
@@ -1498,7 +1728,7 @@ document.querySelector('.add-column')
 
 window.addEventListener(
   'pagehide',
-  guardar
+  ()=>guardar({inmediato:true})
 )
 
 
