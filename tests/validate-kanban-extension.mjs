@@ -947,6 +947,9 @@ try {
     let controlsVisible=!document.querySelector('#canvas-controls').hidden
     let boards=document.querySelectorAll('.overview-workspace').length
     let viewport=document.querySelector('#canvas-viewport')
+    let gridAlignContent=getComputedStyle(
+      document.querySelector('.overview-columns.grid')
+    ).alignContent
     let altDownAccepted=document.dispatchEvent(new KeyboardEvent('keydown',{
       bubbles:true,
       cancelable:true,
@@ -972,7 +975,7 @@ try {
     }
     let header=freeBoard.querySelector('.overview-workspace-header')
 
-    header.dispatchEvent(new PointerEvent('pointerdown',{
+    freeBoard.dispatchEvent(new PointerEvent('pointerdown',{
       bubbles:true,
       cancelable:true,
       pointerId:21,
@@ -1246,6 +1249,7 @@ try {
       canvasActive,
       controlsVisible,
       boards,
+      gridAlignContent,
       altDownAccepted,
       altUpAccepted,
       altFocusRetained,
@@ -1283,6 +1287,7 @@ try {
     !canvasView.canvasActive ||
     !canvasView.controlsVisible ||
     canvasView.boards !== overview.tabs ||
+    canvasView.gridAlignContent !== "start" ||
     canvasView.altDownAccepted ||
     canvasView.altUpAccepted ||
     !canvasView.altFocusRetained ||

@@ -2613,15 +2613,15 @@ function iniciarGestoTableroLienzo(e){
 
   let workspace=e.target.closest?.('.overview-workspace')
   let resize=e.target.closest?.('.canvas-resize-handle')
-  let header=e.target.closest?.('.overview-workspace-header')
+  let interactive=e.target.closest?.(
+    '.column,.card,button,input,select,textarea,a,[contenteditable="true"]'
+  )
+  let movableSurface=workspace && !interactive
 
   if(
     !workspace ||
     !kanban.contains(workspace) ||
-    (!resize && !header) ||
-    (!resize && e.target.closest?.(
-      '[contenteditable="true"],button,input,select,textarea,a'
-    ))
+    (!resize && !movableSurface)
   )
     return false
 
