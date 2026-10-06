@@ -50,6 +50,9 @@ const editContext=
 const addColumnContext=
   document.querySelector('#add-column-context')
 
+const addGroupContext=
+  document.querySelector('#add-group-context')
+
 const copyContext=
   document.querySelector('#copy-context')
 
@@ -857,19 +860,42 @@ function leerTablero(){
 }
 
 
+function contarTarjetasColumnaModelo(column){
+
+  return (column?.cards || []).length+
+    (column?.groups || []).reduce(
+      (total,group)=>total+(group.cards || []).length,
+      0
+    )
+}
+
+
 function leerColumnas(container){
 
   return [...container.children]
     .filter(element=>element.matches('.column'))
-    .map(column=>({
+    .map(leerColumna)
+}
 
-    title:
-      column.querySelector('h3').innerHTML,
 
-    cards:[
-      ...column.querySelectorAll('.card')
-    ].map(card=>card.innerHTML)
-    }))
+function leerColumna(column){
+
+  let cards=column.querySelector(':scope > .cards')
+
+  return {
+    title:column.querySelector('h3').innerHTML,
+    cards:[...cards.children]
+      .filter(item=>item.matches('.card'))
+      .map(card=>card.innerHTML),
+    groups:[...cards.children]
+      .filter(item=>item.matches('.card-group'))
+      .map(group=>({
+        title:group.querySelector('.card-group-title').innerHTML,
+        cards:[...group.querySelector('.group-cards').children]
+          .filter(item=>item.matches('.card'))
+          .map(card=>card.innerHTML)
+      }))
+  }
 }
 
 
@@ -882,6 +908,48 @@ function crearTarjeta(content='Nueva tarjeta'){
   card.innerHTML=content
 
   return card
+}
+
+
+function insertarTarjetas(container,items,reference){
+
+  let next=reference===undefined
+    ? container.querySelector(':scope > .card-group')
+    : reference
+
+  items.forEach(item=>container.insertBefore(item,next || null))
+}
+
+
+function crearGrupo(item={}){
+
+  let group=document.createElement('section')
+
+  group.className='card-group'
+  group.innerHTML=`
+    <div class="card-group-header">
+      <h4 class="card-group-title"></h4>
+      <span class="group-count"></span>
+    </div>
+    <div class="cards group-cards"></div>
+    <button class="add-card group-add-card">
+      + Agregar tarjeta
+    </button>
+  `
+
+  group.querySelector('.card-group-title').innerHTML=
+    item.title || 'Nuevo grupo'
+
+  let cards=group.querySelector('.group-cards')
+
+  ;(item.cards || []).forEach(text=>{
+    cards.append(crearTarjeta(text))
+  })
+
+  group.querySelector('.group-count').textContent=
+    cards.querySelectorAll(':scope > .card').length
+
+  return group
 }
 
 
@@ -913,6 +981,10 @@ function crearColumna(item={}){
     cards.append(crearTarjeta(text))
   })
 
+  ;(item.groups || []).forEach(group=>{
+    cards.append(crearGrupo(group))
+  })
+
   column.querySelector('.column-count').textContent=
     cards.querySelectorAll('.card').length
 
@@ -925,6 +997,11 @@ function actualizarContadoresColumnas(){
   kanban.querySelectorAll('.column').forEach(column=>{
     column.querySelector('.column-count').textContent=
       column.querySelectorAll('.card').length
+
+    column.querySelectorAll('.card-group').forEach(group=>{
+      group.querySelector('.group-count').textContent=
+        group.querySelectorAll('.group-cards > .card').length
+    })
   })
 
   kanban.querySelectorAll('.overview-workspace')
@@ -1004,7 +1081,7 @@ function crearVistaGeneral({lienzo=false}={}){
     title.textContent=workspace.title
     count.className='workspace-count'
     count.textContent=(workspace.board || []).reduce(
-      (total,column)=>total+(column.cards || []).length,
+      (total,column)=>total+contarTarjetasColumnaModelo(column),
       0
     )
     columnsContainer.className=
@@ -1376,7 +1453,7 @@ function dibujarWorkspaces(){
       count.textContent=(workspace.board || [])
         .reduce(
           (total,column)=>
-            total+(column.cards || []).length,
+            total+contarTarjetasColumnaModelo(column),
           0
         )
 
@@ -1453,7 +1530,7 @@ function sincronizarWorkspaces(){
     tab.querySelector('.workspace-count').textContent=
       (workspace.board || []).reduce(
         (total,column)=>
-          total+(column.cards || []).length,
+          total+contarTarjetasColumnaModelo(column),
         0
       )
   })
@@ -1641,6 +1718,21 @@ async function importarDatos(data){
             ),
             cards:Array.isArray(column.cards)
               ? column.cards.map(card=>String(card))
+              : [],
+            groups:Array.isArray(column.groups)
+              ? column.groups
+                  .filter(group=>group && typeof group==='object')
+                  .map((group,groupIndex)=>(
+                    {
+                      title:String(
+                        group.title ||
+                        `Grupo ${groupIndex+1}`
+                      ),
+                      cards:Array.isArray(group.cards)
+                        ? group.cards.map(card=>String(card))
+                        : []
+                    }
+                  ))
               : []
           }))
       : [],
@@ -1862,6 +1954,7 @@ document.addEventListener(
       contextTarget=workspaceTab
       editContext.hidden=false
       addColumnContext.hidden=false
+      addGroupContext.hidden=true
       copyContext.hidden=true
       pasteContext.hidden=true
       duplicateContext.hidden=true
@@ -1876,6 +1969,7 @@ document.addEventListener(
       contextTarget=card || column
       editContext.hidden=true
       addColumnContext.hidden=true
+      addGroupContext.hidden=!!card
       copyContext.hidden=false
       pasteContext.hidden=internalClipboard?.type!=='card'
       duplicateContext.hidden=false
@@ -1905,6 +1999,7 @@ document.addEventListener(
       seleccionarTableroVista(overviewWorkspace)
       editContext.hidden=false
       addColumnContext.hidden=false
+      addGroupContext.hidden=true
       copyContext.hidden=true
       pasteContext.hidden=true
       duplicateContext.hidden=true
@@ -1920,6 +2015,7 @@ document.addEventListener(
       contextTarget=kanban
       editContext.hidden=true
       addColumnContext.hidden=true
+      addGroupContext.hidden=true
       copyContext.hidden=true
       pasteContext.hidden=false
       duplicateContext.hidden=true
@@ -2047,6 +2143,39 @@ addColumnContext.onclick=()=>{
 }
 
 
+addGroupContext.onclick=async()=>{
+
+  let column=contextTarget?.closest('.column')
+
+  cerrarMenuContextual()
+
+  if(!column)
+    return
+
+  let container=column.querySelector(':scope > .cards')
+  let suggested=`Grupo ${
+    container.querySelectorAll(':scope > .card-group').length+1
+  }`
+  let title=await pedirNombre(
+    'Agregar grupo',
+    'Escribe el nombre del nuevo grupo.',
+    suggested
+  )
+
+  if(title===null || !column.isConnected)
+    return
+
+  let group=crearGrupo({
+    title:title.trim() || suggested,
+    cards:[]
+  })
+
+  container.append(group)
+  actualizarContadoresColumnas()
+  guardar()
+}
+
+
 copyContext.onclick=async()=>{
 
   let target=contextTarget
@@ -2076,11 +2205,7 @@ copyContext.onclick=async()=>{
       ? [...kanban.querySelectorAll('.column')]
           .filter(column=>selectedColumns.has(column))
       : [target]
-    let items=columns.map(column=>({
-      title:column.querySelector('h3').innerHTML,
-      cards:[...column.querySelectorAll('.card')]
-        .map(card=>card.innerHTML)
-    }))
+    let items=columns.map(leerColumna)
 
     internalClipboard={type:'column',items}
     text=columns.map(column=>[
@@ -2205,12 +2330,12 @@ function moverSeleccionA(workspaceId,columnIndex){
       let column=workspaceElement
         ?.querySelectorAll('.overview-columns > .column')
         [columnIndex]
-      let container=column?.querySelector('.cards')
+      let container=column?.querySelector(':scope > .cards')
 
       if(!container)
         return
 
-      container.append(...items)
+      insertarTarjetas(container,items)
     }else{
       let container=workspaceElement
         ?.querySelector('.overview-columns')
@@ -2219,7 +2344,7 @@ function moverSeleccionA(workspaceId,columnIndex){
         return
 
       container.querySelector('.overview-empty')?.remove()
-      container.append(...items)
+      insertarTarjetas(container,items)
       actualizarVaciosVistaGeneral()
     }
 
@@ -2235,7 +2360,7 @@ function moverSeleccionA(workspaceId,columnIndex){
       let column=[...kanban.children]
         .filter(item=>item.matches('.column'))
         [columnIndex]
-      let container=column?.querySelector('.cards')
+      let container=column?.querySelector(':scope > .cards')
 
       if(!container)
         return
@@ -2252,11 +2377,7 @@ function moverSeleccionA(workspaceId,columnIndex){
       workspaceBoards.delete(workspaceId)
     }
   }else{
-    let contents=items.map(column=>({
-      title:column.querySelector('h3').innerHTML,
-      cards:[...column.querySelectorAll('.card')]
-        .map(item=>item.innerHTML)
-    }))
+    let contents=items.map(leerColumna)
 
     if(workspaceId===activeWorkspace)
       kanban.append(...items)
@@ -2352,10 +2473,12 @@ pasteContext.onclick=()=>{
   let cards=clipboard.items.map(crearTarjeta)
   let reference=target.matches('.card')
     ? target.nextSibling
-    : null
-  let container=column.querySelector('.cards')
+    : undefined
+  let container=target.matches('.card')
+    ? target.parentElement
+    : column.querySelector(':scope > .cards')
 
-  cards.forEach(card=>container.insertBefore(card,reference))
+  insertarTarjetas(container,cards,reference)
   seleccionarTarjetas(cards)
   guardar()
 }
@@ -3013,7 +3136,7 @@ function prepararArrastreTarjetas(){
     ...kanban.querySelectorAll('.cards')
   ].map(container=>({
     container,
-    cards:[...container.querySelectorAll('.card')]
+    children:[...container.children]
   }))
 
   let first=draggedCards[0]
@@ -3067,6 +3190,10 @@ function actualizarDestinoTarjetas(container,next,x,y){
   )
     return
 
+
+  if(!next && !container.classList.contains('group-cards'))
+    next=container.querySelector(':scope > .card-group')
+
   if(
     cardDropTarget?.container===container &&
     cardDropTarget?.next===next
@@ -3104,8 +3231,8 @@ function resolverArrastreTarjetas(cancelado){
     draggedCards.forEach(
       card=>card.classList.remove('card-drag-source')
     )
-    cardOriginalLayouts.forEach(({container,cards})=>{
-      container.replaceChildren(...cards)
+    cardOriginalLayouts.forEach(({container,children})=>{
+      container.replaceChildren(...children)
     })
   }
 
@@ -3115,11 +3242,9 @@ function resolverArrastreTarjetas(cancelado){
 
 function obtenerSiguienteTarjeta(container,y,direction){
 
-  let cards=[
-    ...container.querySelectorAll(
-      '.card:not(.dragging)'
-    )
-  ]
+  let cards=[...container.children].filter(
+    card=>card.matches('.card:not(.dragging)')
+  )
 
   if(!cards.length)
     return null
@@ -3473,8 +3598,13 @@ function procesarArrastre(eventTarget,clientX,clientY){
         return
       }
 
-      let cards=
-        column.querySelector('.cards')
+      let group=eventTarget.closest('.card-group')
+      let cards=group
+        ? group.querySelector(':scope > .group-cards')
+        : eventTarget.closest('.cards')
+
+      if(!cards || !column.contains(cards))
+        cards=column.querySelector(':scope > .cards')
 
       if(cardPointerContainer!==cards){
         cardPointerContainer=cards
@@ -3735,7 +3865,7 @@ document.addEventListener(
   e=>{
 
     if(
-      !e.target.matches('.card,h3')
+      !e.target.matches('.card,h3,.card-group-title')
     )
       return
 
@@ -3788,7 +3918,7 @@ document.addEventListener(
       return
 
     e.target.contentEditable=false
-    e.target.draggable=true
+    e.target.draggable=e.target.matches('.card,h3')
 
     guardar()
   },
@@ -3805,16 +3935,20 @@ document.addEventListener(
     )
       return
 
-    let cards=
-      e.target
-        .closest('.column')
-        .querySelector('.cards')
+    let group=e.target.closest('.card-group')
+    let cards=group
+      ? group.querySelector(':scope > .group-cards')
+      : e.target
+          .closest('.column')
+          .querySelector(':scope > .cards')
 
     let card=crearTarjeta(
-      `Nueva tarjeta ${cards.querySelectorAll('.card').length+1}`
+      `Nueva tarjeta ${
+        cards.querySelectorAll(':scope > .card').length+1
+      }`
     )
 
-    cards.append(card)
+    insertarTarjetas(cards,[card])
 
     cards.scrollTop=
       cards.scrollHeight

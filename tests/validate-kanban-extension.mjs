@@ -180,6 +180,106 @@ try {
     throw new Error(`La politica de seleccion no se aplico: ${JSON.stringify(selectionPolicy)}`);
   }
 
+  const groups = await cdp.evaluate(`(async()=>{
+    let column=document.querySelector('.column')
+    let root=column.querySelector(':scope > .cards')
+    let originalCard=root.querySelector(':scope > .card')
+    let originalContent=originalCard.innerHTML
+    let initialCount=column.querySelectorAll('.card').length
+
+    column.dispatchEvent(new MouseEvent('contextmenu',{
+      bubbles:true,
+      cancelable:true,
+      clientX:80,
+      clientY:80
+    }))
+    let menuButton=document.querySelector('#add-group-context')
+    let menuVisible=!menuButton.hidden
+    menuButton.click()
+    await new Promise(resolve=>requestAnimationFrame(resolve))
+    let modalTitle=document.querySelector('#confirm-title').textContent.trim()
+    let input=document.querySelector('#confirm-input')
+    input.value='Prioridad'
+    document.querySelector('#accept-confirm').click()
+    await new Promise(resolve=>setTimeout(resolve,60))
+
+    let group=column.querySelector('.card-group')
+    let heightBefore=group.offsetHeight
+    group.querySelector('.group-add-card').click()
+    let created=group.querySelector('.group-cards > .card')
+    created.textContent='Tarea agrupada'
+    created.blur()
+    await new Promise(resolve=>setTimeout(resolve,50))
+
+    let transfer=new DataTransfer()
+    originalCard.dispatchEvent(new DragEvent('dragstart',{
+      bubbles:true,
+      cancelable:true,
+      dataTransfer:transfer
+    }))
+    let groupRect=group.getBoundingClientRect()
+    group.querySelector('.card-group-header').dispatchEvent(
+      new DragEvent('dragover',{
+        bubbles:true,
+        cancelable:true,
+        clientX:groupRect.left+20,
+        clientY:groupRect.bottom-20,
+        dataTransfer:transfer
+      })
+    )
+    originalCard.dispatchEvent(new DragEvent('dragend',{
+      bubbles:true,
+      cancelable:true,
+      dataTransfer:transfer
+    }))
+    await new Promise(resolve=>setTimeout(resolve,80))
+
+    let stored=(await chrome.storage.local.get(['kanban-data']))['kanban-data']
+    let active=stored.workspaces.find(
+      workspace=>workspace.id===stored.activeWorkspace
+    )
+    let storedGroup=active.board[0].groups?.[0]
+    let result={
+      menuVisible,
+      modalTitle,
+      title:group.querySelector('.card-group-title').textContent.trim(),
+      cards:group.querySelectorAll('.group-cards > .card').length,
+      groupCount:group.querySelector('.group-count').textContent.trim(),
+      columnCount:column.querySelector('.column-count').textContent.trim(),
+      expectedColumnCount:String(initialCount+1),
+      grew:group.offsetHeight>heightBefore,
+      storedTitle:storedGroup?.title,
+      storedCards:storedGroup?.cards?.map(value=>{
+        let element=document.createElement('div')
+        element.innerHTML=value
+        return element.textContent
+      })
+    }
+
+    created.remove()
+    root.insertBefore(originalCard,group)
+    group.remove()
+    await guardar({inmediato:true})
+    await new Promise(resolve=>setTimeout(resolve,50))
+
+    return result
+  })()`);
+
+  if (
+    !groups.menuVisible ||
+    groups.modalTitle !== "Agregar grupo" ||
+    groups.title !== "Prioridad" ||
+    groups.cards !== 2 ||
+    groups.groupCount !== "2" ||
+    groups.columnCount !== groups.expectedColumnCount ||
+    !groups.grew ||
+    groups.storedTitle !== "Prioridad" ||
+    groups.storedCards?.length !== 2 ||
+    !groups.storedCards.includes("Tarea agrupada")
+  ) {
+    throw new Error(`Los grupos de columna no funcionan correctamente: ${JSON.stringify(groups)}`);
+  }
+
   const result = await cdp.evaluate(`(async()=>{
     scrollTo(0,250)
     let initialScroll=scrollY
@@ -1418,7 +1518,7 @@ try {
     throw new Error(`El modo lienzo no funciono correctamente: ${JSON.stringify(canvasView)}`);
   }
 
-  console.log("KANBAN_EXTENSION_OK: lienzo, paneo, previews escaladas, zonas de aterrizaje y persistencia confirmados.");
+  console.log("KANBAN_EXTENSION_OK: grupos, lienzo, paneo, zonas de aterrizaje y persistencia confirmados.");
 } finally {
   cdp?.close();
   browser.kill();
