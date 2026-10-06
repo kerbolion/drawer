@@ -284,7 +284,9 @@ let selectedColumns=new Set()
 let columnSelectionAnchor
 let draggedCards=[]
 let draggedColumns=[]
-let cardMoveTarget
+let cardDropTarget
+let cardPlaceholders=[]
+let cardOriginalLayouts=[]
 let columnDropTarget
 let columnPlaceholders=[]
 let columnOriginalOrder=[]
@@ -1623,7 +1625,9 @@ function iniciarArrastre(element,e){
   columnPlaceholders=[]
   columnOriginalOrder=[]
   columnOverPlaceholder=false
-  cardMoveTarget=null
+  cardDropTarget=null
+  cardPlaceholders=[]
+  cardOriginalLayouts=[]
   workspaceDragMoved=false
 
   if(drag.matches('.card')){
@@ -1658,6 +1662,8 @@ function iniciarArrastre(element,e){
 
   if(drag.matches('.column'))
     prepararArrastreColumnas()
+  else if(drag.matches('.card'))
+    prepararArrastreTarjetas()
 
   return true
 }
@@ -1708,6 +1714,86 @@ function prepararArrastreColumnas(){
   })
 
   first.before(fragment)
+}
+
+
+function prepararArrastreTarjetas(){
+
+  cardOriginalLayouts=[
+    ...kanban.querySelectorAll('.cards')
+  ].map(container=>({
+    container,
+    cards:[...container.querySelectorAll('.card')]
+  }))
+
+  let first=draggedCards[0]
+  let fragment=document.createDocumentFragment()
+
+  draggedCards.forEach(card=>{
+    let placeholder=document.createElement('div')
+
+    placeholder.className='card-placeholder'
+    placeholder.setAttribute('aria-hidden','true')
+    placeholder.style.height=
+      `${card.getBoundingClientRect().height}px`
+    cardPlaceholders.push(placeholder)
+    fragment.append(placeholder)
+    card.classList.add('card-drag-source')
+  })
+
+  first.before(fragment)
+}
+
+
+function actualizarDestinoTarjetas(container,next){
+
+  if(!container){
+    cardDropTarget=null
+    return
+  }
+
+  if(
+    cardDropTarget?.container===container &&
+    cardDropTarget?.next===next
+  )
+    return
+
+  let fragment=document.createDocumentFragment()
+
+  cardPlaceholders.forEach(
+    placeholder=>fragment.append(placeholder)
+  )
+  container.insertBefore(fragment,next || null)
+  cardDropTarget={container,next}
+}
+
+
+function resolverArrastreTarjetas(cancelado){
+
+  let aplicar=
+    !cancelado &&
+    cardDropTarget?.container?.isConnected
+
+  if(aplicar){
+    cardPlaceholders.forEach((placeholder,index)=>{
+      let card=draggedCards[index]
+
+      card.classList.remove('card-drag-source')
+      placeholder.replaceWith(card)
+    })
+  }else{
+    cardPlaceholders.forEach(
+      placeholder=>placeholder.remove()
+    )
+    draggedCards.forEach(
+      card=>card.classList.remove('card-drag-source')
+    )
+    cardOriginalLayouts.forEach(({container,cards})=>{
+      container.replaceChildren(...cards)
+    })
+  }
+
+  actualizarContadoresColumnas()
 }
 
 
@@ -1817,6 +1903,9 @@ function finalizarArrastre({cancelado=false}={}){
 
     let completedDrag=drag
 
+    if(completedDrag?.matches('.card'))
+      resolverArrastreTarjetas(cancelado)
+
     if(completedDrag?.matches('.column'))
       resolverArrastreColumnas(cancelado)
 
@@ -1846,7 +1935,9 @@ function finalizarArrastre({cancelado=false}={}){
     drag=null
     draggedCards=[]
     draggedColumns=[]
-    cardMoveTarget=null
+    cardDropTarget=null
+    cardPlaceholders=[]
+    cardOriginalLayouts=[]
     columnDropTarget=null
     columnPlaceholders=[]
     columnOriginalOrder=[]
@@ -1922,8 +2013,10 @@ function procesarArrastre(eventTarget,clientX,clientY){
       let column=
         eventTarget.closest('.column')
 
-      if(!column)
+      if(!column){
+        actualizarDestinoTarjetas(null)
         return
+      }
 
       let cards=
         column.querySelector('.cards')
@@ -1942,22 +2035,7 @@ function procesarArrastre(eventTarget,clientX,clientY){
           rect.height/2
       })
 
-      if(
-        cardMoveTarget?.cards!==cards ||
-        cardMoveTarget?.next!==next
-      ){
-        if(draggedCards.length===1){
-          cards.insertBefore(draggedCards[0],next || null)
-        }else{
-          let fragment=document.createDocumentFragment()
-
-          draggedCards.forEach(card=>fragment.append(card))
-          cards.insertBefore(fragment,next || null)
-        }
-
-        cardMoveTarget={cards,next}
-        actualizarContadoresColumnas()
-      }
+      actualizarDestinoTarjetas(cards,next)
 
       return
   }

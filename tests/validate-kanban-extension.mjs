@@ -262,6 +262,85 @@ try {
     throw new Error(`El tablero no se restauro al recargar: ${JSON.stringify(restored)}`);
   }
 
+  const cardDrop = await cdp.evaluate(`(async()=>{
+    let source=document.querySelector('#kanban .card')
+    let sourceColumn=source.closest('.column')
+    let targetColumn=[...document.querySelectorAll('#kanban > .column')]
+      .find(column=>column!==sourceColumn)
+    let target=targetColumn.querySelector('.cards')
+    let content=source.innerHTML
+    let targetTitle=targetColumn.querySelector('h3').innerHTML
+    let before=[...target.querySelectorAll('.card')].map(card=>card.innerHTML)
+    let transfer=new DataTransfer()
+    let rect=target.getBoundingClientRect()
+
+    source.dispatchEvent(new DragEvent('dragstart',{
+      bubbles:true,
+      cancelable:true,
+      dataTransfer:transfer
+    }))
+    target.dispatchEvent(new DragEvent('dragover',{
+      bubbles:true,
+      cancelable:true,
+      clientX:rect.left+rect.width/2,
+      clientY:rect.bottom-1,
+      dataTransfer:transfer
+    }))
+    await new Promise(resolve=>requestAnimationFrame(resolve))
+
+    let during=[...target.children]
+      .filter(item=>!item.classList.contains('card-drag-source'))
+      .map(item=>
+        item.classList.contains('card-placeholder')
+          ? '__placeholder__'
+          : item.innerHTML
+      )
+    let sourceHidden=source.classList.contains('card-drag-source')
+
+    source.dispatchEvent(new DragEvent('dragend',{
+      bubbles:true,
+      cancelable:true,
+      dataTransfer:transfer
+    }))
+    await new Promise(resolve=>setTimeout(resolve,80))
+
+    let after=[...target.querySelectorAll('.card')].map(card=>card.innerHTML)
+    let stored=(await chrome.storage.local.get(['kanban-data']))['kanban-data']
+    let board=stored.workspaces.find(workspace=>workspace.id===stored.activeWorkspace).board
+    let storedTarget=board.find(column=>column.title===targetTitle)
+
+    return {
+      before,
+      during,
+      after,
+      stored:storedTarget.cards,
+      content,
+      sourceHidden,
+      placeholderCleared:!document.querySelector('.card-placeholder'),
+      sourceRestored:!document.querySelector('.card-drag-source')
+    }
+  })()`);
+
+  const expectedCardOrder = [
+    ...cardDrop.before,
+    cardDrop.content
+  ];
+  const expectedCardPreview = [
+    ...cardDrop.before,
+    '__placeholder__'
+  ];
+
+  if (
+    JSON.stringify(cardDrop.during) !== JSON.stringify(expectedCardPreview) ||
+    JSON.stringify(cardDrop.after) !== JSON.stringify(expectedCardOrder) ||
+    JSON.stringify(cardDrop.stored) !== JSON.stringify(expectedCardOrder) ||
+    !cardDrop.sourceHidden ||
+    !cardDrop.placeholderCleared ||
+    !cardDrop.sourceRestored
+  ) {
+    throw new Error(`La insercion de tarjeta no se aplico al soltar: ${JSON.stringify(cardDrop)}`);
+  }
+
   const columnDrop = await cdp.evaluate(`(async()=>{
     let columns=[...document.querySelectorAll('#kanban > .column')]
     let source=columns[0]
