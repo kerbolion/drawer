@@ -271,6 +271,8 @@ let dragImageOffset={x:0,y:0}
 let columnMoveAnchor
 let dragFrame
 let pendingDragPoint
+let workspaceDragMoved=false
+let workspaceClickBlockedUntil=0
 let workspaces=[]
 let activeWorkspace=''
 let workspaceBoards=new Map()
@@ -463,7 +465,10 @@ function crearColumna(item={}){
   column.className='column'
 
   column.innerHTML=`
-    <h3 draggable="true"></h3>
+    <div class="column-header">
+      <h3 draggable="true"></h3>
+      <span class="column-count"></span>
+    </div>
     <div class="cards"></div>
     <button class="add-card">
       + Agregar tarjeta
@@ -488,7 +493,19 @@ function crearColumna(item={}){
     cards.append(card)
   })
 
+  column.querySelector('.column-count').textContent=
+    cards.querySelectorAll('.card').length
+
   return column
+}
+
+
+function actualizarContadoresColumnas(){
+
+  kanban.querySelectorAll('.column').forEach(column=>{
+    column.querySelector('.column-count').textContent=
+      column.querySelectorAll('.card').length
+  })
 }
 
 
@@ -589,6 +606,7 @@ function dibujarWorkspaces(){
 
       button.dataset.workspace=workspace.id
       button.type='button'
+      button.draggable=true
 
       name.textContent=workspace.title
       count.className='workspace-count'
@@ -748,8 +766,10 @@ function guardar({
     )
 
   if(current){
-    if(tablero)
+    if(tablero){
+      actualizarContadoresColumnas()
       current.board=leerTablero()
+    }
 
     if(configuracion)
       current.settings=leerConfiguracion()
@@ -1229,12 +1249,22 @@ document.addEventListener(
       drag=e.target
 
     if(e.target.matches('h3'))
-      drag=e.target.parentElement
+      drag=e.target.closest('.column')
+
+    let workspaceTab=
+      e.target.closest?.('.workspace-tab')
+
+    if(
+      workspaceTab &&
+      workspaceTabs.contains(workspaceTab)
+    )
+      drag=workspaceTab
 
     if(!drag)
       return
 
     columnMoveAnchor=null
+    workspaceDragMoved=false
     crearDragImage(drag,e)
     drag.classList.add('dragging')
   }
@@ -1273,13 +1303,32 @@ document.addEventListener(
       )
     }
 
+    let completedDrag=drag
+
+    if(completedDrag?.matches('.workspace-tab')){
+      let byId=new Map(
+        workspaces.map(workspace=>[workspace.id,workspace])
+      )
+
+      workspaces=[
+        ...workspaceTabs.querySelectorAll('.workspace-tab')
+      ].map(tab=>byId.get(tab.dataset.workspace))
+        .filter(Boolean)
+
+      if(workspaceDragMoved)
+        workspaceClickBlockedUntil=performance.now()+200
+    }
+
     drag?.classList.remove('dragging')
     eliminarDragImage()
 
     drag=null
     columnMoveAnchor=null
 
-    guardar()
+    if(completedDrag?.matches('.workspace-tab'))
+      guardar({tablero:false,configuracion:false})
+    else
+      guardar()
   }
 )
 
@@ -1288,6 +1337,28 @@ function procesarArrastre(eventTarget,clientX,clientY){
 
   if(!drag)
     return
+
+  if(drag.matches('.workspace-tab')){
+
+    if(!workspaceTabs.contains(eventTarget))
+      return
+
+    let next=[
+      ...workspaceTabs.querySelectorAll(
+        '.workspace-tab:not(.dragging)'
+      )
+    ].find(tab=>{
+      let rect=tab.getBoundingClientRect()
+      return clientX < rect.left + rect.width/2
+    })
+
+    if(drag.nextElementSibling===(next || null))
+      return
+
+    workspaceTabs.insertBefore(drag,next || null)
+    workspaceDragMoved=true
+    return
+  }
 
   if(drag.matches('.card')){
 
@@ -1317,11 +1388,13 @@ function procesarArrastre(eventTarget,clientX,clientY){
       if(
         drag.parentElement!==cards ||
         drag.nextElementSibling!==(next || null)
-      )
+      ){
         cards.insertBefore(
           drag,
           next || null
         )
+        actualizarContadoresColumnas()
+      }
 
       return
   }
@@ -1551,6 +1624,11 @@ document.addEventListener(
 workspaceTabs.addEventListener(
   'click',
   e=>{
+
+    if(performance.now() < workspaceClickBlockedUntil){
+      e.preventDefault()
+      return
+    }
 
     let tab=
       e.target.closest('.workspace-tab')

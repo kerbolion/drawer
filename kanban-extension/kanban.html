@@ -91,6 +91,7 @@ body{
   background:var(--site-button-bg);
   color:var(--site-button-text);
   white-space:nowrap;
+  cursor:grab;
 }
 
 .workspace-tab.active{
@@ -271,11 +272,31 @@ select{
   flex-direction:column;
 }
 
+.column-header{
+  display:flex;
+  flex:none;
+  gap:8px;
+  align-items:center;
+  margin-bottom:10px;
+}
+
 .column h3{
-  margin:0 0 10px;
+  flex:1;
+  min-width:0;
+  margin:0;
   padding:5px;
   cursor:grab;
+}
+
+.column-count{
   flex:none;
+  min-width:22px;
+  padding:2px 6px;
+  border-radius:10px;
+  background:color-mix(in srgb,var(--site-heading) 12%,var(--site-bg));
+  color:var(--site-muted);
+  font-size:11px;
+  text-align:center;
 }
 
 .cards{
