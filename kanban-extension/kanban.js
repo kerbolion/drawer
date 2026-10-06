@@ -138,7 +138,9 @@ let canvasFitMotion
 let canvasTransform={x:0,y:0,scale:1}
 let canvasBoardGesture
 let canvasSpacePressed=false
+let canvasAltPressed=false
 let canvasAltFocus
+let modifierButtonBlockUntil=0
 let overviewSettings=normalizarConfiguracion()
 let views=[]
 let activeViewId='all'
@@ -1377,7 +1379,9 @@ function desactivarLienzo(){
   let deactivationVersion=canvasActivationVersion
 
   establecerPaneoConEspacio(false)
+  canvasAltPressed=false
   canvasAltFocus=null
+  modifierButtonBlockUntil=0
   settingsPanel.hidden=false
 
   if(canvasPanzoom){
@@ -4520,8 +4524,10 @@ function retenerAltEnLienzo(e){
   e.preventDefault()
   e.stopImmediatePropagation()
 
-  if(e.type==='keydown')
+  if(e.type==='keydown'){
+    canvasAltPressed=true
     canvasAltFocus=editable || null
+  }
 
   if(!canvasAltFocus)
     canvasViewport.focus({preventScroll:true})
@@ -4529,6 +4535,7 @@ function retenerAltEnLienzo(e){
   if(e.type==='keyup'){
     let focus=canvasAltFocus
 
+    canvasAltPressed=false
     canvasAltFocus=null
     requestAnimationFrame(()=>{
       if(!canvasMode)
@@ -4553,6 +4560,42 @@ document.addEventListener(
 document.addEventListener(
   'keyup',
   retenerAltEnLienzo,
+  true
+)
+
+
+document.addEventListener(
+  'pointerdown',
+  e=>{
+    if(
+      canvasMode &&
+      e.target.closest?.('button') &&
+      (canvasAltPressed || canvasSpacePressed || e.altKey)
+    )
+      modifierButtonBlockUntil=performance.now()+600
+  },
+  true
+)
+
+
+document.addEventListener(
+  'click',
+  e=>{
+    if(
+      !canvasMode ||
+      !e.target.closest?.('button') ||
+      !(
+        canvasAltPressed ||
+        canvasSpacePressed ||
+        e.altKey ||
+        performance.now()<modifierButtonBlockUntil
+      )
+    )
+      return
+
+    e.preventDefault()
+    e.stopImmediatePropagation()
+  },
   true
 )
 
@@ -4595,7 +4638,11 @@ document.addEventListener(
 
 window.addEventListener(
   'blur',
-  ()=>establecerPaneoConEspacio(false)
+  ()=>{
+    canvasAltPressed=false
+    modifierButtonBlockUntil=0
+    establecerPaneoConEspacio(false)
+  }
 )
 
 

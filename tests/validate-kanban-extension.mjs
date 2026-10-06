@@ -1295,6 +1295,50 @@ try {
       '.overview-workspace[data-workspace="'+configuredWorkspaceId+'"]'
     )
     let freeBoardId=freeBoard.dataset.workspace
+    let modifierAddButton=freeBoard.querySelector('.add-card')
+    let cardsBeforeModifierClick=document.querySelectorAll('.card').length
+    document.dispatchEvent(new KeyboardEvent('keydown',{
+      bubbles:true,
+      cancelable:true,
+      key:'Alt',
+      code:'AltLeft',
+      altKey:true
+    }))
+    modifierAddButton.dispatchEvent(new PointerEvent('pointerdown',{
+      bubbles:true,
+      cancelable:true,
+      button:0,
+      pointerId:61,
+      altKey:true
+    }))
+    document.dispatchEvent(new KeyboardEvent('keyup',{
+      bubbles:true,
+      cancelable:true,
+      key:'Alt',
+      code:'AltLeft'
+    }))
+    modifierAddButton.click()
+    let altButtonBlocked=
+      document.querySelectorAll('.card').length===cardsBeforeModifierClick
+    modifierButtonBlockUntil=0
+    document.dispatchEvent(new KeyboardEvent('keydown',{
+      bubbles:true,
+      cancelable:true,
+      key:' ',
+      code:'Space'
+    }))
+    modifierAddButton.click()
+    let spaceButtonBlocked=
+      document.querySelectorAll('.card').length===cardsBeforeModifierClick
+    document.dispatchEvent(new KeyboardEvent('keyup',{
+      bubbles:true,
+      cancelable:true,
+      key:' ',
+      code:'Space'
+    }))
+    await new Promise(resolve=>requestAnimationFrame(
+      ()=>requestAnimationFrame(resolve)
+    ))
     let configuredColumnHeight=freeBoard.querySelector('.column').offsetHeight
     let editableCard=freeBoard.querySelector('.card')
     editableCard.contentEditable=true
@@ -1703,6 +1747,8 @@ try {
       editableAltDownAccepted,
       editableAltUpAccepted,
       editableAltFocusRetained,
+      altButtonBlocked,
+      spaceButtonBlocked,
       transformed,
       previewSourceText,
       previewSourceRect,
@@ -1758,6 +1804,8 @@ try {
     canvasView.editableAltDownAccepted ||
     canvasView.editableAltUpAccepted ||
     !canvasView.editableAltFocusRetained ||
+    !canvasView.altButtonBlocked ||
+    !canvasView.spaceButtonBlocked ||
     canvasView.scaleAfterControl !== canvasView.scaleBeforeModifier ||
     canvasView.scaleAfterAlt === canvasView.scaleBeforeModifier ||
     canvasView.initialScale === canvasView.zoomedScale ||
