@@ -704,7 +704,7 @@ html[data-theme="dark"] .card-group{
 
 .group-cards{
   min-height:36px;
-  padding:0;
+  padding:4px;
   overflow:visible;
 }
 
@@ -720,12 +720,58 @@ html[data-theme="dark"] .card-group{
 }
 
 .card{
+  position:relative;
   background:var(--site-bg);
-  padding:12px;
+  padding:12px 42px 12px 12px;
   margin-bottom:8px;
   border-radius:6px;
   cursor:grab;
   box-shadow:0 1px 3px var(--site-shadow);
+}
+
+.card-content{
+  min-height:1em;
+  overflow-wrap:anywhere;
+  white-space:pre-wrap;
+}
+
+.card-content[contenteditable="true"]{
+  outline:none;
+  background:transparent;
+}
+
+.card.editing{
+  outline:2px solid var(--primary-color);
+  outline-offset:1px;
+  cursor:text;
+}
+
+.edit-card{
+  position:absolute;
+  top:6px;
+  right:6px;
+  display:grid;
+  width:28px;
+  height:28px;
+  place-items:center;
+  padding:0;
+  border:1px solid var(--site-border);
+  border-radius:5px;
+  background:var(--site-button-bg);
+  color:var(--site-button-text);
+  opacity:0;
+  pointer-events:none;
+  transition:opacity .12s ease;
+}
+
+.card:hover > .edit-card,
+.card:focus-within > .edit-card{
+  opacity:1;
+  pointer-events:auto;
+}
+
+.drag-image .edit-card{
+  display:none;
 }
 
 .card.selected{

@@ -322,7 +322,11 @@ async function copiarAlPortapapeles(text){
 
 function obtenerTextoPlano(element){
 
-  return element.innerText
+  let source=element.matches?.('.card')
+    ? element.querySelector(':scope > .card-content') || element
+    : element
+
+  return source.innerText
     .replace(/\u00a0/g,' ')
     .replace(/\r\n?/g,'\n')
     .trim()
@@ -964,7 +968,7 @@ function leerColumna(column){
     title:column.querySelector('h3').innerHTML,
     cards:[...cards.children]
       .filter(item=>item.matches('.card'))
-      .map(card=>card.innerHTML),
+      .map(leerContenidoTarjeta),
     groups:[...cards.children]
       .filter(item=>item.matches('.card-group'))
       .map(leerGrupo)
@@ -978,8 +982,15 @@ function leerGrupo(group){
     title:group.querySelector('.card-group-title').innerHTML,
     cards:[...group.querySelector('.group-cards').children]
       .filter(item=>item.matches('.card'))
-      .map(card=>card.innerHTML)
+      .map(leerContenidoTarjeta)
   }
+}
+
+
+function leerContenidoTarjeta(card){
+
+  return card.querySelector(':scope > .card-content')
+    ?.innerHTML ?? card.innerHTML
 }
 
 
@@ -989,7 +1000,15 @@ function crearTarjeta(content='Nueva tarjeta'){
 
   card.className='card'
   card.draggable=true
-  card.innerHTML=content
+  card.innerHTML=`
+    <div class="card-content"></div>
+    <button
+      class="edit-card"
+      type="button"
+      title="Editar tarjeta"
+      aria-label="Editar tarjeta">✎</button>
+  `
+  card.querySelector('.card-content').innerHTML=content
 
   return card
 }
@@ -2010,6 +2029,17 @@ function editar(el,seleccionar=false){
 }
 
 
+function editarTarjeta(card,seleccionar=false){
+
+  card.classList.add('editing')
+  card.draggable=false
+  editar(
+    card.querySelector(':scope > .card-content'),
+    seleccionar
+  )
+}
+
+
 columns.oninput=()=>{
 
   ajustarColumnas()
@@ -2342,7 +2372,7 @@ copyContext.onclick=async()=>{
 
     internalClipboard={
       type:'card',
-      items:cards.map(card=>card.innerHTML)
+      items:cards.map(leerContenidoTarjeta)
     }
     text=cards.map(obtenerTextoPlano).join('\n')
   }else{
@@ -2509,7 +2539,7 @@ function moverSeleccionA(workspaceId,columnIndex){
 
   if(card || group){
     let contents=card
-      ? items.map(item=>item.innerHTML)
+      ? items.map(leerContenidoTarjeta)
       : items.map(leerGrupo)
 
     if(workspaceId===activeWorkspace){
@@ -2745,7 +2775,7 @@ deleteContext.onclick=async()=>{
     : card
       ? multipleCards
         ? `${cardTargets.length} tarjetas seleccionadas`
-        : target.textContent.trim()
+        : obtenerTextoPlano(target)
       : group
         ? multipleGroups
           ? `${groupTargets.length} grupos seleccionados`
@@ -2919,7 +2949,11 @@ function obtenerOrigenArrastre(target){
 
   let card=target.closest?.('.card')
 
-  if(card && kanban.contains(card))
+  if(
+    card &&
+    kanban.contains(card) &&
+    !target.closest?.('button,input,select,textarea,a')
+  )
     return {element:card,handle:card}
 
   let group=target.closest?.('.card-group')
@@ -4082,9 +4116,26 @@ document.addEventListener(
     if(
       e.button!==0 ||
       pointerGesture ||
-      canvasBoardGesture ||
-      e.target.closest?.('[contenteditable="true"]')
+      canvasBoardGesture
     )
+      return
+
+    let editingCard=e.target.closest?.('.card.editing')
+
+    if(editingCard){
+      let content=editingCard.querySelector(
+        ':scope > .card-content'
+      )
+
+      if(!e.target.closest('.card-content,.edit-card')){
+        e.preventDefault()
+        content.focus({preventScroll:true})
+      }
+
+      return
+    }
+
+    if(e.target.closest?.('[contenteditable="true"]'))
       return
 
     let origin=obtenerOrigenArrastre(e.target)
@@ -4279,7 +4330,7 @@ document.addEventListener(
     }
 
     if(
-      !e.target.matches('.card,h3,.card-group-title')
+      !e.target.matches('h3,.card-group-title')
     )
       return
 
@@ -4334,6 +4385,12 @@ document.addEventListener(
     e.target.contentEditable=false
     e.target.draggable=e.target.matches('.card,h3')
 
+    if(e.target.matches('.card-content'))
+      e.target.closest('.card').classList.remove('editing')
+
+    if(e.target.matches('.card-content'))
+      e.target.closest('.card').draggable=true
+
     guardar()
   },
   true
@@ -4343,6 +4400,15 @@ document.addEventListener(
 document.addEventListener(
   'click',
   e=>{
+
+    let editButton=e.target.closest('.edit-card')
+
+    if(editButton){
+      let card=editButton.closest('.card')
+
+      editarTarjeta(card)
+      return
+    }
 
     if(
       !e.target.matches('.add-card')
@@ -4369,10 +4435,7 @@ document.addEventListener(
 
     guardar()
 
-    editar(
-      card,
-      true
-    )
+    editarTarjeta(card,true)
   }
 )
 

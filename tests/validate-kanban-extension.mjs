@@ -193,11 +193,75 @@ try {
     throw new Error(`La politica de seleccion no se aplico: ${JSON.stringify(selectionPolicy)}`);
   }
 
+  const cardEditing = await cdp.evaluate(`(async()=>{
+    let card=document.querySelector('.card')
+    let content=card.querySelector(':scope > .card-content')
+    let button=card.querySelector(':scope > .edit-card')
+    let cardRect=card.getBoundingClientRect()
+    let buttonRect=button.getBoundingClientRect()
+    let hiddenOpacity=getComputedStyle(button).opacity
+
+    button.focus({preventScroll:true})
+    await new Promise(resolve=>setTimeout(resolve,150))
+    let focusOpacity=getComputedStyle(button).opacity
+    button.click()
+    let inlineActive=content.isContentEditable
+    let dragDisabled=!card.draggable
+    let cardFocused=card.classList.contains('editing')
+    let contentOutline=getComputedStyle(content).outlineStyle
+    card.dispatchEvent(new PointerEvent('pointerdown',{
+      bubbles:true,
+      cancelable:true,
+      button:0,
+      pointerId:77,
+      clientX:cardRect.right-4,
+      clientY:cardRect.bottom-4
+    }))
+    let bodyClickKeepsEditing=
+      content.isContentEditable &&
+      document.activeElement===content &&
+      !pointerGesture
+    content.blur()
+    await new Promise(resolve=>setTimeout(resolve,30))
+
+    return {
+      hiddenOpacity,
+      focusOpacity,
+      inlineActive,
+      dragDisabled,
+      cardFocused,
+      contentOutline,
+      bodyClickKeepsEditing,
+      dragRestored:card.draggable,
+      cardFocusCleared:!card.classList.contains('editing'),
+      fixedTop:Math.abs(buttonRect.top-cardRect.top-6)<1,
+      fixedRight:Math.abs(cardRect.right-buttonRect.right-6)<1,
+      persistedWithoutButton:!leerContenidoTarjeta(card).includes('edit-card')
+    }
+  })()`);
+
+  if (
+    cardEditing.hiddenOpacity !== "0" ||
+    cardEditing.focusOpacity !== "1" ||
+    !cardEditing.inlineActive ||
+    !cardEditing.dragDisabled ||
+    !cardEditing.cardFocused ||
+    cardEditing.contentOutline !== "none" ||
+    !cardEditing.bodyClickKeepsEditing ||
+    !cardEditing.dragRestored ||
+    !cardEditing.cardFocusCleared ||
+    !cardEditing.fixedTop ||
+    !cardEditing.fixedRight ||
+    !cardEditing.persistedWithoutButton
+  ) {
+    throw new Error(`El boton de edicion de tarjeta no funciona: ${JSON.stringify(cardEditing)}`);
+  }
+
   const groups = await cdp.evaluate(`(async()=>{
     let column=document.querySelector('.column')
     let root=column.querySelector(':scope > .cards')
     let originalCard=root.querySelector(':scope > .card')
-    let originalContent=originalCard.innerHTML
+    let originalContent=leerContenidoTarjeta(originalCard)
     let initialCount=column.querySelectorAll('.card').length
 
     column.dispatchEvent(new MouseEvent('contextmenu',{
@@ -444,7 +508,7 @@ try {
     let targetColumn=[...document.querySelectorAll('.column')]
       .find(column=>column!==sourceColumn)
     let target=targetColumn.querySelector('.cards')
-    let movedCard=card.innerHTML
+    let movedCard=leerContenidoTarjeta(card)
     let targetTitle=targetColumn.querySelector('h3').innerHTML
     let targetRect=target.getBoundingClientRect()
     let transfer=new DataTransfer()
@@ -507,7 +571,7 @@ try {
     cards:document.querySelectorAll('.card').length,
     moveRestored:[...document.querySelectorAll('.column')].some(column=>
       column.querySelector('h3').innerHTML===${JSON.stringify(result.targetTitle)} &&
-      [...column.querySelectorAll('.card')].some(card=>card.innerHTML===${JSON.stringify(result.movedCard)})
+      [...column.querySelectorAll('.card')].some(card=>leerContenidoTarjeta(card)===${JSON.stringify(result.movedCard)})
     ),
     theme:document.documentElement.dataset.theme
   })`);
@@ -522,13 +586,14 @@ try {
   const copiedMultilineCard = await cdp.evaluate(`(async()=>{
     let copied=''
     let card=document.querySelector('#kanban .card')
-    let original=card.innerHTML
+    let contentElement=card.querySelector('.card-content')
+    let original=contentElement.innerHTML
 
     Object.defineProperty(navigator,'clipboard',{
       configurable:true,
       value:{writeText:async text=>{copied=text}}
     })
-    card.innerHTML='Linea 1<div>Linea 2</div><div>Linea 3</div>'
+    contentElement.innerHTML='Linea 1<div>Linea 2</div><div>Linea 3</div>'
     card.dispatchEvent(new MouseEvent('contextmenu',{
       bubbles:true,
       cancelable:true,
@@ -537,7 +602,7 @@ try {
     }))
     document.querySelector('#copy-context').click()
     await new Promise(resolve=>setTimeout(resolve,20))
-    card.innerHTML=original
+    contentElement.innerHTML=original
 
     return copied
   })()`);
@@ -554,9 +619,9 @@ try {
     let target=targetColumn.querySelector('.cards')
     let targetCards=[...target.querySelectorAll('.card')]
     let hovered=targetCards[0]
-    let content=source.innerHTML
+    let content=leerContenidoTarjeta(source)
     let targetTitle=targetColumn.querySelector('h3').innerHTML
-    let before=[...target.querySelectorAll('.card')].map(card=>card.innerHTML)
+    let before=[...target.querySelectorAll('.card')].map(leerContenidoTarjeta)
     let transfer=new DataTransfer()
     let rect=hovered.getBoundingClientRect()
 
@@ -588,7 +653,7 @@ try {
       .map(item=>
         item.classList.contains('card-placeholder')
           ? '__placeholder__'
-          : item.innerHTML
+          : leerContenidoTarjeta(item)
       )
     let sourceHidden=source.classList.contains('card-drag-source')
 
@@ -599,7 +664,7 @@ try {
     }))
     await new Promise(resolve=>setTimeout(resolve,80))
 
-    let after=[...target.querySelectorAll('.card')].map(card=>card.innerHTML)
+    let after=[...target.querySelectorAll('.card')].map(leerContenidoTarjeta)
     let stored=(await chrome.storage.local.get(['kanban-data']))['kanban-data']
     let board=stored.workspaces.find(workspace=>workspace.id===stored.activeWorkspace).board
     let storedTarget=board.find(column=>column.title===targetTitle)
@@ -911,7 +976,7 @@ try {
     let boardOrder=[...document.querySelectorAll('.overview-workspace')]
       .map(workspace=>workspace.dataset.workspace)
     let card=sourceBoard.querySelector('.card')
-    let cardContent=card.innerHTML
+    let cardContent=leerContenidoTarjeta(card)
     let targetCards=destinationBoard.querySelector('.cards')
     let transfer=new DataTransfer()
     let rect=targetCards.getBoundingClientRect()
@@ -936,7 +1001,7 @@ try {
     await new Promise(resolve=>setTimeout(resolve,80))
 
     let cardMoved=[...destinationBoard.querySelectorAll('.card')]
-      .some(item=>item.innerHTML===cardContent)
+      .some(item=>leerContenidoTarjeta(item)===cardContent)
 
     let sourceColumn=sourceBoard.querySelector('.column')
     let columnTitle=sourceColumn.querySelector('h3').innerHTML
@@ -1082,7 +1147,7 @@ try {
     let sourceStored=stored.workspaces.find(workspace=>workspace.id===sourceId)
     let destinationStored=stored.workspaces.find(workspace=>workspace.id===destinationId)
     let contextMoved=sourceStored.board.some(column=>
-      column.cards.includes(contextCard.innerHTML)
+      column.cards.includes(leerContenidoTarjeta(contextCard))
     )
     let countersMatch=[...document.querySelectorAll('.overview-workspace')]
       .every(workspace=>
