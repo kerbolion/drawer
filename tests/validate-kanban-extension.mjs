@@ -937,6 +937,24 @@ try {
   }
 
   const canvasView = await cdp.evaluate(`(async()=>{
+    let configuredTab=document.querySelector('.workspace-tab')
+    let configuredWorkspaceId=configuredTab.dataset.workspace
+    configuredTab.click()
+    await new Promise(resolve=>setTimeout(resolve,80))
+    document.querySelector('#view').value='grid'
+    document.querySelector('#view').dispatchEvent(
+      new Event('change',{bubbles:true})
+    )
+    document.querySelector('#heightMode').value='fixed'
+    document.querySelector('#heightMode').dispatchEvent(
+      new Event('change',{bubbles:true})
+    )
+    document.querySelector('#height').value='333'
+    document.querySelector('#height').dispatchEvent(
+      new Event('input',{bubbles:true})
+    )
+    await new Promise(resolve=>setTimeout(resolve,80))
+
     document.querySelector('.view-button').click()
     document.querySelector('#show-canvas').click()
     await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))
@@ -966,8 +984,36 @@ try {
     }))
     await new Promise(resolve=>requestAnimationFrame(resolve))
     let altFocusRetained=document.activeElement===viewport
-    let freeBoard=document.querySelector('.overview-workspace')
+    let freeBoard=document.querySelector(
+      '.overview-workspace[data-workspace="'+configuredWorkspaceId+'"]'
+    )
     let freeBoardId=freeBoard.dataset.workspace
+    let configuredColumnHeight=freeBoard.querySelector('.column').offsetHeight
+    let editableCard=freeBoard.querySelector('.card')
+    editableCard.contentEditable=true
+    editableCard.draggable=false
+    editableCard.focus({preventScroll:true})
+    let editableAltDownAccepted=editableCard.dispatchEvent(
+      new KeyboardEvent('keydown',{
+        bubbles:true,
+        cancelable:true,
+        key:'Alt',
+        code:'AltLeft',
+        altKey:true
+      })
+    )
+    let editableAltUpAccepted=editableCard.dispatchEvent(
+      new KeyboardEvent('keyup',{
+        bubbles:true,
+        cancelable:true,
+        key:'Alt',
+        code:'AltLeft'
+      })
+    )
+    await new Promise(resolve=>requestAnimationFrame(resolve))
+    let editableAltFocusRetained=document.activeElement===editableCard
+    editableCard.contentEditable=false
+    editableCard.draggable=true
     let initialBoardLayout={
       x:parseFloat(freeBoard.style.left),
       y:parseFloat(freeBoard.style.top),
@@ -1228,10 +1274,6 @@ try {
     let availableHeightClass=document.querySelector('#kanban')
       .classList.contains('available-height')
     let fixedHeightHidden=document.querySelector('#height-value').hidden
-    document.querySelector('#heightMode').value='fixed'
-    document.querySelector('#heightMode').dispatchEvent(
-      new Event('change',{bubbles:true})
-    )
 
     let firstCloseWorked=!document.querySelector('#canvas-viewport')
       .classList.contains('canvas-active')
@@ -1249,9 +1291,16 @@ try {
       width:restoredBoard.offsetWidth,
       height:restoredBoard.offsetHeight
     }
+    let boardAvailableHeight=restoredBoard
+      .querySelector('.overview-columns')
+      .classList.contains('available-height')
 
     document.querySelector('.workspace-tab').click()
     await new Promise(resolve=>setTimeout(resolve,80))
+    document.querySelector('#heightMode').value='fixed'
+    document.querySelector('#heightMode').dispatchEvent(
+      new Event('change',{bubbles:true})
+    )
 
     return {
       panzoomType:typeof Panzoom,
@@ -1267,11 +1316,16 @@ try {
       settingsRestored,
       availableHeightClass,
       fixedHeightHidden,
+      boardAvailableHeight,
+      configuredColumnHeight,
       boards,
       gridAlignContent,
       altDownAccepted,
       altUpAccepted,
       altFocusRetained,
+      editableAltDownAccepted,
+      editableAltUpAccepted,
+      editableAltFocusRetained,
       transformed,
       previewSourceText,
       previewSourceRect,
@@ -1309,11 +1363,16 @@ try {
     !canvasView.settingsRestored ||
     !canvasView.availableHeightClass ||
     !canvasView.fixedHeightHidden ||
+    !canvasView.boardAvailableHeight ||
+    canvasView.configuredColumnHeight !== 333 ||
     canvasView.boards !== overview.tabs ||
     canvasView.gridAlignContent !== "start" ||
     canvasView.altDownAccepted ||
     canvasView.altUpAccepted ||
     !canvasView.altFocusRetained ||
+    canvasView.editableAltDownAccepted ||
+    canvasView.editableAltUpAccepted ||
+    !canvasView.editableAltFocusRetained ||
     canvasView.scaleAfterControl !== canvasView.scaleBeforeModifier ||
     canvasView.scaleAfterAlt === canvasView.scaleBeforeModifier ||
     canvasView.initialScale === canvasView.zoomedScale ||

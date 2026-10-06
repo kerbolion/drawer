@@ -133,6 +133,7 @@ let canvasActivationVersion=0
 let canvasTransform={x:0,y:0,scale:1}
 let canvasBoardGesture
 let canvasSpacePressed=false
+let canvasAltFocus
 let overviewSettings=normalizarConfiguracion()
 let views=[]
 let activeViewId='all'
@@ -1008,6 +1009,12 @@ function crearVistaGeneral({lienzo=false}={}){
     )
     columnsContainer.className=
       `overview-columns ${boardSettings.view}`
+
+    if(
+      boardSettings.view==='grid' &&
+      boardSettings.heightMode==='available'
+    )
+      columnsContainer.classList.add('available-height')
     resizeHandle.className=
       'canvas-resize-handle panzoom-exclude'
     resizeHandle.setAttribute('aria-hidden','true')
@@ -1152,6 +1159,7 @@ function desactivarLienzo(){
   let deactivationVersion=canvasActivationVersion
 
   establecerPaneoConEspacio(false)
+  canvasAltFocus=null
   settingsPanel.hidden=false
 
   if(canvasPanzoom){
@@ -3890,21 +3898,37 @@ function retenerAltEnLienzo(e){
     e.key!=='Alt' ||
     !canvasMode ||
     e.ctrlKey ||
-    e.target.closest?.(
-      'input,textarea,select,[contenteditable="true"]'
-    )
+    e.getModifierState?.('AltGraph')
   )
     return
 
+  let editable=e.target.closest?.(
+    'input,textarea,select,[contenteditable="true"]'
+  )
+
   e.preventDefault()
   e.stopImmediatePropagation()
-  canvasViewport.focus({preventScroll:true})
 
-  if(e.type==='keyup')
+  if(e.type==='keydown')
+    canvasAltFocus=editable || null
+
+  if(!canvasAltFocus)
+    canvasViewport.focus({preventScroll:true})
+
+  if(e.type==='keyup'){
+    let focus=canvasAltFocus
+
+    canvasAltFocus=null
     requestAnimationFrame(()=>{
-      if(canvasMode)
+      if(!canvasMode)
+        return
+
+      if(focus?.isConnected)
+        focus.focus({preventScroll:true})
+      else
         canvasViewport.focus({preventScroll:true})
     })
+  }
 }
 
 

@@ -533,6 +533,15 @@ select{
   align-items:start;
 }
 
+.overview-columns.grid.available-height{
+  grid-auto-rows:minmax(0,1fr);
+  align-content:stretch;
+}
+
+.kanban.overview .overview-columns.grid.available-height .column{
+  height:100%;
+}
+
 .overview-columns.row{
   grid-auto-flow:column;
   grid-auto-columns:minmax(var(--board-min-width),1fr);
