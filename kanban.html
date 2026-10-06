@@ -8,6 +8,11 @@
 <style>
 *{box-sizing:border-box}
 
+html,
+body{
+  height:100%;
+}
+
 :root{
   color-scheme:light;
   --site-bg:#fff;
@@ -50,6 +55,8 @@
 
 body{
   margin:0;
+  display:flex;
+  flex-direction:column;
   font-family:monospace;
   font-size:16px;
   background:var(--site-bg);
@@ -198,6 +205,10 @@ body{
   gap:6px;
 }
 
+.settings .grid-setting[hidden]{
+  display:none;
+}
+
 .settings input{
   width:75px;
   padding:5px;
@@ -226,6 +237,7 @@ select{
 }
 
 .kanban{
+  flex:none;
   display:grid;
   grid-template-columns:repeat(var(--real-columns),minmax(0,1fr));
   gap:15px;
@@ -235,14 +247,17 @@ select{
 }
 
 .kanban.row{
+  flex:1 1 0;
+  min-height:0;
   grid-auto-flow:column;
   grid-auto-columns:minmax(300px,320px);
   grid-template-columns:none;
+  grid-template-rows:minmax(0,1fr);
   overflow-x:auto;
 }
 
 .kanban.row .column{
-  height:600px;
+  height:100%;
 }
 
 .column{
