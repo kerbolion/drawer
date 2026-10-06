@@ -1,6 +1,5 @@
 const STORAGE='kanban-data'
 const THEME_STORAGE='minimal-builder-theme'
-const COLUMN_MOVE_MARGIN=16
 const DEFAULT_SETTINGS={
   columns:'3',
   height:'600',
@@ -274,7 +273,6 @@ themeToggle.onclick=async()=>{
 let drag
 let dragImage
 let dragImageOffset={x:0,y:0}
-let columnMoveAnchor
 let dragFrame
 let pendingDragPoint
 let pointerGesture
@@ -287,7 +285,10 @@ let columnSelectionAnchor
 let draggedCards=[]
 let draggedColumns=[]
 let cardMoveTarget
-let columnMoveTarget
+let columnDropTarget
+let columnPlaceholders=[]
+let columnOriginalOrder=[]
+let columnOverPlaceholder=false
 let internalClipboard
 let workspaces=[]
 let activeWorkspace=''
@@ -1593,12 +1594,16 @@ function obtenerOrigenArrastre(target){
   if(card && kanban.contains(card))
     return {element:card,handle:card}
 
-  let heading=target.closest?.('h3')
+  let column=target.closest?.('.column')
 
-  if(heading && kanban.contains(heading))
+  if(
+    column &&
+    kanban.contains(column) &&
+    !target.closest?.('button,input,select,textarea,a')
+  )
     return {
-      element:heading.closest('.column'),
-      handle:heading
+      element:column,
+      handle:target.closest?.('h3') || column
     }
 
   return null
@@ -1614,8 +1619,10 @@ function iniciarArrastre(element,e){
     document.activeElement.blur()
 
   drag=element
-  columnMoveAnchor=null
-  columnMoveTarget=null
+  columnDropTarget=null
+  columnPlaceholders=[]
+  columnOriginalOrder=[]
+  columnOverPlaceholder=false
   cardMoveTarget=null
   workspaceDragMoved=false
 
@@ -1649,6 +1656,9 @@ function iniciarArrastre(element,e){
         : [drag])
     .forEach(item=>item.classList.add('dragging'))
 
+  if(drag.matches('.column'))
+    prepararArrastreColumnas()
+
   return true
 }
 
@@ -1676,7 +1686,116 @@ function programarArrastre(target,x,y){
 }
 
 
-function finalizarArrastre(){
+function prepararArrastreColumnas(){
+
+  columnOriginalOrder=[
+    ...kanban.querySelectorAll('.column')
+  ]
+
+  let first=draggedColumns[0]
+  let fragment=document.createDocumentFragment()
+
+  draggedColumns.forEach(column=>{
+    let placeholder=document.createElement('section')
+
+    placeholder.className='column-placeholder'
+    placeholder.setAttribute('aria-hidden','true')
+    placeholder.style.height=
+      `${column.getBoundingClientRect().height}px`
+    columnPlaceholders.push(placeholder)
+    fragment.append(placeholder)
+    column.classList.add('column-drag-source')
+  })
+
+  first.before(fragment)
+}
+
+
+function puntoSobreMarcadorColumnas(x,y){
+
+  return columnPlaceholders.some(placeholder=>{
+    let rect=placeholder.getBoundingClientRect()
+
+    return (
+      x>=rect.left &&
+      x<=rect.right &&
+      y>=rect.top &&
+      y<=rect.bottom
+    )
+  })
+}
+
+
+function actualizarDestinoColumnas(target,x,y){
+
+  if(!target){
+    columnOverPlaceholder=
+      puntoSobreMarcadorColumnas(x,y)
+
+    if(!columnOverPlaceholder)
+      columnDropTarget=null
+
+    return
+  }
+
+  if(
+    columnDropTarget===target &&
+    !columnOverPlaceholder
+  )
+    return
+
+  let layout=[...kanban.children]
+    .filter(item=>
+      !item.classList.contains('column-drag-source')
+    )
+  let targetIndex=layout.indexOf(target)
+  let placeholderIndex=Math.min(
+    ...columnPlaceholders.map(
+      placeholder=>layout.indexOf(placeholder)
+    )
+  )
+  let fragment=document.createDocumentFragment()
+
+  columnPlaceholders.forEach(
+    placeholder=>fragment.append(placeholder)
+  )
+
+  if(placeholderIndex < targetIndex)
+    target.after(fragment)
+  else
+    target.before(fragment)
+
+  columnDropTarget=target
+  columnOverPlaceholder=false
+}
+
+
+function resolverArrastreColumnas(cancelado){
+
+  let aplicar=
+    !cancelado &&
+    columnDropTarget?.isConnected
+
+  if(aplicar){
+    columnPlaceholders.forEach((placeholder,index)=>{
+      let column=draggedColumns[index]
+
+      column.classList.remove('column-drag-source')
+      placeholder.replaceWith(column)
+    })
+  }else{
+    columnPlaceholders.forEach(
+      placeholder=>placeholder.remove()
+    )
+    draggedColumns.forEach(
+      column=>column.classList.remove('column-drag-source')
+    )
+    kanban.replaceChildren(...columnOriginalOrder)
+  }
+}
+
+
+function finalizarArrastre({cancelado=false}={}){
 
   if(!drag)
     return
@@ -1697,6 +1816,9 @@ function finalizarArrastre(){
     }
 
     let completedDrag=drag
+
+    if(completedDrag?.matches('.column'))
+      resolverArrastreColumnas(cancelado)
 
     if(completedDrag?.matches('.workspace-tab')){
       let byId=new Map(
@@ -1725,8 +1847,10 @@ function finalizarArrastre(){
     draggedCards=[]
     draggedColumns=[]
     cardMoveTarget=null
-    columnMoveTarget=null
-    columnMoveAnchor=null
+    columnDropTarget=null
+    columnPlaceholders=[]
+    columnOriginalOrder=[]
+    columnOverPlaceholder=false
 
     if(completedDrag?.matches('.workspace-tab'))
       guardar({tablero:false,configuracion:false})
@@ -1841,87 +1965,16 @@ function procesarArrastre(eventTarget,clientX,clientY){
 
   if(drag.matches('.column')){
 
-      if(
-        columnMoveAnchor &&
-        Math.hypot(
-          clientX-columnMoveAnchor.x,
-          clientY-columnMoveAnchor.y
-        ) < COLUMN_MOVE_MARGIN
-      )
-        return
-
       let hovered=
         eventTarget.closest('.column')
 
-      if(hovered?.classList.contains('dragging'))
-        return
-
-      let candidates=[
-        ...kanban.querySelectorAll(
-          '.column:not(.dragging)'
-        )
-      ]
-
-      if(!candidates.length){
-        return
-      }
-
-      let target=hovered ||
-        candidates.reduce(
-          (nearest,column)=>{
-
-            let rect=
-              column.getBoundingClientRect()
-
-            let dx=
-              clientX < rect.left
-                ? rect.left-clientX
-                : clientX > rect.right
-                  ? clientX-rect.right
-                  : 0
-
-            let dy=
-              clientY < rect.top
-                ? rect.top-clientY
-                : clientY > rect.bottom
-                  ? clientY-rect.bottom
-                  : 0
-
-            let distance=
-              dx*dx + dy*dy
-
-            return !nearest ||
-              distance < nearest.distance
-                ? {column,distance}
-                : nearest
-          },
-          null
-        ).column
-
-      if(columnMoveTarget===target)
-        return
-
-      let ordered=[
-        ...kanban.querySelectorAll('.column')
-      ]
-      let firstDraggedIndex=Math.min(
-        ...draggedColumns.map(column=>ordered.indexOf(column))
+      actualizarDestinoColumnas(
+        hovered?.classList.contains('dragging')
+          ? null
+          : hovered,
+        clientX,
+        clientY
       )
-      let targetIndex=ordered.indexOf(target)
-      let fragment=document.createDocumentFragment()
-
-      draggedColumns.forEach(column=>fragment.append(column))
-
-      if(firstDraggedIndex < targetIndex)
-        target.after(fragment)
-      else
-        target.before(fragment)
-
-      columnMoveTarget=target
-      columnMoveAnchor={
-        x:clientX,
-        y:clientY
-      }
   }
 }
 
@@ -2097,7 +2150,9 @@ function terminarGestoPuntero(e){
     }
   }
 
-  finalizarArrastre()
+  finalizarArrastre({
+    cancelado:e.type==='pointercancel'
+  })
 }
 
 

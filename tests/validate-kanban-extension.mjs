@@ -262,6 +262,82 @@ try {
     throw new Error(`El tablero no se restauro al recargar: ${JSON.stringify(restored)}`);
   }
 
+  const columnDrop = await cdp.evaluate(`(async()=>{
+    let columns=[...document.querySelectorAll('#kanban > .column')]
+    let source=columns[0]
+    let target=columns[2]
+    let title=column=>column.querySelector('h3').textContent.trim()
+    let before=columns.map(title)
+    let transfer=new DataTransfer()
+    let rect=target.getBoundingClientRect()
+
+    source.querySelector('h3').dispatchEvent(new DragEvent('dragstart',{
+      bubbles:true,
+      cancelable:true,
+      dataTransfer:transfer
+    }))
+    target.querySelector('.cards').dispatchEvent(new DragEvent('dragover',{
+      bubbles:true,
+      cancelable:true,
+      clientX:rect.left+rect.width/2,
+      clientY:rect.top+rect.height/2,
+      dataTransfer:transfer
+    }))
+    await new Promise(resolve=>requestAnimationFrame(resolve))
+
+    let during=[...document.querySelector('#kanban').children]
+      .filter(item=>!item.classList.contains('column-drag-source'))
+      .map(item=>
+        item.classList.contains('column-placeholder')
+          ? '__placeholder__'
+          : title(item)
+      )
+    let sourceHidden=source.classList.contains('column-drag-source')
+
+    source.querySelector('h3').dispatchEvent(new DragEvent('dragend',{
+      bubbles:true,
+      cancelable:true,
+      dataTransfer:transfer
+    }))
+    await new Promise(resolve=>setTimeout(resolve,80))
+
+    let after=[...document.querySelectorAll('#kanban > .column')].map(title)
+    let stored=(await chrome.storage.local.get(['kanban-data']))['kanban-data']
+    let board=stored.workspaces.find(workspace=>workspace.id===stored.activeWorkspace).board
+
+    return {
+      before,
+      during,
+      after,
+      stored:board.map(column=>column.title.replace(/<[^>]+>/g,'').trim()),
+      sourceHidden,
+      placeholderCleared:!document.querySelector('.column-placeholder'),
+      sourceRestored:!document.querySelector('.column-drag-source')
+    }
+  })()`);
+
+  const expectedColumnOrder = [
+    columnDrop.before[1],
+    columnDrop.before[2],
+    columnDrop.before[0]
+  ];
+  const expectedColumnPreview = [
+    columnDrop.before[1],
+    columnDrop.before[2],
+    '__placeholder__'
+  ];
+
+  if (
+    JSON.stringify(columnDrop.during) !== JSON.stringify(expectedColumnPreview) ||
+    JSON.stringify(columnDrop.after) !== JSON.stringify(expectedColumnOrder) ||
+    JSON.stringify(columnDrop.stored) !== JSON.stringify(expectedColumnOrder) ||
+    !columnDrop.sourceHidden ||
+    !columnDrop.placeholderCleared ||
+    !columnDrop.sourceRestored
+  ) {
+    throw new Error(`La insercion de columna no se aplico al soltar: ${JSON.stringify(columnDrop)}`);
+  }
+
   const deletion = await cdp.evaluate(`(async()=>{
     let initialCards=document.querySelectorAll('.card').length
     let initialColumns=document.querySelectorAll('.column').length

@@ -271,11 +271,30 @@ select{
   border-radius:8px;
   display:flex;
   flex-direction:column;
+  cursor:grab;
 }
 
 .column.selected{
   outline:2px solid var(--primary-color);
   outline-offset:1px;
+}
+
+.column-placeholder{
+  height:var(--height);
+  border:2px dashed var(--primary-color);
+  border-radius:8px;
+  background:color-mix(in srgb,var(--primary-color) 5%,transparent);
+  pointer-events:none;
+}
+
+.kanban.row .column-placeholder{
+  height:100%;
+}
+
+.column-drag-source{
+  position:fixed !important;
+  visibility:hidden;
+  pointer-events:none;
 }
 
 .column-header{
