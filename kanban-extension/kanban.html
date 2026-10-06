@@ -293,6 +293,7 @@ select{
       transparent 1px
     );
   background-size:20px 20px;
+  outline:none;
 }
 
 .canvas-viewport.canvas-active.is-panning,
@@ -990,7 +991,7 @@ html.is-dragging *{
 </div>
 
 
-<div class="canvas-viewport" id="canvas-viewport">
+<div class="canvas-viewport" id="canvas-viewport" tabindex="-1">
   <div
     class="canvas-controls panzoom-exclude panzoom-control"
     id="canvas-controls"

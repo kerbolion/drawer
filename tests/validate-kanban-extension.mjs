@@ -947,6 +947,21 @@ try {
     let controlsVisible=!document.querySelector('#canvas-controls').hidden
     let boards=document.querySelectorAll('.overview-workspace').length
     let viewport=document.querySelector('#canvas-viewport')
+    let altDownAccepted=document.dispatchEvent(new KeyboardEvent('keydown',{
+      bubbles:true,
+      cancelable:true,
+      key:'Alt',
+      code:'AltLeft',
+      altKey:true
+    }))
+    let altUpAccepted=document.dispatchEvent(new KeyboardEvent('keyup',{
+      bubbles:true,
+      cancelable:true,
+      key:'Alt',
+      code:'AltLeft'
+    }))
+    await new Promise(resolve=>requestAnimationFrame(resolve))
+    let altFocusRetained=document.activeElement===viewport
     let freeBoard=document.querySelector('.overview-workspace')
     let freeBoardId=freeBoard.dataset.workspace
     let initialBoardLayout={
@@ -1034,6 +1049,30 @@ try {
       clientY:80
     }))
     await new Promise(resolve=>requestAnimationFrame(resolve))
+
+    let scaleBeforeModifier=document.querySelector('#canvas-scale').textContent.trim()
+    freeBoard.dispatchEvent(new WheelEvent('wheel',{
+      bubbles:true,
+      cancelable:true,
+      ctrlKey:true,
+      deltaY:-100,
+      clientX:200,
+      clientY:180
+    }))
+    await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))
+    let scaleAfterControl=document.querySelector('#canvas-scale').textContent.trim()
+    freeBoard.dispatchEvent(new WheelEvent('wheel',{
+      bubbles:true,
+      cancelable:true,
+      altKey:true,
+      deltaY:-100,
+      clientX:200,
+      clientY:180
+    }))
+    await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))
+    let scaleAfterAlt=document.querySelector('#canvas-scale').textContent.trim()
+    document.querySelector('#canvas-scale').click()
+    await new Promise(resolve=>setTimeout(resolve,250))
 
     document.querySelector('#canvas-zoom-in').click()
     await new Promise(resolve=>setTimeout(resolve,300))
@@ -1200,10 +1239,16 @@ try {
       panzoomType:typeof Panzoom,
       canvasHandler:typeof document.querySelector('#show-canvas').onclick,
       initialScale,
+      scaleBeforeModifier,
+      scaleAfterControl,
+      scaleAfterAlt,
       zoomedScale,
       canvasActive,
       controlsVisible,
       boards,
+      altDownAccepted,
+      altUpAccepted,
+      altFocusRetained,
       transformed,
       previewSourceText,
       previewSourceRect,
@@ -1238,6 +1283,11 @@ try {
     !canvasView.canvasActive ||
     !canvasView.controlsVisible ||
     canvasView.boards !== overview.tabs ||
+    canvasView.altDownAccepted ||
+    canvasView.altUpAccepted ||
+    !canvasView.altFocusRetained ||
+    canvasView.scaleAfterControl !== canvasView.scaleBeforeModifier ||
+    canvasView.scaleAfterAlt === canvasView.scaleBeforeModifier ||
     canvasView.initialScale === canvasView.zoomedScale ||
     canvasView.transformed === "none" ||
     Math.abs(canvasView.cardPlaceholderRect.height-

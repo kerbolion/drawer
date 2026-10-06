@@ -3851,6 +3851,44 @@ viewButton.onclick=()=>{
 }
 
 
+function retenerAltEnLienzo(e){
+
+  if(
+    e.key!=='Alt' ||
+    !canvasMode ||
+    e.ctrlKey ||
+    e.target.closest?.(
+      'input,textarea,select,[contenteditable="true"]'
+    )
+  )
+    return
+
+  e.preventDefault()
+  e.stopImmediatePropagation()
+  canvasViewport.focus({preventScroll:true})
+
+  if(e.type==='keyup')
+    requestAnimationFrame(()=>{
+      if(canvasMode)
+        canvasViewport.focus({preventScroll:true})
+    })
+}
+
+
+document.addEventListener(
+  'keydown',
+  retenerAltEnLienzo,
+  true
+)
+
+
+document.addEventListener(
+  'keyup',
+  retenerAltEnLienzo,
+  true
+)
+
+
 document.addEventListener(
   'keydown',
   e=>{
@@ -3930,7 +3968,7 @@ canvasViewport.addEventListener(
 
     let overBoard=e.target.closest('.overview-workspace')
 
-    if(overBoard && !e.ctrlKey && !e.metaKey)
+    if(overBoard && !e.altKey)
       return
 
     e.preventDefault()
