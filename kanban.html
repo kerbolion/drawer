@@ -924,9 +924,12 @@ let workspaceDragMoved=false
 let workspaceClickBlockedUntil=0
 let selectedCards=new Set()
 let selectionAnchor
-let selectedColumn
+let selectedColumns=new Set()
+let columnSelectionAnchor
 let draggedCards=[]
+let draggedColumns=[]
 let cardMoveTarget
+let columnMoveTarget
 let internalClipboard
 let workspaces=[]
 let activeWorkspace=''
@@ -967,13 +970,13 @@ function crearDragImage(element,e){
 
   dragImage.draggable=false
 
-  if(
-    element.matches('.card') &&
-    draggedCards.length>1
-  ){
+  let selectionCount=
+    draggedCards.length || draggedColumns.length
+
+  if(selectionCount>1){
     let count=document.createElement('span')
     count.className='drag-selection-count'
-    count.textContent=draggedCards.length
+    count.textContent=selectionCount
     dragImage.append(count)
   }
 
@@ -1020,17 +1023,73 @@ function limpiarSeleccion(){
 
   selectedCards.forEach(card=>card.classList.remove('selected'))
   selectedCards.clear()
-  selectedColumn?.classList.remove('selected')
-  selectedColumn=null
+  selectedColumns.forEach(column=>column.classList.remove('selected'))
+  selectedColumns.clear()
   selectionAnchor=null
+  columnSelectionAnchor=null
 }
 
 
-function seleccionarColumna(column){
+function seleccionarColumnas(columns,{anchor=true}={}){
 
   limpiarSeleccion()
-  selectedColumn=column
-  selectedColumn.classList.add('selected')
+
+  columns.forEach(column=>{
+    selectedColumns.add(column)
+    column.classList.add('selected')
+  })
+
+  if(anchor)
+    columnSelectionAnchor=columns.at(-1) || null
+}
+
+
+function seleccionarColumna(column,e={}){
+
+  let additive=e.ctrlKey || e.metaKey
+  let ranged=e.shiftKey && columnSelectionAnchor?.isConnected
+
+  if(ranged){
+    let anchorColumn=columnSelectionAnchor
+    let columns=[...kanban.querySelectorAll('.column')]
+    let from=columns.indexOf(anchorColumn)
+    let to=columns.indexOf(column)
+
+    if(from!==-1 && to!==-1){
+      let range=columns.slice(
+        Math.min(from,to),
+        Math.max(from,to)+1
+      )
+
+      if(!additive)
+        limpiarSeleccion()
+
+      range.forEach(item=>{
+        selectedColumns.add(item)
+        item.classList.add('selected')
+      })
+      columnSelectionAnchor=anchorColumn
+      return
+    }
+  }
+
+  if(additive){
+    if(selectedColumns.has(column)){
+      selectedColumns.delete(column)
+      column.classList.remove('selected')
+    }else{
+      if(selectedCards.size)
+        limpiarSeleccion()
+
+      selectedColumns.add(column)
+      column.classList.add('selected')
+    }
+
+    columnSelectionAnchor=column
+    return
+  }
+
+  seleccionarColumnas([column])
 }
 
 
@@ -1078,6 +1137,9 @@ function seleccionarTarjeta(card,e={}){
   }
 
   if(additive){
+    if(selectedColumns.size)
+      limpiarSeleccion()
+
     if(selectedCards.has(card)){
       selectedCards.delete(card)
       card.classList.remove('selected')
@@ -1798,15 +1860,17 @@ document.addEventListener(
       if(card && !selectedCards.has(card))
         seleccionarTarjetas([card])
 
-      if(!card && selectedColumn!==column)
-        seleccionarColumna(column)
+      if(!card && !selectedColumns.has(column))
+        seleccionarColumnas([column])
 
       deleteContext.textContent=
         card
           ? selectedCards.has(card) && selectedCards.size>1
             ? `Eliminar ${selectedCards.size} tarjetas`
             : 'Eliminar tarjeta'
-          : 'Eliminar columna'
+          : selectedColumns.has(column) && selectedColumns.size>1
+            ? `Eliminar ${selectedColumns.size} columnas`
+            : 'Eliminar columna'
     }else if(
       kanban.contains(e.target) &&
       internalClipboard?.type==='column'
@@ -1893,19 +1957,22 @@ copyContext.onclick=async()=>{
     }
     text=cards.map(card=>card.textContent.trim()).join('\n')
   }else{
-    let item={
-      title:target.querySelector('h3').innerHTML,
-      cards:[
-        ...target.querySelectorAll('.card')
-      ].map(card=>card.innerHTML)
-    }
+    let columns=selectedColumns.has(target)
+      ? [...kanban.querySelectorAll('.column')]
+          .filter(column=>selectedColumns.has(column))
+      : [target]
+    let items=columns.map(column=>({
+      title:column.querySelector('h3').innerHTML,
+      cards:[...column.querySelectorAll('.card')]
+        .map(card=>card.innerHTML)
+    }))
 
-    internalClipboard={type:'column',items:[item]}
-    text=[
-      target.querySelector('h3')?.textContent.trim(),
-      ...[...target.querySelectorAll('.card')]
+    internalClipboard={type:'column',items}
+    text=columns.map(column=>[
+      column.querySelector('h3')?.textContent.trim(),
+      ...[...column.querySelectorAll('.card')]
         .map(card=>card.textContent.trim())
-    ].filter(Boolean).join('\n')
+    ].filter(Boolean).join('\n')).join('\n\n')
   }
 
   await copiarAlPortapapeles(text)
@@ -1930,7 +1997,7 @@ pasteContext.onclick=()=>{
     )
 
     kanban.append(...columns)
-    seleccionarColumna(columns.at(-1))
+    seleccionarColumnas(columns)
     ajustarColumnas()
     guardar()
     return
@@ -1995,20 +2062,30 @@ deleteContext.onclick=async()=>{
   let target=contextTarget
   let card=target?.matches('.card')
   let workspace=target?.matches('.workspace-tab')
+  let column=target?.matches('.column')
   let cardTargets=card && selectedCards.has(target)
     ? [...kanban.querySelectorAll('.card')]
         .filter(item=>selectedCards.has(item))
     : card
       ? [target]
       : []
+  let columnTargets=column && selectedColumns.has(target)
+    ? [...kanban.querySelectorAll('.column')]
+        .filter(item=>selectedColumns.has(item))
+    : column
+      ? [target]
+      : []
   let multipleCards=cardTargets.length>1
+  let multipleColumns=columnTargets.length>1
   let type=workspace
     ? 'tablero'
     : card
       ? multipleCards
         ? 'tarjetas'
         : 'tarjeta'
-      : 'columna'
+      : multipleColumns
+        ? 'columnas'
+        : 'columna'
 
   let label=workspace
     ? target.querySelector('span')
@@ -2017,8 +2094,10 @@ deleteContext.onclick=async()=>{
       ? multipleCards
         ? `${cardTargets.length} tarjetas seleccionadas`
         : target.textContent.trim()
-      : target?.querySelector('h3')
-          ?.textContent.trim()
+      : multipleColumns
+        ? `${columnTargets.length} columnas seleccionadas`
+        : target?.querySelector('h3')
+            ?.textContent.trim()
 
   cerrarMenuContextual()
 
@@ -2027,7 +2106,7 @@ deleteContext.onclick=async()=>{
 
   let accepted=await pedirConfirmacion(
     `Eliminar ${type}`,
-    multipleCards
+    multipleCards || multipleColumns
       ? `Vas a eliminar ${label}. Esta accion no se puede deshacer.`
       : `Vas a eliminar ${type==='tablero' ? 'el' : 'la'} ${type} "${label || ''}". Esta accion no se puede deshacer.`
   )
@@ -2036,7 +2115,9 @@ deleteContext.onclick=async()=>{
     !accepted ||
     (card
       ? !cardTargets.some(item=>item.isConnected)
-      : !target.isConnected)
+      : column
+        ? !columnTargets.some(item=>item.isConnected)
+        : !target.isConnected)
   )
     return
 
@@ -2093,8 +2174,8 @@ deleteContext.onclick=async()=>{
     return
   }
 
+  columnTargets.forEach(item=>item.remove())
   limpiarSeleccion()
-  target.remove()
   ajustarColumnas()
   guardar()
 }
@@ -2176,6 +2257,7 @@ function iniciarArrastre(element,e){
 
   drag=element
   columnMoveAnchor=null
+  columnMoveTarget=null
   cardMoveTarget=null
   workspaceDragMoved=false
 
@@ -2188,17 +2270,25 @@ function iniciarArrastre(element,e){
   }else{
     draggedCards=[]
 
-    if(
-      drag.matches('.column') &&
-      selectedColumn!==drag
-    )
-      seleccionarColumna(drag)
+    if(drag.matches('.column')){
+      if(!selectedColumns.has(drag))
+        seleccionarColumnas([drag])
+
+      draggedColumns=[...kanban.querySelectorAll('.column')]
+        .filter(column=>selectedColumns.has(column))
+    }else{
+      draggedColumns=[]
+    }
   }
 
   document.documentElement.classList.add('is-dragging')
   crearDragImage(drag,e)
 
-  ;(draggedCards.length ? draggedCards : [drag])
+  ;(draggedCards.length
+      ? draggedCards
+      : draggedColumns.length
+        ? draggedColumns
+        : [drag])
     .forEach(item=>item.classList.add('dragging'))
 
   return true
@@ -2264,14 +2354,20 @@ function finalizarArrastre(){
         workspaceClickBlockedUntil=performance.now()+200
     }
 
-    ;(draggedCards.length ? draggedCards : [drag])
+    ;(draggedCards.length
+        ? draggedCards
+        : draggedColumns.length
+          ? draggedColumns
+          : [drag])
       .forEach(item=>item?.classList.remove('dragging'))
     document.documentElement.classList.remove('is-dragging')
     eliminarDragImage()
 
     drag=null
     draggedCards=[]
+    draggedColumns=[]
     cardMoveTarget=null
+    columnMoveTarget=null
     columnMoveAnchor=null
 
     if(completedDrag?.matches('.workspace-tab'))
@@ -2399,7 +2495,7 @@ function procesarArrastre(eventTarget,clientX,clientY){
       let hovered=
         eventTarget.closest('.column')
 
-      if(hovered===drag)
+      if(hovered?.classList.contains('dragging'))
         return
 
       let candidates=[
@@ -2409,7 +2505,6 @@ function procesarArrastre(eventTarget,clientX,clientY){
       ]
 
       if(!candidates.length){
-        kanban.append(drag)
         return
       }
 
@@ -2445,18 +2540,26 @@ function procesarArrastre(eventTarget,clientX,clientY){
           null
         ).column
 
+      if(columnMoveTarget===target)
+        return
+
       let ordered=[
         ...kanban.querySelectorAll('.column')
       ]
-
-      if(
-        ordered.indexOf(drag) <
-        ordered.indexOf(target)
+      let firstDraggedIndex=Math.min(
+        ...draggedColumns.map(column=>ordered.indexOf(column))
       )
-        target.after(drag)
-      else
-        target.before(drag)
+      let targetIndex=ordered.indexOf(target)
+      let fragment=document.createDocumentFragment()
 
+      draggedColumns.forEach(column=>fragment.append(column))
+
+      if(firstDraggedIndex < targetIndex)
+        target.after(fragment)
+      else
+        target.before(fragment)
+
+      columnMoveTarget=target
       columnMoveAnchor={
         x:clientX,
         y:clientY
@@ -2518,7 +2621,15 @@ document.addEventListener(
       if(!collapseOnClick)
         seleccionarTarjeta(origin.element,e)
     }else if(origin.element.matches('.column')){
-      seleccionarColumna(origin.element)
+      collapseOnClick=
+        !e.ctrlKey &&
+        !e.metaKey &&
+        !e.shiftKey &&
+        selectedColumns.has(origin.element) &&
+        selectedColumns.size>1
+
+      if(!collapseOnClick)
+        seleccionarColumna(origin.element,e)
     }else{
       limpiarSeleccion()
     }
@@ -2605,7 +2716,10 @@ function terminarGestoPuntero(e){
     document.documentElement.classList.remove('is-dragging')
 
     if(gesture.collapseOnClick)
-      seleccionarTarjetas([gesture.origin.element])
+      if(gesture.origin.element.matches('.card'))
+        seleccionarTarjetas([gesture.origin.element])
+      else
+        seleccionarColumnas([gesture.origin.element])
 
     return
   }
