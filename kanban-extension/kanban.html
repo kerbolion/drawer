@@ -276,6 +276,125 @@ select{
   align-items:start;
 }
 
+.canvas-viewport{
+  display:contents;
+}
+
+.canvas-viewport.canvas-active{
+  position:relative;
+  display:block;
+  flex:1 1 0;
+  min-height:0;
+  overflow:hidden;
+  background:
+    radial-gradient(
+      circle,
+      color-mix(in srgb,var(--site-heading) 12%,transparent) 1px,
+      transparent 1px
+    );
+  background-size:20px 20px;
+}
+
+.canvas-viewport.canvas-active.is-panning{
+  cursor:grabbing !important;
+}
+
+.canvas-viewport.canvas-active .kanban{
+  position:relative;
+  display:block;
+  min-height:100%;
+  overflow:visible;
+  transform-origin:50% 50%;
+}
+
+.canvas-viewport.canvas-active .overview-workspace{
+  position:absolute;
+  display:flex;
+  flex-direction:column;
+  min-width:220px;
+  min-height:160px;
+  overflow:hidden;
+}
+
+.canvas-viewport.canvas-active .overview-workspace-header{
+  flex:none;
+  cursor:move;
+}
+
+.canvas-viewport.canvas-active .overview-columns{
+  flex:1;
+  min-height:0;
+  overflow:auto;
+}
+
+.canvas-resize-handle{
+  display:none;
+}
+
+.canvas-viewport.canvas-active .canvas-resize-handle{
+  position:absolute;
+  z-index:4;
+  right:0;
+  bottom:0;
+  display:block;
+  width:18px;
+  height:18px;
+  cursor:nwse-resize;
+}
+
+.canvas-viewport.canvas-active .canvas-resize-handle::after{
+  position:absolute;
+  right:4px;
+  bottom:4px;
+  width:8px;
+  height:8px;
+  border-right:2px solid var(--site-muted);
+  border-bottom:2px solid var(--site-muted);
+  content:'';
+}
+
+.canvas-viewport.canvas-active .overview-workspace.canvas-moving,
+.canvas-viewport.canvas-active .overview-workspace.canvas-resizing{
+  outline:2px solid var(--primary-color);
+  outline-offset:1px;
+}
+
+.canvas-controls{
+  position:absolute;
+  z-index:20;
+  right:18px;
+  bottom:18px;
+  display:flex;
+  align-items:center;
+  padding:4px;
+  border:1px solid var(--site-border);
+  border-radius:8px;
+  background:var(--site-bg);
+  box-shadow:0 8px 24px var(--site-shadow);
+}
+
+.canvas-controls[hidden]{
+  display:none;
+}
+
+.canvas-controls button{
+  min-width:34px;
+  height:32px;
+  padding:0 9px;
+  border-radius:5px;
+  background:transparent;
+  color:var(--site-button-text);
+}
+
+.canvas-controls button:hover{
+  background:color-mix(in srgb,var(--site-heading) 8%,var(--site-bg));
+}
+
+.canvas-controls .canvas-scale{
+  min-width:58px;
+  cursor:default;
+}
+
 .kanban.row{
   flex:1 1 0;
   min-height:0;
@@ -785,6 +904,9 @@ html.is-dragging *{
       <button id="show-overview" type="button">
         Todos los tableros
       </button>
+      <button id="show-canvas" type="button">
+        Lienzo
+      </button>
       <div id="saved-views"></div>
       <button id="new-view" type="button">
         Agregar vista
@@ -852,7 +974,19 @@ html.is-dragging *{
 </div>
 
 
-<div class="kanban" id="kanban">
+<div class="canvas-viewport" id="canvas-viewport">
+  <div
+    class="canvas-controls panzoom-exclude"
+    id="canvas-controls"
+    aria-label="Controles del lienzo"
+    hidden>
+    <button id="canvas-zoom-out" type="button" title="Alejar">−</button>
+    <button class="canvas-scale" id="canvas-scale" type="button" title="Restablecer zoom">100%</button>
+    <button id="canvas-zoom-in" type="button" title="Acercar">+</button>
+    <button id="canvas-fit" type="button" title="Ajustar lienzo">Ajustar</button>
+  </div>
+
+  <div class="kanban" id="kanban">
 
   <section class="column">
 
@@ -901,6 +1035,7 @@ html.is-dragging *{
 
   </section>
 
+  </div>
 </div>
 
 <div class="context-menu" id="context-menu" hidden>
@@ -942,7 +1077,7 @@ html.is-dragging *{
   </section>
 </div>
 
-
+<script src="panzoom.js"></script>
 <script src="kanban.js"></script>
 
 </body>

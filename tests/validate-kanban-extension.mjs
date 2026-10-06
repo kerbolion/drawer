@@ -86,7 +86,8 @@ if (JSON.stringify(manifest.permissions) !== JSON.stringify(["storage", "tabs"])
 const files = await Promise.all([
   readFile(path.join(extensionDir, "kanban.html"), "utf8"),
   readFile(path.join(extensionDir, "kanban.js"), "utf8"),
-  readFile(path.join(extensionDir, "background.js"), "utf8")
+  readFile(path.join(extensionDir, "background.js"), "utf8"),
+  readFile(path.join(extensionDir, "panzoom.js"), "utf8")
 ]);
 
 if (files.some(file => file.includes("localStorage"))) {
@@ -123,6 +124,12 @@ const webServer = http.createServer(async (request, response) => {
   if (request.url === "/kanban.js") {
     response.setHeader("Content-Type", "text/javascript; charset=utf-8");
     response.end(files[1]);
+    return;
+  }
+
+  if (request.url === "/panzoom.js") {
+    response.setHeader("Content-Type", "text/javascript; charset=utf-8");
+    response.end(files[3]);
     return;
   }
 
@@ -929,7 +936,246 @@ try {
     throw new Error(`La vista general no sincronizo movimientos: ${JSON.stringify(overview)}`);
   }
 
-  console.log("KANBAN_EXTENSION_OK: scroll, menus, vista general, movimientos y persistencia confirmados.");
+  const canvasView = await cdp.evaluate(`(async()=>{
+    document.querySelector('.view-button').click()
+    document.querySelector('#show-canvas').click()
+    await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))
+
+    let initialScale=document.querySelector('#canvas-scale').textContent.trim()
+    let canvasActive=document.querySelector('#canvas-viewport')
+      .classList.contains('canvas-active')
+    let controlsVisible=!document.querySelector('#canvas-controls').hidden
+    let boards=document.querySelectorAll('.overview-workspace').length
+    let viewport=document.querySelector('#canvas-viewport')
+    let freeBoard=document.querySelector('.overview-workspace')
+    let freeBoardId=freeBoard.dataset.workspace
+    let initialBoardLayout={
+      x:parseFloat(freeBoard.style.left),
+      y:parseFloat(freeBoard.style.top),
+      width:freeBoard.offsetWidth,
+      height:freeBoard.offsetHeight
+    }
+    let header=freeBoard.querySelector('.overview-workspace-header')
+
+    header.dispatchEvent(new PointerEvent('pointerdown',{
+      bubbles:true,
+      cancelable:true,
+      pointerId:21,
+      button:0,
+      clientX:200,
+      clientY:160
+    }))
+    document.dispatchEvent(new PointerEvent('pointermove',{
+      bubbles:true,
+      pointerId:21,
+      button:0,
+      clientX:50,
+      clientY:130
+    }))
+    document.dispatchEvent(new PointerEvent('pointerup',{
+      bubbles:true,
+      pointerId:21,
+      button:0,
+      clientX:50,
+      clientY:130
+    }))
+
+    let resize=freeBoard.querySelector('.canvas-resize-handle')
+    resize.dispatchEvent(new PointerEvent('pointerdown',{
+      bubbles:true,
+      cancelable:true,
+      pointerId:22,
+      button:0,
+      clientX:500,
+      clientY:400
+    }))
+    document.dispatchEvent(new PointerEvent('pointermove',{
+      bubbles:true,
+      pointerId:22,
+      button:0,
+      clientX:580,
+      clientY:460
+    }))
+    document.dispatchEvent(new PointerEvent('pointerup',{
+      bubbles:true,
+      pointerId:22,
+      button:0,
+      clientX:580,
+      clientY:460
+    }))
+
+    let changedBoardLayout={
+      x:parseFloat(freeBoard.style.left),
+      y:parseFloat(freeBoard.style.top),
+      width:freeBoard.offsetWidth,
+      height:freeBoard.offsetHeight
+    }
+
+    viewport.dispatchEvent(new PointerEvent('pointerdown',{
+      bubbles:true,
+      cancelable:true,
+      pointerId:31,
+      button:0,
+      clientX:40,
+      clientY:40
+    }))
+    document.dispatchEvent(new PointerEvent('pointermove',{
+      bubbles:true,
+      pointerId:31,
+      button:0,
+      clientX:100,
+      clientY:80
+    }))
+    document.dispatchEvent(new PointerEvent('pointerup',{
+      bubbles:true,
+      pointerId:31,
+      button:0,
+      clientX:100,
+      clientY:80
+    }))
+    await new Promise(resolve=>requestAnimationFrame(resolve))
+
+    document.querySelector('#canvas-zoom-in').click()
+    await new Promise(resolve=>setTimeout(resolve,300))
+
+    let renderedScale=document.querySelector('#kanban').getBoundingClientRect().width /
+      document.querySelector('#kanban').offsetWidth
+
+    header.dispatchEvent(new PointerEvent('pointerdown',{
+      bubbles:true,
+      cancelable:true,
+      pointerId:23,
+      button:0,
+      clientX:220,
+      clientY:180
+    }))
+    document.dispatchEvent(new PointerEvent('pointermove',{
+      bubbles:true,
+      pointerId:23,
+      button:0,
+      clientX:220+45*renderedScale,
+      clientY:180+25*renderedScale
+    }))
+    document.dispatchEvent(new PointerEvent('pointerup',{
+      bubbles:true,
+      pointerId:23,
+      button:0,
+      clientX:220+45*renderedScale,
+      clientY:180+25*renderedScale
+    }))
+
+    resize.dispatchEvent(new PointerEvent('pointerdown',{
+      bubbles:true,
+      cancelable:true,
+      pointerId:24,
+      button:0,
+      clientX:600,
+      clientY:500
+    }))
+    document.dispatchEvent(new PointerEvent('pointermove',{
+      bubbles:true,
+      pointerId:24,
+      button:0,
+      clientX:600+30*renderedScale,
+      clientY:500+20*renderedScale
+    }))
+    document.dispatchEvent(new PointerEvent('pointerup',{
+      bubbles:true,
+      pointerId:24,
+      button:0,
+      clientX:600+30*renderedScale,
+      clientY:500+20*renderedScale
+    }))
+
+    changedBoardLayout={
+      x:parseFloat(freeBoard.style.left),
+      y:parseFloat(freeBoard.style.top),
+      width:freeBoard.offsetWidth,
+      height:freeBoard.offsetHeight
+    }
+    await new Promise(resolve=>setTimeout(resolve,250))
+
+    let zoomedScale=document.querySelector('#canvas-scale').textContent.trim()
+    let transformed=getComputedStyle(document.querySelector('#kanban')).transform
+    let stored=(await chrome.storage.local.get(['kanban-data']))['kanban-data']
+
+    document.querySelector('.workspace-tab').click()
+    await new Promise(resolve=>setTimeout(resolve,80))
+
+    let firstCloseWorked=!document.querySelector('#canvas-viewport')
+      .classList.contains('canvas-active')
+
+    document.querySelector('.view-button').click()
+    document.querySelector('#show-canvas').click()
+    await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))
+
+    let restoredBoard=document.querySelector(
+      '.overview-workspace[data-workspace="'+freeBoardId+'"]'
+    )
+    let restoredBoardLayout={
+      x:parseFloat(restoredBoard.style.left),
+      y:parseFloat(restoredBoard.style.top),
+      width:restoredBoard.offsetWidth,
+      height:restoredBoard.offsetHeight
+    }
+
+    document.querySelector('.workspace-tab').click()
+    await new Promise(resolve=>setTimeout(resolve,80))
+
+    return {
+      panzoomType:typeof Panzoom,
+      canvasHandler:typeof document.querySelector('#show-canvas').onclick,
+      initialScale,
+      zoomedScale,
+      canvasActive,
+      controlsVisible,
+      boards,
+      transformed,
+      initialBoardLayout,
+      changedBoardLayout,
+      restoredBoardLayout,
+      storedBoardLayout:stored.workspaces.find(
+        workspace=>workspace.id===freeBoardId
+      )?.canvasLayout,
+      storedX:stored.canvasTransform?.x,
+      storedScale:stored.canvasTransform?.scale,
+      canvasClosed:firstCloseWorked && !document.querySelector('#canvas-viewport')
+        .classList.contains('canvas-active'),
+      controlsHidden:document.querySelector('#canvas-controls').hidden,
+      transformCleared:!document.querySelector('#kanban').style.transform
+    }
+  })()`);
+
+  if (
+    !canvasView.canvasActive ||
+    !canvasView.controlsVisible ||
+    canvasView.boards !== overview.tabs ||
+    canvasView.initialScale === canvasView.zoomedScale ||
+    canvasView.transformed === "none" ||
+    Math.abs(canvasView.changedBoardLayout.x -
+      (canvasView.initialBoardLayout.x - 105)) > .01 ||
+    Math.abs(canvasView.changedBoardLayout.y -
+      (canvasView.initialBoardLayout.y - 5)) > .01 ||
+    Math.abs(canvasView.changedBoardLayout.width -
+      (canvasView.initialBoardLayout.width + 110)) > .01 ||
+    Math.abs(canvasView.changedBoardLayout.height -
+      (canvasView.initialBoardLayout.height + 80)) > .01 ||
+    canvasView.storedBoardLayout?.x !== canvasView.changedBoardLayout.x ||
+    canvasView.storedBoardLayout?.y !== canvasView.changedBoardLayout.y ||
+    canvasView.storedBoardLayout?.width !== canvasView.changedBoardLayout.width ||
+    canvasView.storedBoardLayout?.height !== canvasView.changedBoardLayout.height ||
+    JSON.stringify(canvasView.restoredBoardLayout) !==
+      JSON.stringify(canvasView.changedBoardLayout) ||
+    !(canvasView.storedX > 0) ||
+    !(canvasView.storedScale > 1) ||
+    !canvasView.canvasClosed ||
+    !canvasView.controlsHidden ||
+    !canvasView.transformCleared
+  ) {
+    throw new Error(`El modo lienzo no funciono correctamente: ${JSON.stringify(canvasView)}`);
+  }
+
+  console.log("KANBAN_EXTENSION_OK: scroll, menus, lienzo libre, redimensionado, movimientos y persistencia confirmados.");
 } finally {
   cdp?.close();
   browser.kill();

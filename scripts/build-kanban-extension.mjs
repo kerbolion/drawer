@@ -4,14 +4,23 @@ import path from "node:path";
 const root = path.resolve(import.meta.dirname, "..");
 const output = path.join(root, "kanban-extension");
 const source = await readFile(path.join(root, "kanban.html"), "utf8");
+const panzoom = await readFile(
+  path.join(root, "node_modules", "@panzoom", "panzoom", "dist", "panzoom.min.js"),
+  "utf8"
+);
 const scriptMatch = source.match(/<script>([\s\S]*?)<\/script>/);
 
 if (!scriptMatch) throw new Error("kanban.html no contiene un script integrado");
 
-const html = source.replace(
-  scriptMatch[0],
-  '<script src="kanban.js"></script>'
-);
+const html = source
+  .replace(
+    "node_modules/@panzoom/panzoom/dist/panzoom.min.js",
+    "panzoom.js"
+  )
+  .replace(
+    scriptMatch[0],
+    '<script src="kanban.js"></script>'
+  );
 
 const manifest = {
   manifest_version: 3,
@@ -66,6 +75,7 @@ await Promise.all([
   writeFile(path.join(output, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`),
   writeFile(path.join(output, "background.js"), background),
   writeFile(path.join(output, "kanban.html"), html),
+  writeFile(path.join(output, "panzoom.js"), panzoom),
   writeFile(path.join(output, "kanban.js"), `${scriptMatch[1].trim()}\n`)
 ]);
 

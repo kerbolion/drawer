@@ -70,6 +70,27 @@ const viewMenu=
 const showOverview=
   document.querySelector('#show-overview')
 
+const showCanvas=
+  document.querySelector('#show-canvas')
+
+const canvasViewport=
+  document.querySelector('#canvas-viewport')
+
+const canvasControls=
+  document.querySelector('#canvas-controls')
+
+const canvasZoomOut=
+  document.querySelector('#canvas-zoom-out')
+
+const canvasZoomIn=
+  document.querySelector('#canvas-zoom-in')
+
+const canvasScale=
+  document.querySelector('#canvas-scale')
+
+const canvasFit=
+  document.querySelector('#canvas-fit')
+
 const savedViews=
   document.querySelector('#saved-views')
 
@@ -95,6 +116,12 @@ let resolveModal
 let modalMode='input'
 let contextTarget
 let overviewMode=false
+let canvasMode=false
+let canvasPanzoom
+let canvasSaveTimer
+let canvasActivationVersion=0
+let canvasTransform={x:0,y:0,scale:1}
+let canvasBoardGesture
 let overviewSettings=normalizarConfiguracion()
 let views=[]
 let activeViewId='all'
@@ -722,6 +749,46 @@ function normalizarConfiguracion(settings={}){
 }
 
 
+function normalizarTransformLienzo(transform={}){
+
+  let scale=Number(transform.scale)
+  let x=Number(transform.x)
+  let y=Number(transform.y)
+
+  return {
+    x:Number.isFinite(x) ? x : 0,
+    y:Number.isFinite(y) ? y : 0,
+    scale:Number.isFinite(scale)
+      ? Math.min(2.5,Math.max(.35,scale))
+      : 1
+  }
+}
+
+
+function normalizarDisenoLienzo(layout={},index=0){
+
+  let width=Number(layout.width)
+  let heightValue=Number(layout.height)
+  let x=Number(layout.x)
+  let y=Number(layout.y)
+  let z=Number(layout.z)
+
+  return {
+    x:Number.isFinite(x) ? x : 40+(index%3)*660,
+    y:Number.isFinite(y)
+      ? y
+      : 40+Math.floor(index/3)*500,
+    width:Number.isFinite(width)
+      ? Math.max(220,width)
+      : 620,
+    height:Number.isFinite(heightValue)
+      ? Math.max(160,heightValue)
+      : 460,
+    z:Number.isFinite(z) ? Math.max(1,z) : index+1
+  }
+}
+
+
 function aplicarConfiguracion(settings){
 
   let config=normalizarConfiguracion(settings)
@@ -867,7 +934,7 @@ function dibujarMenuVistas(){
 }
 
 
-function crearVistaGeneral(){
+function crearVistaGeneral({lienzo=false}={}){
 
   let customView=obtenerVistaActiva()
   let allowed=customView
@@ -876,17 +943,18 @@ function crearVistaGeneral(){
 
   return workspaces
     .filter(workspace=>!allowed || allowed.has(workspace.id))
-    .map(workspace=>{
+    .map((workspace,index)=>{
     let section=document.createElement('section')
     let header=document.createElement('header')
     let title=document.createElement('h2')
     let count=document.createElement('span')
     let columnsContainer=document.createElement('div')
+    let resizeHandle=document.createElement('span')
     let boardSettings=normalizarConfiguracion(
       workspace.settings
     )
 
-    section.className='overview-workspace'
+    section.className='overview-workspace panzoom-exclude'
     section.dataset.workspace=workspace.id
     header.className='overview-workspace-header'
     title.className='overview-open'
@@ -898,6 +966,9 @@ function crearVistaGeneral(){
     )
     columnsContainer.className=
       `overview-columns ${boardSettings.view}`
+    resizeHandle.className=
+      'canvas-resize-handle panzoom-exclude'
+    resizeHandle.setAttribute('aria-hidden','true')
     columnsContainer.style.setProperty(
       '--board-columns',
       boardSettings.columns
@@ -926,8 +997,22 @@ function crearVistaGeneral(){
       columnsContainer.append(empty)
     }
 
+    if(lienzo){
+      let layout=normalizarDisenoLienzo(
+        workspace.canvasLayout,
+        index
+      )
+
+      workspace.canvasLayout=layout
+      section.style.left=`${layout.x}px`
+      section.style.top=`${layout.y}px`
+      section.style.width=`${layout.width}px`
+      section.style.height=`${layout.height}px`
+      section.style.zIndex=layout.z
+    }
+
     header.append(title,count)
-    section.append(header,columnsContainer)
+    section.append(header,columnsContainer,resizeHandle)
     return section
     })
 }
@@ -954,8 +1039,125 @@ function sincronizarDesdeVistaGeneral(){
 }
 
 
-function dibujarVistaGeneral(viewId=activeViewId){
+function guardarTransformLienzo(){
 
+  clearTimeout(canvasSaveTimer)
+  canvasSaveTimer=setTimeout(
+    ()=>guardar({
+      tablero:false,
+      configuracion:false
+    }),
+    180
+  )
+}
+
+
+function actualizarEscalaLienzo(){
+
+  canvasScale.textContent=
+    `${Math.round(canvasTransform.scale*100)}%`
+}
+
+
+function actualizarLimitesLienzo(){
+
+  if(!canvasMode)
+    return
+
+  let boards=[
+    ...kanban.querySelectorAll('.overview-workspace')
+  ]
+  let right=boards.reduce(
+    (maximum,board)=>Math.max(
+      maximum,
+      (parseFloat(board.style.left) || 0)+board.offsetWidth
+    ),
+    0
+  )
+  let bottom=boards.reduce(
+    (maximum,board)=>Math.max(
+      maximum,
+      (parseFloat(board.style.top) || 0)+board.offsetHeight
+    ),
+    0
+  )
+
+  kanban.style.width=
+    `${Math.max(canvasViewport.clientWidth,right+160)}px`
+  kanban.style.height=
+    `${Math.max(canvasViewport.clientHeight,bottom+160)}px`
+}
+
+
+function desactivarLienzo(){
+
+  canvasActivationVersion++
+  let deactivationVersion=canvasActivationVersion
+
+  if(canvasPanzoom){
+    canvasTransform=normalizarTransformLienzo({
+      ...canvasPanzoom.getPan(),
+      scale:canvasPanzoom.getScale()
+    })
+    canvasPanzoom.destroy()
+    canvasPanzoom.resetStyle()
+    canvasPanzoom=null
+  }
+
+  canvasMode=false
+  canvasViewport.classList.remove(
+    'canvas-active',
+    'is-panning'
+  )
+  canvasControls.hidden=true
+  kanban.style.removeProperty('transform')
+  kanban.style.removeProperty('transition')
+  kanban.style.removeProperty('width')
+  kanban.style.removeProperty('height')
+
+  setTimeout(()=>{
+    if(
+      !canvasMode &&
+      deactivationVersion===canvasActivationVersion
+    ){
+      kanban.style.removeProperty('transform')
+      kanban.style.removeProperty('transition')
+    }
+  })
+}
+
+
+function activarLienzo(){
+
+  if(typeof Panzoom!=='function')
+    return
+
+  canvasMode=true
+  canvasViewport.classList.add('canvas-active')
+  canvasControls.hidden=false
+  actualizarLimitesLienzo()
+  canvasTransform=normalizarTransformLienzo(canvasTransform)
+  canvasPanzoom=Panzoom(kanban,{
+    canvas:true,
+    cursor:'grab',
+    minScale:.35,
+    maxScale:2.5,
+    step:.15,
+    startX:canvasTransform.x,
+    startY:canvasTransform.y,
+    startScale:canvasTransform.scale,
+    excludeClass:'panzoom-exclude'
+  })
+  actualizarEscalaLienzo()
+}
+
+
+function dibujarVistaGeneral(
+  viewId=activeViewId,
+  {lienzo=canvasMode}={}
+){
+
+  desactivarLienzo()
   limpiarSeleccion()
   activeViewId=
     viewId==='all' || views.some(view=>view.id===viewId)
@@ -963,13 +1165,25 @@ function dibujarVistaGeneral(viewId=activeViewId){
       : 'all'
   overviewMode=true
   kanban.classList.add('overview')
-  kanban.replaceChildren(...crearVistaGeneral())
+  kanban.replaceChildren(...crearVistaGeneral({lienzo}))
   viewButton.classList.add('active')
   document.querySelector('.add-column').hidden=true
   aplicarConfiguracion(
     obtenerVistaActiva()?.settings || overviewSettings
   )
   sincronizarWorkspaces()
+
+  if(lienzo){
+    let version=canvasActivationVersion
+
+    requestAnimationFrame(()=>{
+      if(
+        overviewMode &&
+        version===canvasActivationVersion
+      )
+        activarLienzo()
+    })
+  }
 }
 
 
@@ -989,6 +1203,7 @@ function dibujarTablero(board,id=activeWorkspace){
 
   let nodes=(board || []).map(crearColumna)
 
+  desactivarLienzo()
   limpiarSeleccion()
   overviewMode=false
   kanban.classList.remove('overview')
@@ -1016,6 +1231,7 @@ function mostrarTablero(id,{preservarActual=true}={}){
   if(!workspace)
     return null
 
+  desactivarLienzo()
   limpiarSeleccion()
   overviewMode=false
   kanban.classList.remove('overview')
@@ -1183,6 +1399,7 @@ function escribirDatos(){
   let data=structuredClone({
     activeWorkspace,
     overviewSettings,
+    canvasTransform,
     views,
     workspaces
   })
@@ -1295,6 +1512,7 @@ async function exportarDatos(){
     version:1,
     activeWorkspace,
     overviewSettings,
+    canvasTransform,
     views,
     workspaces
   },null,2)
@@ -1358,11 +1576,18 @@ async function importarDatos(data){
       : [],
     settings:normalizarConfiguracion(
       workspace?.settings || legacySettings
+    ),
+    canvasLayout:normalizarDisenoLienzo(
+      workspace?.canvasLayout,
+      index
     )
   }))
 
   overviewSettings=normalizarConfiguracion(
     data.overviewSettings
+  )
+  canvasTransform=normalizarTransformLienzo(
+    data.canvasTransform
   )
   views=Array.isArray(data.views)
     ? data.views.map(normalizarVista)
@@ -1423,6 +1648,9 @@ async function cargar(){
   overviewSettings=normalizarConfiguracion(
     data.overviewSettings
   )
+  canvasTransform=normalizarTransformLienzo(
+    data.canvasTransform
+  )
   views=Array.isArray(data.views)
     ? data.views.map(normalizarVista)
     : []
@@ -1438,6 +1666,10 @@ async function cargar(){
             : [],
           settings:normalizarConfiguracion(
             workspace.settings || legacySettings
+          ),
+          canvasLayout:normalizarDisenoLienzo(
+            workspace.canvasLayout,
+            index
           )
         }))
       : [{
@@ -1446,7 +1678,8 @@ async function cargar(){
           board:Array.isArray(data.board)
             ? data.board
             : initialBoard,
-          settings:normalizarConfiguracion(legacySettings)
+          settings:normalizarConfiguracion(legacySettings),
+          canvasLayout:normalizarDisenoLienzo({},0)
         }]
 
   activeWorkspace=workspaces.some(
@@ -2183,7 +2416,8 @@ deleteContext.onclick=async()=>{
           title:'Nueva columna 1',
           cards:[]
         }],
-        settings:normalizarConfiguracion()
+        settings:normalizarConfiguracion(),
+        canvasLayout:normalizarDisenoLienzo({},0)
       })
 
     if(deletingFromOverview){
@@ -2305,6 +2539,7 @@ function obtenerOrigenArrastre(target){
 
   if(
     overviewMode &&
+    !canvasMode &&
     overviewWorkspace &&
     kanban.contains(overviewWorkspace) &&
     (!target.closest?.('button,input,select,textarea,a') ||
@@ -2316,6 +2551,156 @@ function obtenerOrigenArrastre(target){
     }
 
   return null
+}
+
+
+function obtenerPuntoLienzo(clientX,clientY){
+
+  let rect=kanban.getBoundingClientRect()
+  let scale=rect.width/kanban.offsetWidth
+
+  if(!Number.isFinite(scale) || scale<=0)
+    scale=canvasPanzoom?.getScale() || 1
+
+  return {
+    x:(clientX-rect.left)/scale,
+    y:(clientY-rect.top)/scale
+  }
+}
+
+
+function iniciarGestoTableroLienzo(e){
+
+  if(!canvasMode || e.button!==0)
+    return false
+
+  let workspace=e.target.closest?.('.overview-workspace')
+  let resize=e.target.closest?.('.canvas-resize-handle')
+  let header=e.target.closest?.('.overview-workspace-header')
+
+  if(
+    !workspace ||
+    !kanban.contains(workspace) ||
+    (!resize && !header) ||
+    (!resize && e.target.closest?.(
+      '[contenteditable="true"],button,input,select,textarea,a'
+    ))
+  )
+    return false
+
+  seleccionarTableroVista(workspace)
+
+  let current=workspaces.find(
+    item=>item.id===workspace.dataset.workspace
+  )
+  let layout=normalizarDisenoLienzo(
+    current?.canvasLayout
+  )
+  let highest=workspaces.reduce(
+    (maximum,item)=>Math.max(
+      maximum,
+      Number(item.canvasLayout?.z) || 0
+    ),
+    0
+  )
+
+  layout.z=highest+1
+
+  if(current)
+    current.canvasLayout=layout
+
+  workspace.style.zIndex=layout.z
+  workspace.classList.add(
+    resize ? 'canvas-resizing' : 'canvas-moving'
+  )
+  let point=obtenerPuntoLienzo(
+    e.clientX,
+    e.clientY
+  )
+
+  canvasBoardGesture={
+    pointerId:e.pointerId,
+    workspace,
+    current,
+    resize:!!resize,
+    startX:point.x,
+    startY:point.y,
+    x:parseFloat(workspace.style.left) || 0,
+    y:parseFloat(workspace.style.top) || 0,
+    width:workspace.offsetWidth,
+    height:workspace.offsetHeight,
+    grabX:point.x-(parseFloat(workspace.style.left) || 0),
+    grabY:point.y-(parseFloat(workspace.style.top) || 0)
+  }
+  workspace.setPointerCapture?.(e.pointerId)
+  e.preventDefault()
+  return true
+}
+
+
+function moverTableroLienzo(e){
+
+  let gesture=canvasBoardGesture
+
+  if(
+    !gesture ||
+    gesture.pointerId!==e.pointerId
+  )
+    return false
+
+  let point=obtenerPuntoLienzo(
+    e.clientX,
+    e.clientY
+  )
+  let deltaX=point.x-gesture.startX
+  let deltaY=point.y-gesture.startY
+
+  if(gesture.resize){
+    gesture.workspace.style.width=
+      `${Math.max(220,gesture.width+deltaX)}px`
+    gesture.workspace.style.height=
+      `${Math.max(160,gesture.height+deltaY)}px`
+  }else{
+    gesture.workspace.style.left=
+      `${point.x-gesture.grabX}px`
+    gesture.workspace.style.top=
+      `${point.y-gesture.grabY}px`
+  }
+
+  e.preventDefault()
+  return true
+}
+
+
+function terminarGestoTableroLienzo(e){
+
+  let gesture=canvasBoardGesture
+
+  if(
+    !gesture ||
+    gesture.pointerId!==e.pointerId
+  )
+    return false
+
+  canvasBoardGesture=null
+  gesture.workspace.classList.remove(
+    'canvas-moving',
+    'canvas-resizing'
+  )
+
+  if(gesture.current)
+    gesture.current.canvasLayout=normalizarDisenoLienzo({
+      x:parseFloat(gesture.workspace.style.left),
+      y:parseFloat(gesture.workspace.style.top),
+      width:gesture.workspace.offsetWidth,
+      height:gesture.workspace.offsetHeight,
+      z:parseFloat(gesture.workspace.style.zIndex)
+    })
+
+  actualizarLimitesLienzo()
+  guardarTransformLienzo()
+  e.preventDefault()
+  return true
 }
 
 
@@ -3092,9 +3477,13 @@ document.addEventListener(
   'pointerdown',
   e=>{
 
+    if(iniciarGestoTableroLienzo(e))
+      return
+
     if(
       e.button!==0 ||
       pointerGesture ||
+      canvasBoardGesture ||
       e.target.closest?.('[contenteditable="true"]')
     )
       return
@@ -3156,6 +3545,9 @@ document.addEventListener(
   'pointermove',
   e=>{
 
+    if(moverTableroLienzo(e))
+      return
+
     let gesture=pointerGesture
 
     if(
@@ -3201,6 +3593,9 @@ document.addEventListener(
 
 
 function terminarGestoPuntero(e){
+
+  if(terminarGestoTableroLienzo(e))
+    return
 
   let gesture=pointerGesture
 
@@ -3420,15 +3815,120 @@ viewButton.onclick=()=>{
 }
 
 
+kanban.addEventListener(
+  'panzoomchange',
+  e=>{
+
+    if(!canvasMode)
+      return
+
+    canvasTransform=normalizarTransformLienzo(
+      e.detail
+    )
+    actualizarEscalaLienzo()
+    guardarTransformLienzo()
+  }
+)
+
+
+kanban.addEventListener(
+  'panzoomstart',
+  ()=>canvasViewport.classList.add('is-panning')
+)
+
+
+kanban.addEventListener(
+  'panzoomend',
+  ()=>canvasViewport.classList.remove('is-panning')
+)
+
+
+canvasViewport.addEventListener(
+  'wheel',
+  e=>{
+
+    if(!canvasMode || !canvasPanzoom)
+      return
+
+    let overBoard=e.target.closest('.overview-workspace')
+
+    if(overBoard && !e.ctrlKey && !e.metaKey)
+      return
+
+    e.preventDefault()
+    canvasPanzoom.zoomWithWheel(e)
+  },
+  {passive:false}
+)
+
+
+canvasZoomOut.onclick=()=>{
+  canvasPanzoom?.zoomOut({animate:true})
+}
+
+
+canvasZoomIn.onclick=()=>{
+  canvasPanzoom?.zoomIn({animate:true})
+}
+
+
+canvasScale.onclick=()=>{
+  canvasPanzoom?.zoom(1,{animate:true})
+}
+
+
+canvasFit.onclick=()=>{
+
+  if(!canvasPanzoom)
+    return
+
+  let horizontalPadding=40
+  let verticalPadding=40
+  let width=Math.max(1,kanban.scrollWidth)
+  let heightValue=Math.max(1,kanban.scrollHeight)
+  let scale=Math.min(
+    (canvasViewport.clientWidth-horizontalPadding)/width,
+    (canvasViewport.clientHeight-verticalPadding)/heightValue,
+    1
+  )
+
+  canvasPanzoom.zoom(
+    Math.max(.35,scale),
+    {animate:true}
+  )
+  requestAnimationFrame(()=>{
+    canvasPanzoom?.pan(0,0,{animate:true})
+  })
+}
+
+
 showOverview.onclick=()=>{
 
   viewMenu.hidden=true
 
-  if(overviewMode && activeViewId==='all')
+  if(
+    overviewMode &&
+    !canvasMode &&
+    activeViewId==='all'
+  )
     return
 
   guardar()
-  dibujarVistaGeneral('all')
+  dibujarVistaGeneral('all',{lienzo:false})
+  prepararTablerosRestantes()
+  guardar({tablero:false})
+}
+
+
+showCanvas.onclick=()=>{
+
+  viewMenu.hidden=true
+
+  if(canvasMode && activeViewId==='all')
+    return
+
+  guardar()
+  dibujarVistaGeneral('all',{lienzo:true})
   prepararTablerosRestantes()
   guardar({tablero:false})
 }
@@ -3443,11 +3943,18 @@ savedViews.onclick=e=>{
 
   viewMenu.hidden=true
 
-  if(overviewMode && activeViewId===button.dataset.view)
+  if(
+    overviewMode &&
+    !canvasMode &&
+    activeViewId===button.dataset.view
+  )
     return
 
   guardar()
-  dibujarVistaGeneral(button.dataset.view)
+  dibujarVistaGeneral(
+    button.dataset.view,
+    {lienzo:false}
+  )
   prepararTablerosRestantes()
   guardar({tablero:false})
 }
@@ -3468,7 +3975,11 @@ newView.onclick=async()=>{
     id:crypto.randomUUID?.() || `view-${Date.now()}`,
     title:result.title,
     workspaceIds:result.workspaceIds,
-    settings:normalizarConfiguracion()
+    settings:normalizarConfiguracion(),
+    canvasLayout:normalizarDisenoLienzo(
+      {},
+      workspaces.length
+    )
   },views.length)
 
   views.push(viewItem)
