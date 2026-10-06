@@ -604,10 +604,16 @@ async function exportarDatos(){
 
   let url=URL.createObjectURL(blob)
   let link=document.createElement('a')
+  let now=new Date()
+  let localDate=[
+    now.getFullYear(),
+    String(now.getMonth()+1).padStart(2,'0'),
+    String(now.getDate()).padStart(2,'0')
+  ].join('-')
 
   link.href=url
   link.download=
-    `kanban-${new Date().toISOString().slice(0,10)}.json`
+    `kanban-${localDate}.json`
 
   document.body.append(link)
   link.click()
