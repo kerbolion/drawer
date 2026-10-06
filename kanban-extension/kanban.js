@@ -20,6 +20,9 @@ const confirmMessage=
 const confirmInput=
   document.querySelector('#confirm-input')
 
+const confirmFile=
+  document.querySelector('#confirm-file')
+
 const cancelConfirm=
   document.querySelector('#cancel-confirm')
 
@@ -38,6 +41,21 @@ const duplicateContext=
 const deleteContext=
   document.querySelector('#delete-context')
 
+const dataControl=
+  document.querySelector('.data-control')
+
+const dataButton=
+  document.querySelector('.data-button')
+
+const dataMenu=
+  document.querySelector('.data-menu')
+
+const exportData=
+  document.querySelector('#export-data')
+
+const importData=
+  document.querySelector('#import-data')
+
 let resolveModal
 let modalMode='input'
 let contextTarget
@@ -46,6 +64,7 @@ let contextTarget
 function cerrarModal(value=null){
 
   confirmModal.hidden=true
+  confirmFile.value=''
   resolveModal?.(value)
   resolveModal=null
 }
@@ -58,6 +77,8 @@ function pedirNombre(title,message,value=''){
   confirmMessage.textContent=message
   confirmInput.value=value
   confirmInput.hidden=false
+  confirmFile.hidden=true
+  cancelConfirm.hidden=false
   acceptConfirm.textContent='Guardar'
   acceptConfirm.className='primary'
   confirmModal.hidden=false
@@ -80,8 +101,57 @@ function pedirConfirmacion(title,message){
   confirmMessage.textContent=message
   confirmInput.value=''
   confirmInput.hidden=true
+  confirmFile.hidden=true
+  cancelConfirm.hidden=false
   acceptConfirm.textContent='Eliminar'
   acceptConfirm.className='danger'
+  confirmModal.hidden=false
+
+  requestAnimationFrame(()=>{
+    acceptConfirm.focus()
+  })
+
+  return new Promise(resolve=>{
+    resolveModal=resolve
+  })
+}
+
+
+function pedirArchivo(){
+
+  modalMode='file'
+  confirmTitle.textContent='Importar datos'
+  confirmMessage.textContent=
+    'Selecciona un archivo JSON exportado desde este Kanban.'
+  confirmInput.value=''
+  confirmInput.hidden=true
+  confirmFile.value=''
+  confirmFile.hidden=false
+  cancelConfirm.hidden=false
+  acceptConfirm.textContent='Importar'
+  acceptConfirm.className='primary'
+  confirmModal.hidden=false
+
+  requestAnimationFrame(()=>{
+    confirmFile.focus()
+  })
+
+  return new Promise(resolve=>{
+    resolveModal=resolve
+  })
+}
+
+
+function mostrarMensaje(title,message){
+
+  modalMode='message'
+  confirmTitle.textContent=title
+  confirmMessage.textContent=message
+  confirmInput.hidden=true
+  confirmFile.hidden=true
+  cancelConfirm.hidden=true
+  acceptConfirm.textContent='Aceptar'
+  acceptConfirm.className='primary'
   confirmModal.hidden=false
 
   requestAnimationFrame(()=>{
@@ -121,12 +191,25 @@ async function copiarAlPortapapeles(text){
 
 cancelConfirm.onclick=()=>cerrarModal()
 
-acceptConfirm.onclick=()=>
+acceptConfirm.onclick=()=>{
+
+  if(modalMode==='file'){
+    let file=confirmFile.files[0]
+
+    if(!file)
+      return
+
+    cerrarModal(file)
+    return
+  }
+
   cerrarModal(
-    modalMode==='confirm'
+    modalMode==='confirm' ||
+    modalMode==='message'
       ? true
       : confirmInput.value
   )
+}
 
 confirmModal.onclick=e=>{
 
@@ -504,6 +587,88 @@ function guardar(){
 }
 
 
+async function exportarDatos(){
+
+  await guardar()
+
+  let data=JSON.stringify({
+    version:1,
+    activeWorkspace,
+    workspaces
+  },null,2)
+
+  let blob=new Blob(
+    [data],
+    {type:'application/json'}
+  )
+
+  let url=URL.createObjectURL(blob)
+  let link=document.createElement('a')
+
+  link.href=url
+  link.download=
+    `kanban-${new Date().toISOString().slice(0,10)}.json`
+
+  document.body.append(link)
+  link.click()
+  link.remove()
+  URL.revokeObjectURL(url)
+}
+
+
+async function importarDatos(data){
+
+  if(
+    !data ||
+    !Array.isArray(data.workspaces) ||
+    !data.workspaces.length
+  )
+    throw new Error('Formato invalido')
+
+  let legacySettings={
+    columns:data.columns,
+    height:data.height,
+    minWidth:data.minWidth,
+    view:data.view
+  }
+
+  workspaces=data.workspaces.map((workspace,index)=>({
+    id:String(workspace?.id || `workspace-${index+1}`),
+    title:String(workspace?.title || `Tablero ${index+1}`),
+    board:Array.isArray(workspace?.board)
+      ? workspace.board
+          .filter(column=>column && typeof column==='object')
+          .map((column,columnIndex)=>({
+            title:String(
+              column.title ||
+              `Nueva columna ${columnIndex+1}`
+            ),
+            cards:Array.isArray(column.cards)
+              ? column.cards.map(card=>String(card))
+              : []
+          }))
+      : [],
+    settings:normalizarConfiguracion(
+      workspace?.settings || legacySettings
+    )
+  }))
+
+  activeWorkspace=workspaces.some(
+    workspace=>workspace.id===String(data.activeWorkspace)
+  )
+    ? String(data.activeWorkspace)
+    : workspaces[0].id
+
+  let current=workspaces.find(
+    workspace=>workspace.id===activeWorkspace
+  )
+
+  dibujarTablero(current.board)
+  aplicarConfiguracion(current.settings)
+  await guardar()
+}
+
+
 async function cargar(){
 
   let initialBoard=
@@ -837,6 +1002,7 @@ document.addEventListener(
 
     if(e.key==='Escape'){
       cerrarMenuContextual()
+      dataMenu.hidden=true
 
       if(!confirmModal.hidden)
         cerrarModal()
@@ -1214,6 +1380,50 @@ workspaceTabs.addEventListener(
       e.deltaY || e.deltaX
   },
   {passive:false}
+)
+
+
+dataButton.onclick=()=>{
+
+  dataMenu.hidden=!dataMenu.hidden
+}
+
+
+exportData.onclick=async()=>{
+
+  dataMenu.hidden=true
+  await exportarDatos()
+}
+
+
+importData.onclick=async()=>{
+
+  dataMenu.hidden=true
+
+  let file=await pedirArchivo()
+
+  if(!file)
+    return
+
+  try{
+    let data=JSON.parse(await file.text())
+    await importarDatos(data)
+  }catch{
+    await mostrarMensaje(
+      'No se pudo importar',
+      'El archivo seleccionado no contiene datos válidos del Kanban.'
+    )
+  }
+}
+
+
+document.addEventListener(
+  'click',
+  e=>{
+
+    if(!dataControl.contains(e.target))
+      dataMenu.hidden=true
+  }
 )
 
 

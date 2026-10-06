@@ -112,11 +112,51 @@ body{
 }
 
 .add-workspace,
+.data-button,
 .add-column{
   border:1px solid var(--site-secondary-button-border);
   background:var(--site-secondary-button-bg);
   color:var(--site-secondary-button-text);
   border-radius:20px;
+}
+
+.data-control{
+  position:relative;
+  flex:none;
+}
+
+.data-button{
+  padding:7px 10px;
+}
+
+.data-menu{
+  position:absolute;
+  z-index:9999;
+  top:calc(100% + 6px);
+  right:0;
+  min-width:140px;
+  padding:5px;
+  border:1px solid var(--site-border);
+  border-radius:7px;
+  background:var(--site-bg);
+  box-shadow:0 10px 30px var(--site-shadow);
+}
+
+.data-menu[hidden]{
+  display:none;
+}
+
+.data-menu button{
+  width:100%;
+  padding:8px 10px;
+  border-radius:5px;
+  background:transparent;
+  color:var(--site-button-text);
+  text-align:left;
+}
+
+.data-menu button:hover{
+  background:color-mix(in srgb,var(--site-heading) 8%,var(--site-bg));
 }
 
 [data-theme-toggle]{
@@ -390,6 +430,16 @@ select{
     + Tablero
   </button>
 
+  <div class="data-control">
+    <button class="data-button" type="button">
+      Datos
+    </button>
+    <div class="data-menu" hidden>
+      <button id="export-data" type="button">Exportar</button>
+      <button id="import-data" type="button">Importar</button>
+    </div>
+  </div>
+
   <button type="button" data-theme-toggle title="Modo Oscuro"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><g fill="currentColor"><path d="M8 4a4 4 0 1 1 0 8a4 4 0 0 1 0-8"></path><path d="M10 3h3v3l2 2l-2 2v3h-3l-2 2l-2-2H3v-3L1 8l2-2V3h3l2-2zM8 3a5 5 0 1 0 0 10A5 5 0 0 0 8 3"></path></g></svg></button>
 </nav>
 
@@ -508,6 +558,7 @@ select{
     <h2 id="confirm-title">Nombre del tablero</h2>
     <p id="confirm-message">Escribe el nombre del tablero.</p>
     <input id="confirm-input" autocomplete="off">
+    <input id="confirm-file" type="file" accept=".json,application/json" hidden>
     <div class="actions">
       <button id="cancel-confirm" type="button">Cancelar</button>
       <button class="primary" id="accept-confirm" type="button">Guardar</button>
