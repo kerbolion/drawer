@@ -242,7 +242,7 @@ select{
   display:grid;
   grid-template-columns:repeat(var(--real-columns),minmax(0,1fr));
   gap:15px;
-  padding:20px;
+  padding:50px;
   width:100%;
   align-items:start;
 }
@@ -315,6 +315,11 @@ select{
   box-shadow:0 1px 3px var(--site-shadow);
 }
 
+.card.selected{
+  outline:2px solid var(--primary-color);
+  outline-offset:1px;
+}
+
 .add-card{
   flex:none;
   width:100%;
@@ -343,6 +348,19 @@ html.is-dragging *{
   pointer-events:none;
   transition:none;
   will-change:transform;
+}
+
+.drag-selection-count{
+  position:absolute;
+  top:-8px;
+  right:-8px;
+  min-width:22px;
+  padding:3px 6px;
+  border-radius:12px;
+  background:var(--primary-color);
+  color:var(--site-accent-text);
+  font-size:11px;
+  text-align:center;
 }
 
 .context-menu{
@@ -589,6 +607,9 @@ html.is-dragging *{
   </button>
   <button id="copy-context" type="button">
     Copiar
+  </button>
+  <button id="paste-context" type="button" hidden>
+    Pegar
   </button>
   <button id="duplicate-context" type="button">
     Duplicar

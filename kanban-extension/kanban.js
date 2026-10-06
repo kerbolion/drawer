@@ -38,6 +38,9 @@ const editContext=
 const copyContext=
   document.querySelector('#copy-context')
 
+const pasteContext=
+  document.querySelector('#paste-context')
+
 const duplicateContext=
   document.querySelector('#duplicate-context')
 
@@ -277,6 +280,11 @@ let pendingDragPoint
 let pointerGesture
 let workspaceDragMoved=false
 let workspaceClickBlockedUntil=0
+let selectedCards=new Set()
+let selectionAnchor
+let draggedCards=[]
+let cardMoveTarget
+let internalClipboard
 let workspaces=[]
 let activeWorkspace=''
 let workspaceBoards=new Map()
@@ -315,6 +323,17 @@ function crearDragImage(element,e){
     .forEach(item=>item.draggable=false)
 
   dragImage.draggable=false
+
+  if(
+    element.matches('.card') &&
+    draggedCards.length>1
+  ){
+    let count=document.createElement('span')
+    count.className='drag-selection-count'
+    count.textContent=draggedCards.length
+    dragImage.append(count)
+  }
+
   dragImageOffset={
     x:e.clientX-rect.left,
     y:e.clientY-rect.top
@@ -351,6 +370,74 @@ function eliminarDragImage(){
 
   dragImage?.remove()
   dragImage=null
+}
+
+
+function limpiarSeleccion(){
+
+  selectedCards.forEach(card=>card.classList.remove('selected'))
+  selectedCards.clear()
+  selectionAnchor=null
+}
+
+
+function seleccionarTarjetas(cards,{anchor=true}={}){
+
+  limpiarSeleccion()
+
+  cards.forEach(card=>{
+    selectedCards.add(card)
+    card.classList.add('selected')
+  })
+
+  if(anchor)
+    selectionAnchor=cards.at(-1) || null
+}
+
+
+function seleccionarTarjeta(card,e={}){
+
+  let additive=e.ctrlKey || e.metaKey
+  let ranged=e.shiftKey && selectionAnchor?.isConnected
+
+  if(ranged){
+    let anchorCard=selectionAnchor
+    let cards=[...kanban.querySelectorAll('.card')]
+    let from=cards.indexOf(selectionAnchor)
+    let to=cards.indexOf(card)
+
+    if(from!==-1 && to!==-1){
+      let range=cards.slice(
+        Math.min(from,to),
+        Math.max(from,to)+1
+      )
+
+      if(!additive)
+        limpiarSeleccion()
+
+      range.forEach(item=>{
+        selectedCards.add(item)
+        item.classList.add('selected')
+      })
+      selectionAnchor=anchorCard
+      return
+    }
+  }
+
+  if(additive){
+    if(selectedCards.has(card)){
+      selectedCards.delete(card)
+      card.classList.remove('selected')
+    }else{
+      selectedCards.add(card)
+      card.classList.add('selected')
+    }
+
+    selectionAnchor=card
+    return
+  }
+
+  seleccionarTarjetas([card])
 }
 
 
@@ -463,6 +550,18 @@ function leerTablero(){
 }
 
 
+function crearTarjeta(content='Nueva tarjeta'){
+
+  let card=document.createElement('div')
+
+  card.className='card'
+  card.draggable=true
+  card.innerHTML=content
+
+  return card
+}
+
+
 function crearColumna(item={}){
 
   let column=
@@ -488,15 +587,7 @@ function crearColumna(item={}){
     column.querySelector('.cards')
 
   ;(item.cards || []).forEach(text=>{
-
-    let card=
-      document.createElement('div')
-
-    card.className='card'
-    card.draggable=true
-    card.innerHTML=text
-
-    cards.append(card)
+    cards.append(crearTarjeta(text))
   })
 
   column.querySelector('.column-count').textContent=
@@ -531,6 +622,7 @@ function dibujarTablero(board,id=activeWorkspace){
 
   let nodes=(board || []).map(crearColumna)
 
+  limpiarSeleccion()
   workspaceBoards.set(id,nodes)
   kanban.replaceChildren(...nodes)
 }
@@ -549,6 +641,7 @@ function mostrarTablero(id,{preservarActual=true}={}){
   if(!workspace)
     return null
 
+  limpiarSeleccion()
   activeWorkspace=id
   kanban.replaceChildren(...prepararTablero(workspace))
 
@@ -1033,7 +1126,9 @@ document.addEventListener(
       contextTarget=workspaceTab
       editContext.hidden=false
       copyContext.hidden=true
+      pasteContext.hidden=true
       duplicateContext.hidden=true
+      deleteContext.hidden=false
       deleteContext.textContent='Eliminar tablero'
     }else if(
       column &&
@@ -1043,12 +1138,30 @@ document.addEventListener(
       contextTarget=card || column
       editContext.hidden=true
       copyContext.hidden=false
+      pasteContext.hidden=internalClipboard?.type!=='card'
       duplicateContext.hidden=false
+      deleteContext.hidden=false
+
+      if(card && !selectedCards.has(card))
+        seleccionarTarjetas([card])
 
       deleteContext.textContent=
         card
-          ? 'Eliminar tarjeta'
+          ? selectedCards.has(card) && selectedCards.size>1
+            ? `Eliminar ${selectedCards.size} tarjetas`
+            : 'Eliminar tarjeta'
           : 'Eliminar columna'
+    }else if(
+      kanban.contains(e.target) &&
+      internalClipboard?.type==='column'
+    ){
+      e.preventDefault()
+      contextTarget=kanban
+      editContext.hidden=true
+      copyContext.hidden=true
+      pasteContext.hidden=false
+      duplicateContext.hidden=true
+      deleteContext.hidden=true
     }else{
       cerrarMenuContextual()
       return
@@ -1110,17 +1223,77 @@ copyContext.onclick=async()=>{
   if(!target || target.matches('.workspace-tab'))
     return
 
-  let text=target.matches('.card')
-    ? target.textContent.trim()
-    : [
-        target.querySelector('h3')
-          ?.textContent.trim(),
-        ...[
-          ...target.querySelectorAll('.card')
-        ].map(card=>card.textContent.trim())
-      ].filter(Boolean).join('\n')
+  let text
+
+  if(target.matches('.card')){
+    let cards=selectedCards.has(target)
+      ? [...kanban.querySelectorAll('.card')]
+          .filter(card=>selectedCards.has(card))
+      : [target]
+
+    internalClipboard={
+      type:'card',
+      items:cards.map(card=>card.innerHTML)
+    }
+    text=cards.map(card=>card.textContent.trim()).join('\n')
+  }else{
+    let item={
+      title:target.querySelector('h3').innerHTML,
+      cards:[
+        ...target.querySelectorAll('.card')
+      ].map(card=>card.innerHTML)
+    }
+
+    internalClipboard={type:'column',items:[item]}
+    text=[
+      target.querySelector('h3')?.textContent.trim(),
+      ...[...target.querySelectorAll('.card')]
+        .map(card=>card.textContent.trim())
+    ].filter(Boolean).join('\n')
+  }
 
   await copiarAlPortapapeles(text)
+}
+
+
+pasteContext.onclick=()=>{
+
+  let target=contextTarget
+  let clipboard=internalClipboard
+  cerrarMenuContextual()
+
+  if(!target || !clipboard)
+    return
+
+  if(
+    clipboard.type==='column' &&
+    target===kanban
+  ){
+    clipboard.items.forEach(item=>
+      kanban.append(crearColumna(structuredClone(item)))
+    )
+    ajustarColumnas()
+    guardar()
+    return
+  }
+
+  if(clipboard.type!=='card')
+    return
+
+  let column=target.closest('.column')
+
+  if(!column)
+    return
+
+  let cards=clipboard.items.map(crearTarjeta)
+  let reference=target.matches('.card')
+    ? target.nextSibling
+    : null
+  let container=column.querySelector('.cards')
+
+  cards.forEach(card=>container.insertBefore(card,reference))
+  seleccionarTarjetas(cards)
+  guardar()
 }
 
 
@@ -1135,13 +1308,13 @@ duplicateContext.onclick=()=>{
   let duplicate=target.cloneNode(true)
   let card=target.matches('.card')
 
-  duplicate.classList.remove('dragging')
+  duplicate.classList.remove('dragging','selected')
   duplicate.contentEditable=false
   duplicate.draggable=card
 
   duplicate.querySelectorAll('.card,h3')
     .forEach(item=>{
-      item.classList.remove('dragging')
+      item.classList.remove('dragging','selected')
       item.contentEditable=false
       item.draggable=true
     })
@@ -1157,17 +1330,28 @@ deleteContext.onclick=async()=>{
   let target=contextTarget
   let card=target?.matches('.card')
   let workspace=target?.matches('.workspace-tab')
+  let cardTargets=card && selectedCards.has(target)
+    ? [...kanban.querySelectorAll('.card')]
+        .filter(item=>selectedCards.has(item))
+    : card
+      ? [target]
+      : []
+  let multipleCards=cardTargets.length>1
   let type=workspace
     ? 'tablero'
     : card
-      ? 'tarjeta'
+      ? multipleCards
+        ? 'tarjetas'
+        : 'tarjeta'
       : 'columna'
 
   let label=workspace
     ? target.querySelector('span')
         ?.textContent.trim()
     : card
-      ? target.textContent.trim()
+      ? multipleCards
+        ? `${cardTargets.length} tarjetas seleccionadas`
+        : target.textContent.trim()
       : target?.querySelector('h3')
           ?.textContent.trim()
 
@@ -1178,10 +1362,17 @@ deleteContext.onclick=async()=>{
 
   let accepted=await pedirConfirmacion(
     `Eliminar ${type}`,
-    `Vas a eliminar ${type==='tablero' ? 'el' : 'la'} ${type} "${label || ''}". Esta accion no se puede deshacer.`
+    multipleCards
+      ? `Vas a eliminar ${label}. Esta accion no se puede deshacer.`
+      : `Vas a eliminar ${type==='tablero' ? 'el' : 'la'} ${type} "${label || ''}". Esta accion no se puede deshacer.`
   )
 
-  if(!accepted || !target.isConnected)
+  if(
+    !accepted ||
+    (card
+      ? !cardTargets.some(item=>item.isConnected)
+      : !target.isConnected)
+  )
     return
 
   if(workspace){
@@ -1230,6 +1421,14 @@ deleteContext.onclick=async()=>{
     return
   }
 
+  if(card){
+    cardTargets.forEach(item=>item.remove())
+    limpiarSeleccion()
+    guardar()
+    return
+  }
+
+  limpiarSeleccion()
   target.remove()
   ajustarColumnas()
   guardar()
@@ -1312,10 +1511,24 @@ function iniciarArrastre(element,e){
 
   drag=element
   columnMoveAnchor=null
+  cardMoveTarget=null
   workspaceDragMoved=false
+
+  if(drag.matches('.card')){
+    if(!selectedCards.has(drag))
+      seleccionarTarjetas([drag])
+
+    draggedCards=[...kanban.querySelectorAll('.card')]
+      .filter(card=>selectedCards.has(card))
+  }else{
+    draggedCards=[]
+  }
+
   document.documentElement.classList.add('is-dragging')
   crearDragImage(drag,e)
-  drag.classList.add('dragging')
+
+  ;(draggedCards.length ? draggedCards : [drag])
+    .forEach(item=>item.classList.add('dragging'))
 
   return true
 }
@@ -1380,11 +1593,14 @@ function finalizarArrastre(){
         workspaceClickBlockedUntil=performance.now()+200
     }
 
-    drag?.classList.remove('dragging')
+    ;(draggedCards.length ? draggedCards : [drag])
+      .forEach(item=>item?.classList.remove('dragging'))
     document.documentElement.classList.remove('is-dragging')
     eliminarDragImage()
 
     drag=null
+    draggedCards=[]
+    cardMoveTarget=null
     columnMoveAnchor=null
 
     if(completedDrag?.matches('.workspace-tab'))
@@ -1478,13 +1694,14 @@ function procesarArrastre(eventTarget,clientX,clientY){
       })
 
       if(
-        drag.parentElement!==cards ||
-        drag.nextElementSibling!==(next || null)
+        cardMoveTarget?.cards!==cards ||
+        cardMoveTarget?.next!==next
       ){
-        cards.insertBefore(
-          drag,
-          next || null
-        )
+        let fragment=document.createDocumentFragment()
+
+        draggedCards.forEach(card=>fragment.append(card))
+        cards.insertBefore(fragment,next || null)
+        cardMoveTarget={cards,next}
         actualizarContadoresColumnas()
       }
 
@@ -1606,8 +1823,27 @@ document.addEventListener(
 
     let origin=obtenerOrigenArrastre(e.target)
 
-    if(!origin)
+    if(!origin){
+      if(!e.target.closest?.('.context-menu,.modal-backdrop'))
+        limpiarSeleccion()
       return
+    }
+
+    let collapseOnClick=false
+
+    if(origin.element.matches('.card')){
+      collapseOnClick=
+        !e.ctrlKey &&
+        !e.metaKey &&
+        !e.shiftKey &&
+        selectedCards.has(origin.element) &&
+        selectedCards.size>1
+
+      if(!collapseOnClick)
+        seleccionarTarjeta(origin.element,e)
+    }else{
+      limpiarSeleccion()
+    }
 
     pointerGesture={
       pointerId:e.pointerId,
@@ -1615,6 +1851,7 @@ document.addEventListener(
       x:e.clientX,
       y:e.clientY,
       started:false,
+      collapseOnClick,
       draggable:origin.handle.draggable
     }
 
@@ -1688,6 +1925,10 @@ function terminarGestoPuntero(e){
 
   if(!gesture.started){
     document.documentElement.classList.remove('is-dragging')
+
+    if(gesture.collapseOnClick)
+      seleccionarTarjetas([gesture.origin.element])
+
     return
   }
 
@@ -1802,13 +2043,9 @@ document.addEventListener(
         .closest('.column')
         .querySelector('.cards')
 
-    let card=
-      document.createElement('div')
-
-    card.className='card'
-    card.draggable=true
-    card.textContent=
+    let card=crearTarjeta(
       `Nueva tarjeta ${cards.querySelectorAll('.card').length+1}`
+    )
 
     cards.append(card)
 
