@@ -327,6 +327,12 @@ select{
   opacity:.35;
 }
 
+html.is-dragging,
+html.is-dragging *{
+  cursor:grabbing !important;
+  user-select:none;
+}
+
 .drag-image{
   position:fixed;
   z-index:9999;
@@ -578,6 +584,9 @@ select{
 </div>
 
 <div class="context-menu" id="context-menu" hidden>
+  <button id="edit-context" type="button" hidden>
+    Editar
+  </button>
   <button id="copy-context" type="button">
     Copiar
   </button>

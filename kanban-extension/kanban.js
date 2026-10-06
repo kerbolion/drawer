@@ -32,6 +32,9 @@ const acceptConfirm=
 const contextMenu=
   document.querySelector('#context-menu')
 
+const editContext=
+  document.querySelector('#edit-context')
+
 const copyContext=
   document.querySelector('#copy-context')
 
@@ -271,6 +274,7 @@ let dragImageOffset={x:0,y:0}
 let columnMoveAnchor
 let dragFrame
 let pendingDragPoint
+let pointerGesture
 let workspaceDragMoved=false
 let workspaceClickBlockedUntil=0
 let workspaces=[]
@@ -335,9 +339,11 @@ function crearDragImage(element,e){
   transparent.width=1
   transparent.height=1
 
-  e.dataTransfer.effectAllowed='move'
-  e.dataTransfer.setData('text/plain','')
-  e.dataTransfer.setDragImage(transparent,0,0)
+  if(e.dataTransfer){
+    e.dataTransfer.effectAllowed='move'
+    e.dataTransfer.setData('text/plain','')
+    e.dataTransfer.setDragImage(transparent,0,0)
+  }
 }
 
 
@@ -1025,6 +1031,7 @@ document.addEventListener(
     ){
       e.preventDefault()
       contextTarget=workspaceTab
+      editContext.hidden=false
       copyContext.hidden=true
       duplicateContext.hidden=true
       deleteContext.textContent='Eliminar tablero'
@@ -1034,6 +1041,7 @@ document.addEventListener(
     ){
       e.preventDefault()
       contextTarget=card || column
+      editContext.hidden=true
       copyContext.hidden=false
       duplicateContext.hidden=false
 
@@ -1063,6 +1071,35 @@ document.addEventListener(
       )+'px'
   }
 )
+
+
+editContext.onclick=async()=>{
+
+  let target=contextTarget
+  cerrarMenuContextual()
+
+  if(!target?.matches('.workspace-tab'))
+    return
+
+  let workspace=workspaces.find(
+    item=>item.id===target.dataset.workspace
+  )
+
+  if(!workspace)
+    return
+
+  let title=await pedirNombre(
+    'Renombrar tablero',
+    'Escribe el nuevo nombre del tablero.',
+    workspace.title
+  )
+
+  if(!title?.trim())
+    return
+
+  workspace.title=title.trim()
+  guardar({tablero:false,configuracion:false})
+}
 
 
 copyContext.onclick=async()=>{
@@ -1238,55 +1275,79 @@ window.addEventListener(
 )
 
 
-document.addEventListener(
-  'dragstart',
-  e=>{
+function obtenerOrigenArrastre(target){
 
-    if(document.activeElement?.isContentEditable)
-      document.activeElement.blur()
+  let workspaceTab=target.closest?.('.workspace-tab')
 
-    if(e.target.matches('.card'))
-      drag=e.target
+  if(
+    workspaceTab &&
+    workspaceTabs.contains(workspaceTab)
+  )
+    return {element:workspaceTab,handle:workspaceTab}
 
-    if(e.target.matches('h3'))
-      drag=e.target.closest('.column')
+  let card=target.closest?.('.card')
 
-    let workspaceTab=
-      e.target.closest?.('.workspace-tab')
+  if(card && kanban.contains(card))
+    return {element:card,handle:card}
 
-    if(
-      workspaceTab &&
-      workspaceTabs.contains(workspaceTab)
-    )
-      drag=workspaceTab
+  let heading=target.closest?.('h3')
 
-    if(!drag)
-      return
+  if(heading && kanban.contains(heading))
+    return {
+      element:heading.closest('.column'),
+      handle:heading
+    }
 
-    columnMoveAnchor=null
-    workspaceDragMoved=false
-    crearDragImage(drag,e)
-    drag.classList.add('dragging')
-  }
-)
+  return null
+}
 
 
-document.addEventListener(
-  'drag',
-  e=>{
+function iniciarArrastre(element,e){
 
-    if(
-      dragImage &&
-      (e.clientX || e.clientY)
-    )
-      moverDragImage(e.clientX,e.clientY)
-  }
-)
+  if(drag)
+    return false
+
+  if(document.activeElement?.isContentEditable)
+    document.activeElement.blur()
+
+  drag=element
+  columnMoveAnchor=null
+  workspaceDragMoved=false
+  document.documentElement.classList.add('is-dragging')
+  crearDragImage(drag,e)
+  drag.classList.add('dragging')
+
+  return true
+}
 
 
-document.addEventListener(
-  'dragend',
-  ()=>{
+function programarArrastre(target,x,y){
+
+  pendingDragPoint={target,x,y}
+
+  if(dragFrame)
+    return
+
+  dragFrame=requestAnimationFrame(()=>{
+    dragFrame=null
+
+    let point=pendingDragPoint
+    pendingDragPoint=null
+
+    if(point)
+      procesarArrastre(
+        point.target,
+        point.x,
+        point.y
+      )
+  })
+}
+
+
+function finalizarArrastre(){
+
+  if(!drag)
+    return
 
     if(dragFrame){
       cancelAnimationFrame(dragFrame)
@@ -1320,6 +1381,7 @@ document.addEventListener(
     }
 
     drag?.classList.remove('dragging')
+    document.documentElement.classList.remove('is-dragging')
     eliminarDragImage()
 
     drag=null
@@ -1329,7 +1391,37 @@ document.addEventListener(
       guardar({tablero:false,configuracion:false})
     else
       guardar()
+}
+
+
+document.addEventListener(
+  'dragstart',
+  e=>{
+
+    let origin=obtenerOrigenArrastre(e.target)
+
+    if(origin)
+      iniciarArrastre(origin.element,e)
   }
+)
+
+
+document.addEventListener(
+  'drag',
+  e=>{
+
+    if(
+      dragImage &&
+      (e.clientX || e.clientY)
+    )
+      moverDragImage(e.clientX,e.clientY)
+  }
+)
+
+
+document.addEventListener(
+  'dragend',
+  finalizarArrastre
 )
 
 
@@ -1492,29 +1584,141 @@ document.addEventListener(
     if(!drag)
       return
 
+    programarArrastre(
+      e.target,
+      e.clientX,
+      e.clientY
+    )
+  }
+)
+
+
+document.addEventListener(
+  'pointerdown',
+  e=>{
+
+    if(
+      e.button!==0 ||
+      pointerGesture ||
+      e.target.closest?.('[contenteditable="true"]')
+    )
+      return
+
+    let origin=obtenerOrigenArrastre(e.target)
+
+    if(!origin)
+      return
+
+    pointerGesture={
+      pointerId:e.pointerId,
+      origin,
+      x:e.clientX,
+      y:e.clientY,
+      started:false,
+      draggable:origin.handle.draggable
+    }
+
+    origin.handle.draggable=false
+    origin.handle.setPointerCapture?.(e.pointerId)
+    document.documentElement.classList.add('is-dragging')
+  }
+)
+
+
+document.addEventListener(
+  'pointermove',
+  e=>{
+
+    let gesture=pointerGesture
+
+    if(
+      !gesture ||
+      gesture.pointerId!==e.pointerId
+    )
+      return
+
+    if(!gesture.started){
+      if(
+        Math.hypot(
+          e.clientX-gesture.x,
+          e.clientY-gesture.y
+        ) < 5
+      )
+        return
+
+      gesture.started=iniciarArrastre(
+        gesture.origin.element,
+        e
+      )
+
+      if(!gesture.started)
+        return
+    }
+
+    e.preventDefault()
+    moverDragImage(e.clientX,e.clientY)
+
+    let target=document.elementFromPoint(
+      e.clientX,
+      e.clientY
+    ) || e.target
+
+    programarArrastre(
+      target,
+      e.clientX,
+      e.clientY
+    )
+  },
+  {passive:false}
+)
+
+
+function terminarGestoPuntero(e){
+
+  let gesture=pointerGesture
+
+  if(
+    !gesture ||
+    gesture.pointerId!==e.pointerId
+  )
+    return
+
+  pointerGesture=null
+  gesture.origin.handle.draggable=gesture.draggable
+
+  if(!gesture.started){
+    document.documentElement.classList.remove('is-dragging')
+    return
+  }
+
+  e.preventDefault()
+
+  if(e.type!=='pointercancel'){
+    let target=document.elementFromPoint(
+      e.clientX,
+      e.clientY
+    ) || e.target
+
     pendingDragPoint={
-      target:e.target,
+      target,
       x:e.clientX,
       y:e.clientY
     }
-
-    if(dragFrame)
-      return
-
-    dragFrame=requestAnimationFrame(()=>{
-      dragFrame=null
-
-      let point=pendingDragPoint
-      pendingDragPoint=null
-
-      if(point)
-        procesarArrastre(
-          point.target,
-          point.x,
-          point.y
-        )
-    })
   }
+
+  finalizarArrastre()
+}
+
+
+document.addEventListener(
+  'pointerup',
+  terminarGestoPuntero
+)
+
+
+document.addEventListener(
+  'pointercancel',
+  terminarGestoPuntero
 )
 
 
@@ -1647,36 +1851,6 @@ workspaceTabs.addEventListener(
 
     aplicarConfiguracion(workspace.settings)
     prepararTablerosRestantes()
-    guardar()
-  }
-)
-
-
-workspaceTabs.addEventListener(
-  'dblclick',
-  async e=>{
-
-    let tab=
-      e.target.closest('.workspace-tab')
-
-    if(!tab)
-      return
-
-    let workspace=
-      workspaces.find(
-        item=>item.id===tab.dataset.workspace
-      )
-
-    let title=await pedirNombre(
-      'Renombrar tablero',
-      'Escribe el nuevo nombre del tablero.',
-      workspace.title
-    )
-
-    if(!title?.trim())
-      return
-
-    workspace.title=title.trim()
     guardar()
   }
 )
