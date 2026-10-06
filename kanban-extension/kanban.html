@@ -645,7 +645,35 @@ select{
   padding:10px;
   border:1px solid var(--site-border);
   border-radius:7px;
-  background:color-mix(in srgb,var(--site-bg) 88%,var(--site-heading));
+  cursor:grab;
+}
+
+html:not([data-theme="dark"]) .card-group{
+  background:color-mix(in srgb,var(--site-bg) 88%,#ffffff);
+}
+
+html[data-theme="dark"] .card-group{
+  background:color-mix(in srgb,var(--site-bg) 88%,#000000);
+}
+
+.card-group.selected{
+  outline:2px solid var(--primary-color);
+  outline-offset:1px;
+}
+
+.group-placeholder{
+  height:80px;
+  margin-bottom:10px;
+  border:2px dashed var(--primary-color);
+  border-radius:7px;
+  background:color-mix(in srgb,var(--primary-color) 5%,transparent);
+  pointer-events:none;
+}
+
+.group-drag-source{
+  position:fixed !important;
+  visibility:hidden;
+  pointer-events:none;
 }
 
 .card-group-header{

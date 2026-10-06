@@ -434,10 +434,13 @@ let workspaceDragMoved=false
 let workspaceClickBlockedUntil=0
 let selectedCards=new Set()
 let selectionAnchor
+let selectedGroups=new Set()
+let groupSelectionAnchor
 let selectedColumns=new Set()
 let columnSelectionAnchor
 let selectedOverviewWorkspace
 let draggedCards=[]
+let draggedGroups=[]
 let draggedColumns=[]
 let cardDropTarget
 let cardPlaceholders=[]
@@ -446,6 +449,10 @@ let cardOverPlaceholder=false
 let cardPointerY
 let cardPointerDirection=0
 let cardPointerContainer
+let groupDropTarget
+let groupPlaceholders=[]
+let groupOriginalLayouts=[]
+let groupOverPlaceholder=false
 let columnDropTarget
 let columnPlaceholders=[]
 let columnOriginalLayouts=[]
@@ -496,6 +503,7 @@ function crearDragImage(element,e){
     'dragging',
     'selected',
     'card-drag-source',
+    'group-drag-source',
     'column-drag-source',
     'overview-workspace-drag-source'
   )
@@ -514,7 +522,9 @@ function crearDragImage(element,e){
   dragImage.append(preview)
 
   let selectionCount=
-    draggedCards.length || draggedColumns.length
+    draggedCards.length ||
+    draggedGroups.length ||
+    draggedColumns.length
 
   if(selectionCount>1){
     let count=document.createElement('span')
@@ -566,11 +576,14 @@ function limpiarSeleccion(){
 
   selectedCards.forEach(card=>card.classList.remove('selected'))
   selectedCards.clear()
+  selectedGroups.forEach(group=>group.classList.remove('selected'))
+  selectedGroups.clear()
   selectedColumns.forEach(column=>column.classList.remove('selected'))
   selectedColumns.clear()
   selectedOverviewWorkspace?.classList.remove('selected')
   selectedOverviewWorkspace=null
   selectionAnchor=null
+  groupSelectionAnchor=null
   columnSelectionAnchor=null
 }
 
@@ -631,7 +644,7 @@ function seleccionarColumna(column,e={}){
       selectedColumns.delete(column)
       column.classList.remove('selected')
     }else{
-      if(selectedCards.size)
+      if(selectedCards.size || selectedGroups.size)
         limpiarSeleccion()
 
       selectedColumns.add(column)
@@ -690,7 +703,7 @@ function seleccionarTarjeta(card,e={}){
   }
 
   if(additive){
-    if(selectedColumns.size)
+    if(selectedColumns.size || selectedGroups.size)
       limpiarSeleccion()
 
     if(selectedCards.has(card)){
@@ -706,6 +719,69 @@ function seleccionarTarjeta(card,e={}){
   }
 
   seleccionarTarjetas([card])
+}
+
+
+function seleccionarGrupos(groups,{anchor=true}={}){
+
+  limpiarSeleccion()
+
+  groups.forEach(group=>{
+    selectedGroups.add(group)
+    group.classList.add('selected')
+  })
+
+  if(anchor)
+    groupSelectionAnchor=groups.at(-1) || null
+}
+
+
+function seleccionarGrupo(group,e={}){
+
+  let additive=e.ctrlKey || e.metaKey
+  let ranged=e.shiftKey && groupSelectionAnchor?.isConnected
+
+  if(ranged){
+    let anchorGroup=groupSelectionAnchor
+    let groups=[...kanban.querySelectorAll('.card-group')]
+    let from=groups.indexOf(anchorGroup)
+    let to=groups.indexOf(group)
+
+    if(from!==-1 && to!==-1){
+      let range=groups.slice(
+        Math.min(from,to),
+        Math.max(from,to)+1
+      )
+
+      if(!additive)
+        limpiarSeleccion()
+
+      range.forEach(item=>{
+        selectedGroups.add(item)
+        item.classList.add('selected')
+      })
+      groupSelectionAnchor=anchorGroup
+      return
+    }
+  }
+
+  if(additive){
+    if(selectedGroups.has(group)){
+      selectedGroups.delete(group)
+      group.classList.remove('selected')
+    }else{
+      if(selectedCards.size || selectedColumns.size)
+        limpiarSeleccion()
+
+      selectedGroups.add(group)
+      group.classList.add('selected')
+    }
+
+    groupSelectionAnchor=group
+    return
+  }
+
+  seleccionarGrupos([group])
 }
 
 
@@ -889,12 +965,18 @@ function leerColumna(column){
       .map(card=>card.innerHTML),
     groups:[...cards.children]
       .filter(item=>item.matches('.card-group'))
-      .map(group=>({
-        title:group.querySelector('.card-group-title').innerHTML,
-        cards:[...group.querySelector('.group-cards').children]
-          .filter(item=>item.matches('.card'))
-          .map(card=>card.innerHTML)
-      }))
+      .map(leerGrupo)
+  }
+}
+
+
+function leerGrupo(group){
+
+  return {
+    title:group.querySelector('.card-group-title').innerHTML,
+    cards:[...group.querySelector('.group-cards').children]
+      .filter(item=>item.matches('.card'))
+      .map(card=>card.innerHTML)
   }
 }
 
@@ -1942,6 +2024,7 @@ document.addEventListener(
       e.target.closest('.workspace-tab')
 
     let card=e.target.closest('.card')
+    let group=e.target.closest('.card-group')
     let column=e.target.closest('.column')
     let overviewWorkspace=
       e.target.closest('.overview-workspace')
@@ -1966,20 +2049,23 @@ document.addEventListener(
       kanban.contains(column)
     ){
       e.preventDefault()
-      contextTarget=card || column
-      editContext.hidden=true
+      contextTarget=card || group || column
+      editContext.hidden=!group || !!card
       addColumnContext.hidden=true
-      addGroupContext.hidden=!!card
-      copyContext.hidden=false
-      pasteContext.hidden=internalClipboard?.type!=='card'
-      duplicateContext.hidden=false
+      addGroupContext.hidden=!!card || !!group
+      copyContext.hidden=!!group && !card
+      pasteContext.hidden=(!!group && !card) || internalClipboard?.type!=='card'
+      duplicateContext.hidden=!!group && !card
       moveContext.hidden=false
       deleteContext.hidden=false
 
       if(card && !selectedCards.has(card))
         seleccionarTarjetas([card])
 
-      if(!card && !selectedColumns.has(column))
+      if(!card && group && !selectedGroups.has(group))
+        seleccionarGrupos([group])
+
+      if(!card && !group && !selectedColumns.has(column))
         seleccionarColumnas([column])
 
       deleteContext.textContent=
@@ -1987,9 +2073,13 @@ document.addEventListener(
           ? selectedCards.has(card) && selectedCards.size>1
             ? `Eliminar ${selectedCards.size} tarjetas`
             : 'Eliminar tarjeta'
-          : selectedColumns.has(column) && selectedColumns.size>1
-            ? `Eliminar ${selectedColumns.size} columnas`
-            : 'Eliminar columna'
+          : group
+            ? selectedGroups.has(group) && selectedGroups.size>1
+              ? `Eliminar ${selectedGroups.size} grupos`
+              : 'Eliminar grupo'
+            : selectedColumns.has(column) && selectedColumns.size>1
+              ? `Eliminar ${selectedColumns.size} columnas`
+              : 'Eliminar columna'
     }else if(
       overviewWorkspace &&
       kanban.contains(overviewWorkspace)
@@ -2054,6 +2144,21 @@ editContext.onclick=async()=>{
 
   let target=contextTarget
   cerrarMenuContextual()
+
+  if(target?.matches('.card-group')){
+    let title=await pedirNombre(
+      'Renombrar grupo',
+      'Escribe el nuevo nombre del grupo.',
+      target.querySelector('.card-group-title').textContent.trim()
+    )
+
+    if(!title?.trim() || !target.isConnected)
+      return
+
+    target.querySelector('.card-group-title').textContent=title.trim()
+    guardar()
+    return
+  }
 
   if(
     !target?.matches(
@@ -2249,10 +2354,10 @@ function crearOpcionesMover(target){
   sincronizarModeloVisible()
   moveMenu.replaceChildren()
 
-  let card=target.matches('.card')
+  let nested=target.matches('.card,.card-group')
 
   workspaces.forEach(workspace=>{
-    if(card){
+    if(nested){
       let option=document.createElement('div')
       let trigger=document.createElement('button')
       let columnsMenu=document.createElement('div')
@@ -2308,15 +2413,21 @@ function moverSeleccionA(workspaceId,columnIndex){
 
   let target=contextTarget
   let card=target?.matches('.card')
+  let group=target?.matches('.card-group')
   let items=card
     ? selectedCards.has(target)
       ? [...kanban.querySelectorAll('.card')]
           .filter(item=>selectedCards.has(item))
       : [target]
-    : selectedColumns.has(target)
-      ? [...kanban.querySelectorAll('.column')]
-          .filter(item=>selectedColumns.has(item))
-      : [target]
+    : group
+      ? selectedGroups.has(target)
+        ? [...kanban.querySelectorAll('.card-group')]
+            .filter(item=>selectedGroups.has(item))
+        : [target]
+      : selectedColumns.has(target)
+        ? [...kanban.querySelectorAll('.column')]
+            .filter(item=>selectedColumns.has(item))
+        : [target]
 
   if(!items.length)
     return
@@ -2326,7 +2437,7 @@ function moverSeleccionA(workspaceId,columnIndex){
       `.overview-workspace[data-workspace="${CSS.escape(workspaceId)}"]`
     )
 
-    if(card){
+    if(card || group){
       let column=workspaceElement
         ?.querySelectorAll('.overview-columns > .column')
         [columnIndex]
@@ -2335,7 +2446,10 @@ function moverSeleccionA(workspaceId,columnIndex){
       if(!container)
         return
 
-      insertarTarjetas(container,items)
+      if(card)
+        insertarTarjetas(container,items)
+      else
+        container.append(...items)
     }else{
       let container=workspaceElement
         ?.querySelector('.overview-columns')
@@ -2353,8 +2467,10 @@ function moverSeleccionA(workspaceId,columnIndex){
     return
   }
 
-  if(card){
-    let contents=items.map(item=>item.innerHTML)
+  if(card || group){
+    let contents=card
+      ? items.map(item=>item.innerHTML)
+      : items.map(leerGrupo)
 
     if(workspaceId===activeWorkspace){
       let column=[...kanban.children]
@@ -2365,7 +2481,10 @@ function moverSeleccionA(workspaceId,columnIndex){
       if(!container)
         return
 
-      container.append(...items)
+      if(card)
+        insertarTarjetas(container,items)
+      else
+        container.append(...items)
     }else{
       items.forEach(item=>item.remove())
       let column=targetWorkspace.board[columnIndex]
@@ -2373,7 +2492,12 @@ function moverSeleccionA(workspaceId,columnIndex){
       if(!column)
         return
 
-      column.cards.push(...contents)
+      if(card)
+        column.cards.push(...contents)
+      else{
+        column.groups ||= []
+        column.groups.push(...contents)
+      }
       workspaceBoards.delete(workspaceId)
     }
   }else{
@@ -2525,6 +2649,7 @@ deleteContext.onclick=async()=>{
 
   let target=contextTarget
   let card=target?.matches('.card')
+  let group=target?.matches('.card-group')
   let workspace=target?.matches(
     '.workspace-tab,.overview-workspace'
   )
@@ -2541,7 +2666,14 @@ deleteContext.onclick=async()=>{
     : column
       ? [target]
       : []
+  let groupTargets=group && selectedGroups.has(target)
+    ? [...kanban.querySelectorAll('.card-group')]
+        .filter(item=>selectedGroups.has(item))
+    : group
+      ? [target]
+      : []
   let multipleCards=cardTargets.length>1
+  let multipleGroups=groupTargets.length>1
   let multipleColumns=columnTargets.length>1
   let type=workspace
     ? 'tablero'
@@ -2549,9 +2681,13 @@ deleteContext.onclick=async()=>{
       ? multipleCards
         ? 'tarjetas'
         : 'tarjeta'
-      : multipleColumns
-        ? 'columnas'
-        : 'columna'
+      : group
+        ? multipleGroups
+          ? 'grupos'
+          : 'grupo'
+        : multipleColumns
+          ? 'columnas'
+          : 'columna'
 
   let label=workspace
     ? target.querySelector(
@@ -2562,10 +2698,15 @@ deleteContext.onclick=async()=>{
       ? multipleCards
         ? `${cardTargets.length} tarjetas seleccionadas`
         : target.textContent.trim()
-      : multipleColumns
-        ? `${columnTargets.length} columnas seleccionadas`
-        : target?.querySelector('h3')
-            ?.textContent.trim()
+      : group
+        ? multipleGroups
+          ? `${groupTargets.length} grupos seleccionados`
+          : target.querySelector('.card-group-title')
+              ?.textContent.trim()
+        : multipleColumns
+          ? `${columnTargets.length} columnas seleccionadas`
+          : target?.querySelector('h3')
+              ?.textContent.trim()
 
   cerrarMenuContextual()
 
@@ -2574,18 +2715,20 @@ deleteContext.onclick=async()=>{
 
   let accepted=await pedirConfirmacion(
     `Eliminar ${type}`,
-    multipleCards || multipleColumns
+    multipleCards || multipleGroups || multipleColumns
       ? `Vas a eliminar ${label}. Esta accion no se puede deshacer.`
-      : `Vas a eliminar ${type==='tablero' ? 'el' : 'la'} ${type} "${label || ''}". Esta accion no se puede deshacer.`
+      : `Vas a eliminar ${['tablero','grupo'].includes(type) ? 'el' : 'la'} ${type} "${label || ''}". Esta accion no se puede deshacer.`
   )
 
   if(
     !accepted ||
     (card
       ? !cardTargets.some(item=>item.isConnected)
-      : column
-        ? !columnTargets.some(item=>item.isConnected)
-        : !target.isConnected)
+      : group
+        ? !groupTargets.some(item=>item.isConnected)
+        : column
+          ? !columnTargets.some(item=>item.isConnected)
+          : !target.isConnected)
   )
     return
 
@@ -2660,6 +2803,14 @@ deleteContext.onclick=async()=>{
     return
   }
 
+  if(group){
+    groupTargets.forEach(item=>item.remove())
+    limpiarSeleccion()
+    actualizarContadoresColumnas()
+    guardar()
+    return
+  }
+
   columnTargets.forEach(item=>item.remove())
   limpiarSeleccion()
   actualizarVaciosVistaGeneral()
@@ -2722,6 +2873,15 @@ function obtenerOrigenArrastre(target){
 
   if(card && kanban.contains(card))
     return {element:card,handle:card}
+
+  let group=target.closest?.('.card-group')
+
+  if(
+    group &&
+    kanban.contains(group) &&
+    !target.closest?.('button,input,select,textarea,a')
+  )
+    return {element:group,handle:group}
 
   let column=target.closest?.('.column')
 
@@ -2931,6 +3091,10 @@ function iniciarArrastre(element,e){
   cardPointerY=undefined
   cardPointerDirection=0
   cardPointerContainer=null
+  groupDropTarget=null
+  groupPlaceholders=[]
+  groupOriginalLayouts=[]
+  groupOverPlaceholder=false
   workspaceDragMoved=false
 
   if(drag.matches('.card')){
@@ -2939,16 +3103,26 @@ function iniciarArrastre(element,e){
 
     draggedCards=[...kanban.querySelectorAll('.card')]
       .filter(card=>selectedCards.has(card))
+    draggedGroups=[]
   }else{
     draggedCards=[]
 
-    if(drag.matches('.column')){
+    if(drag.matches('.card-group')){
+      if(!selectedGroups.has(drag))
+        seleccionarGrupos([drag])
+
+      draggedGroups=[...kanban.querySelectorAll('.card-group')]
+        .filter(group=>selectedGroups.has(group))
+      draggedColumns=[]
+    }else if(drag.matches('.column')){
       if(!selectedColumns.has(drag))
         seleccionarColumnas([drag])
 
       draggedColumns=[...kanban.querySelectorAll('.column')]
         .filter(column=>selectedColumns.has(column))
+      draggedGroups=[]
     }else{
+      draggedGroups=[]
       draggedColumns=[]
     }
   }
@@ -2958,13 +3132,17 @@ function iniciarArrastre(element,e){
 
   ;(draggedCards.length
       ? draggedCards
+      : draggedGroups.length
+        ? draggedGroups
       : draggedColumns.length
-        ? draggedColumns
-        : [drag])
+          ? draggedColumns
+          : [drag])
     .forEach(item=>item.classList.add('dragging'))
 
   if(drag.matches('.column'))
     prepararArrastreColumnas()
+  else if(drag.matches('.card-group'))
+    prepararArrastreGrupos()
   else if(drag.matches('.card'))
     prepararArrastreTarjetas()
   else if(drag.matches('.overview-workspace'))
@@ -3155,6 +3333,124 @@ function prepararArrastreTarjetas(){
   })
 
   first.before(fragment)
+}
+
+
+function prepararArrastreGrupos(){
+
+  groupOriginalLayouts=[
+    ...kanban.querySelectorAll('.column > .cards')
+  ].map(container=>({
+    container,
+    children:[...container.children]
+  }))
+
+  let first=draggedGroups[0]
+  let fragment=document.createDocumentFragment()
+
+  draggedGroups.forEach(group=>{
+    let placeholder=document.createElement('div')
+
+    placeholder.className='group-placeholder'
+    placeholder.setAttribute('aria-hidden','true')
+    placeholder.style.height=`${group.offsetHeight}px`
+    groupPlaceholders.push(placeholder)
+    fragment.append(placeholder)
+    group.classList.add('group-drag-source')
+  })
+
+  first.before(fragment)
+}
+
+
+function puntoSobreMarcadorGrupos(x,y){
+
+  return groupPlaceholders.some(placeholder=>{
+    let rect=placeholder.getBoundingClientRect()
+
+    return (
+      x>=rect.left &&
+      x<=rect.right &&
+      y>=rect.top &&
+      y<=rect.bottom
+    )
+  })
+}
+
+
+function obtenerSiguienteGrupo(container,y){
+
+  return [...container.children]
+    .filter(item=>item.matches(
+      '.card-group:not(.dragging)'
+    ))
+    .find(group=>{
+      let rect=group.getBoundingClientRect()
+
+      return y < rect.top+rect.height/2
+    }) || null
+}
+
+
+function actualizarDestinoGrupos(container,next,x,y){
+
+  if(!container){
+    groupDropTarget=null
+    groupOverPlaceholder=false
+    return
+  }
+
+  groupOverPlaceholder=puntoSobreMarcadorGrupos(x,y)
+
+  if(
+    groupOverPlaceholder &&
+    groupDropTarget?.container===container
+  )
+    return
+
+  if(
+    groupDropTarget?.container===container &&
+    groupDropTarget?.next===next
+  )
+    return
+
+  let fragment=document.createDocumentFragment()
+
+  groupPlaceholders.forEach(
+    placeholder=>fragment.append(placeholder)
+  )
+  container.insertBefore(fragment,next || null)
+  groupDropTarget={container,next}
+  groupOverPlaceholder=false
+}
+
+
+function resolverArrastreGrupos(cancelado){
+
+  let aplicar=
+    !cancelado &&
+    groupDropTarget?.container?.isConnected
+
+  if(aplicar){
+    groupPlaceholders.forEach((placeholder,index)=>{
+      let group=draggedGroups[index]
+
+      group.classList.remove('group-drag-source')
+      placeholder.replaceWith(group)
+    })
+  }else{
+    groupPlaceholders.forEach(
+      placeholder=>placeholder.remove()
+    )
+    draggedGroups.forEach(
+      group=>group.classList.remove('group-drag-source')
+    )
+    groupOriginalLayouts.forEach(({container,children})=>{
+      container.replaceChildren(...children)
+    })
+  }
+
+  actualizarContadoresColumnas()
 }
 
 
@@ -3440,6 +3736,9 @@ function finalizarArrastre({cancelado=false}={}){
     if(completedDrag?.matches('.card'))
       resolverArrastreTarjetas(cancelado)
 
+    if(completedDrag?.matches('.card-group'))
+      resolverArrastreGrupos(cancelado)
+
     if(completedDrag?.matches('.column'))
       resolverArrastreColumnas(cancelado)
 
@@ -3474,15 +3773,18 @@ function finalizarArrastre({cancelado=false}={}){
 
     ;(draggedCards.length
         ? draggedCards
+        : draggedGroups.length
+          ? draggedGroups
         : draggedColumns.length
-          ? draggedColumns
-          : [drag])
+            ? draggedColumns
+            : [drag])
       .forEach(item=>item?.classList.remove('dragging'))
     document.documentElement.classList.remove('is-dragging')
     eliminarDragImage()
 
     drag=null
     draggedCards=[]
+    draggedGroups=[]
     draggedColumns=[]
     cardDropTarget=null
     cardPlaceholders=[]
@@ -3491,6 +3793,10 @@ function finalizarArrastre({cancelado=false}={}){
     cardPointerY=undefined
     cardPointerDirection=0
     cardPointerContainer=null
+    groupDropTarget=null
+    groupPlaceholders=[]
+    groupOriginalLayouts=[]
+    groupOverPlaceholder=false
     columnDropTarget=null
     columnPlaceholders=[]
     columnOriginalLayouts=[]
@@ -3574,6 +3880,24 @@ function procesarArrastre(eventTarget,clientX,clientY){
       )
         ? null
         : hovered,
+      clientX,
+      clientY
+    )
+    return
+  }
+
+  if(drag.matches('.card-group')){
+    let column=eventTarget.closest('.column')
+    let container=column?.querySelector(':scope > .cards')
+
+    if(!container){
+      actualizarDestinoGrupos(null,null,clientX,clientY)
+      return
+    }
+
+    actualizarDestinoGrupos(
+      container,
+      obtenerSiguienteGrupo(container,clientY),
       clientX,
       clientY
     )
@@ -3715,6 +4039,16 @@ document.addEventListener(
 
       if(!collapseOnClick)
         seleccionarTarjeta(origin.element,e)
+    }else if(origin.element.matches('.card-group')){
+      collapseOnClick=
+        !e.ctrlKey &&
+        !e.metaKey &&
+        !e.shiftKey &&
+        selectedGroups.has(origin.element) &&
+        selectedGroups.size>1
+
+      if(!collapseOnClick)
+        seleccionarGrupo(origin.element,e)
     }else if(origin.element.matches('.column')){
       collapseOnClick=
         !e.ctrlKey &&
@@ -3821,6 +4155,8 @@ function terminarGestoPuntero(e){
     if(gesture.collapseOnClick)
       if(gesture.origin.element.matches('.card'))
         seleccionarTarjetas([gesture.origin.element])
+      else if(gesture.origin.element.matches('.card-group'))
+        seleccionarGrupos([gesture.origin.element])
       else
         seleccionarColumnas([gesture.origin.element])
 

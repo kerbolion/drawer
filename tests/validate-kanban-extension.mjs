@@ -94,6 +94,19 @@ if (files.some(file => file.includes("localStorage"))) {
   throw new Error("La extension conserva referencias a localStorage");
 }
 
+const normalizedKanbanHtml = files[0].replaceAll('\r', '');
+
+if (
+  !normalizedKanbanHtml.includes(
+    'html:not([data-theme="dark"]) .card-group{\n  background:color-mix(in srgb,var(--site-bg) 88%,#ffffff);'
+  ) ||
+  !normalizedKanbanHtml.includes(
+    'html[data-theme="dark"] .card-group{\n  background:color-mix(in srgb,var(--site-bg) 88%,#000000);'
+  )
+) {
+  throw new Error("Los grupos no conservan los fondos definidos para ambos temas");
+}
+
 if (
   !files[2].includes("chrome.action.onClicked") ||
   !files[2].includes("chrome.tabs.query({url:appUrl})") ||
@@ -256,11 +269,82 @@ try {
       })
     }
 
+    group.dispatchEvent(new PointerEvent('pointerdown',{
+      bubbles:true,
+      button:0,
+      pointerId:41,
+      clientX:groupRect.left+8,
+      clientY:groupRect.top+8
+    }))
+    group.dispatchEvent(new PointerEvent('pointerup',{
+      bubbles:true,
+      button:0,
+      pointerId:41,
+      clientX:groupRect.left+8,
+      clientY:groupRect.top+8
+    }))
+    result.selected=group.classList.contains('selected')
+
+    let destination=document.querySelectorAll('.column')[1]
+    let destinationCards=destination.querySelector(':scope > .cards')
+    let destinationRect=destinationCards.getBoundingClientRect()
+    transfer=new DataTransfer()
+    group.dispatchEvent(new DragEvent('dragstart',{
+      bubbles:true,
+      cancelable:true,
+      dataTransfer:transfer
+    }))
+    destinationCards.dispatchEvent(new DragEvent('dragover',{
+      bubbles:true,
+      cancelable:true,
+      clientX:destinationRect.left+20,
+      clientY:destinationRect.bottom-20,
+      dataTransfer:transfer
+    }))
+    group.dispatchEvent(new DragEvent('dragend',{
+      bubbles:true,
+      cancelable:true,
+      dataTransfer:transfer
+    }))
+    await new Promise(resolve=>setTimeout(resolve,80))
+    result.moved=group.closest('.column')===destination
+
+    group.dispatchEvent(new MouseEvent('contextmenu',{
+      bubbles:true,
+      cancelable:true,
+      clientX:90,
+      clientY:90
+    }))
+    result.editVisible=!document.querySelector('#edit-context').hidden
+    document.querySelector('#edit-context').click()
+    await new Promise(resolve=>requestAnimationFrame(resolve))
+    result.editModal=document.querySelector('#confirm-title').textContent.trim()
+    document.querySelector('#confirm-input').value='Prioridad alta'
+    document.querySelector('#accept-confirm').click()
+    await new Promise(resolve=>setTimeout(resolve,60))
+    result.editedTitle=group.querySelector('.card-group-title').textContent.trim()
+
     created.remove()
-    root.insertBefore(originalCard,group)
-    group.remove()
-    await guardar({inmediato:true})
-    await new Promise(resolve=>setTimeout(resolve,50))
+    root.append(originalCard)
+    group.dispatchEvent(new MouseEvent('contextmenu',{
+      bubbles:true,
+      cancelable:true,
+      clientX:90,
+      clientY:90
+    }))
+    result.deleteLabel=document.querySelector('#delete-context').textContent.trim()
+    document.querySelector('#delete-context').click()
+    await new Promise(resolve=>requestAnimationFrame(resolve))
+    document.querySelector('#accept-confirm').click()
+    await new Promise(resolve=>setTimeout(resolve,80))
+    result.deleted=!group.isConnected
+    stored=(await chrome.storage.local.get(['kanban-data']))['kanban-data']
+    active=stored.workspaces.find(
+      workspace=>workspace.id===stored.activeWorkspace
+    )
+    result.deletedFromStorage=!active.board.some(item=>
+      item.groups?.some(value=>value.title==='Prioridad alta')
+    )
 
     return result
   })()`);
@@ -275,7 +359,15 @@ try {
     !groups.grew ||
     groups.storedTitle !== "Prioridad" ||
     groups.storedCards?.length !== 2 ||
-    !groups.storedCards.includes("Tarea agrupada")
+    !groups.storedCards.includes("Tarea agrupada") ||
+    !groups.selected ||
+    !groups.moved ||
+    !groups.editVisible ||
+    groups.editModal !== "Renombrar grupo" ||
+    groups.editedTitle !== "Prioridad alta" ||
+    groups.deleteLabel !== "Eliminar grupo" ||
+    !groups.deleted ||
+    !groups.deletedFromStorage
   ) {
     throw new Error(`Los grupos de columna no funcionan correctamente: ${JSON.stringify(groups)}`);
   }
