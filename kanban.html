@@ -3280,7 +3280,7 @@ document.addEventListener(
       addGroupContext.hidden=!!card || !!group
       copyContext.hidden=!!group && !card
       pasteContext.hidden=(!!group && !card) || internalClipboard?.type!=='card'
-      duplicateContext.hidden=!!group && !card
+      duplicateContext.hidden=false
       moveContext.hidden=false
       deleteContext.hidden=false
 
@@ -3846,25 +3846,33 @@ duplicateContext.onclick=()=>{
 
   let duplicate=target.cloneNode(true)
   let card=target.matches('.card')
+  let group=target.matches('.card-group')
 
-  duplicate.classList.remove('dragging','selected')
+  duplicate.classList.remove(
+    'dragging',
+    'selected',
+    'group-drag-source'
+  )
   duplicate.contentEditable=false
   duplicate.draggable=card
 
-  duplicate.querySelectorAll('.card,h3')
+  duplicate.querySelectorAll('.card,h3,.card-group-title')
     .forEach(item=>{
       item.classList.remove('dragging','selected')
       item.contentEditable=false
-      item.draggable=true
+      item.draggable=item.matches('.card,h3')
     })
 
   target.after(duplicate)
 
   if(card)
     seleccionarTarjetas([duplicate])
+  else if(group)
+    seleccionarGrupos([duplicate])
   else
     seleccionarColumna(duplicate)
 
+  actualizarContadoresColumnas()
   ajustarColumnas()
   guardar()
 }

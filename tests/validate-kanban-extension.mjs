@@ -324,6 +324,30 @@ try {
     await new Promise(resolve=>setTimeout(resolve,60))
     result.editedTitle=group.querySelector('.card-group-title').textContent.trim()
 
+    group.dispatchEvent(new MouseEvent('contextmenu',{
+      bubbles:true,
+      cancelable:true,
+      clientX:90,
+      clientY:90
+    }))
+    result.duplicateVisible=!document.querySelector('#duplicate-context').hidden
+    document.querySelector('#duplicate-context').click()
+    await new Promise(resolve=>setTimeout(resolve,80))
+    let duplicate=group.nextElementSibling
+    result.duplicated=
+      duplicate?.matches('.card-group') &&
+      duplicate.querySelector('.card-group-title').textContent.trim()==='Prioridad alta' &&
+      duplicate.querySelectorAll('.group-cards > .card').length===2 &&
+      duplicate.classList.contains('selected')
+    stored=(await chrome.storage.local.get(['kanban-data']))['kanban-data']
+    active=stored.workspaces.find(
+      workspace=>workspace.id===stored.activeWorkspace
+    )
+    result.duplicateStored=active.board.some(item=>
+      item.groups?.filter(value=>value.title==='Prioridad alta').length===2
+    )
+    duplicate.remove()
+
     created.remove()
     root.append(originalCard)
     group.dispatchEvent(new MouseEvent('contextmenu',{
@@ -365,6 +389,9 @@ try {
     !groups.editVisible ||
     groups.editModal !== "Renombrar grupo" ||
     groups.editedTitle !== "Prioridad alta" ||
+    !groups.duplicateVisible ||
+    !groups.duplicated ||
+    !groups.duplicateStored ||
     groups.deleteLabel !== "Eliminar grupo" ||
     !groups.deleted ||
     !groups.deletedFromStorage
