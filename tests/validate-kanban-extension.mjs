@@ -262,6 +262,33 @@ try {
     throw new Error(`El tablero no se restauro al recargar: ${JSON.stringify(restored)}`);
   }
 
+  const copiedMultilineCard = await cdp.evaluate(`(async()=>{
+    let copied=''
+    let card=document.querySelector('#kanban .card')
+    let original=card.innerHTML
+
+    Object.defineProperty(navigator,'clipboard',{
+      configurable:true,
+      value:{writeText:async text=>{copied=text}}
+    })
+    card.innerHTML='Linea 1<div>Linea 2</div><div>Linea 3</div>'
+    card.dispatchEvent(new MouseEvent('contextmenu',{
+      bubbles:true,
+      cancelable:true,
+      clientX:50,
+      clientY:50
+    }))
+    document.querySelector('#copy-context').click()
+    await new Promise(resolve=>setTimeout(resolve,20))
+    card.innerHTML=original
+
+    return copied
+  })()`);
+
+  if (copiedMultilineCard !== 'Linea 1\nLinea 2\nLinea 3') {
+    throw new Error(`El portapapeles perdio los saltos de linea: ${JSON.stringify(copiedMultilineCard)}`);
+  }
+
   const cardDrop = await cdp.evaluate(`(async()=>{
     let source=document.querySelector('#kanban .card')
     let sourceColumn=source.closest('.column')

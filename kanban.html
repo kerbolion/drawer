@@ -869,6 +869,15 @@ async function copiarAlPortapapeles(text){
 }
 
 
+function obtenerTextoPlano(element){
+
+  return element.innerText
+    .replace(/\u00a0/g,' ')
+    .replace(/\r\n?/g,'\n')
+    .trim()
+}
+
+
 cancelConfirm.onclick=()=>cerrarModal()
 
 acceptConfirm.onclick=()=>{
@@ -1991,7 +2000,7 @@ copyContext.onclick=async()=>{
       type:'card',
       items:cards.map(card=>card.innerHTML)
     }
-    text=cards.map(card=>card.textContent.trim()).join('\n')
+    text=cards.map(obtenerTextoPlano).join('\n')
   }else{
     let columns=selectedColumns.has(target)
       ? [...kanban.querySelectorAll('.column')]
@@ -2005,9 +2014,9 @@ copyContext.onclick=async()=>{
 
     internalClipboard={type:'column',items}
     text=columns.map(column=>[
-      column.querySelector('h3')?.textContent.trim(),
+      obtenerTextoPlano(column.querySelector('h3')),
       ...[...column.querySelectorAll('.card')]
-        .map(card=>card.textContent.trim())
+        .map(obtenerTextoPlano)
     ].filter(Boolean).join('\n')).join('\n\n')
   }
 
