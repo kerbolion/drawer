@@ -302,6 +302,11 @@ select{
   cursor:grab;
 }
 
+.overview-workspace.selected{
+  outline:2px solid var(--primary-color);
+  outline-offset:1px;
+}
+
 .kanban.overview.row .overview-workspace{
   height:100%;
 }
@@ -356,7 +361,7 @@ select{
   display:grid;
   gap:10px;
   min-height:70px;
-  padding-bottom:4px;
+  padding:4px;
   overflow-x:auto;
 }
 
@@ -627,6 +632,15 @@ html.is-dragging *{
   box-shadow:0 10px 30px var(--site-shadow);
 }
 
+.move-workspace-option::after{
+  content:'';
+  position:absolute;
+  top:0;
+  left:100%;
+  width:6px;
+  height:100%;
+}
+
 .move-workspace-option:hover > .move-columns-menu,
 .move-workspace-option:focus-within > .move-columns-menu,
 .move-workspace-option.open > .move-columns-menu{
@@ -635,6 +649,11 @@ html.is-dragging *{
 
 .context-menu.open-left .move-columns-menu{
   right:calc(100% + 6px);
+  left:auto;
+}
+
+.context-menu.open-left .move-workspace-option::after{
+  right:100%;
   left:auto;
 }
 

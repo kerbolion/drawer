@@ -302,6 +302,11 @@ select{
   cursor:grab;
 }
 
+.overview-workspace.selected{
+  outline:2px solid var(--primary-color);
+  outline-offset:1px;
+}
+
 .kanban.overview.row .overview-workspace{
   height:100%;
 }
@@ -627,6 +632,15 @@ html.is-dragging *{
   box-shadow:0 10px 30px var(--site-shadow);
 }
 
+.move-workspace-option::after{
+  content:'';
+  position:absolute;
+  top:0;
+  left:100%;
+  width:6px;
+  height:100%;
+}
+
 .move-workspace-option:hover > .move-columns-menu,
 .move-workspace-option:focus-within > .move-columns-menu,
 .move-workspace-option.open > .move-columns-menu{
@@ -635,6 +649,11 @@ html.is-dragging *{
 
 .context-menu.open-left .move-columns-menu{
   right:calc(100% + 6px);
+  left:auto;
+}
+
+.context-menu.open-left .move-workspace-option::after{
+  right:100%;
   left:auto;
 }
 
@@ -1315,6 +1334,7 @@ let selectedCards=new Set()
 let selectionAnchor
 let selectedColumns=new Set()
 let columnSelectionAnchor
+let selectedOverviewWorkspace
 let draggedCards=[]
 let draggedColumns=[]
 let cardDropTarget
@@ -1427,8 +1447,18 @@ function limpiarSeleccion(){
   selectedCards.clear()
   selectedColumns.forEach(column=>column.classList.remove('selected'))
   selectedColumns.clear()
+  selectedOverviewWorkspace?.classList.remove('selected')
+  selectedOverviewWorkspace=null
   selectionAnchor=null
   columnSelectionAnchor=null
+}
+
+
+function seleccionarTableroVista(workspace){
+
+  limpiarSeleccion()
+  selectedOverviewWorkspace=workspace
+  workspace.classList.add('selected')
 }
 
 
@@ -2499,6 +2529,7 @@ document.addEventListener(
     ){
       e.preventDefault()
       contextTarget=overviewWorkspace
+      seleccionarTableroVista(overviewWorkspace)
       editContext.hidden=false
       copyContext.hidden=true
       pasteContext.hidden=true
@@ -3181,6 +3212,9 @@ function iniciarArrastre(element,e){
 
   if(document.activeElement?.isContentEditable)
     document.activeElement.blur()
+
+  if(element.matches('.overview-workspace'))
+    seleccionarTableroVista(element)
 
   drag=element
   columnDropTarget=null
@@ -3981,6 +4015,8 @@ document.addEventListener(
 
       if(!collapseOnClick)
         seleccionarColumna(origin.element,e)
+    }else if(origin.element.matches('.overview-workspace')){
+      seleccionarTableroVista(origin.element)
     }else{
       limpiarSeleccion()
     }

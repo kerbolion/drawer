@@ -391,6 +391,7 @@ let selectedCards=new Set()
 let selectionAnchor
 let selectedColumns=new Set()
 let columnSelectionAnchor
+let selectedOverviewWorkspace
 let draggedCards=[]
 let draggedColumns=[]
 let cardDropTarget
@@ -503,8 +504,18 @@ function limpiarSeleccion(){
   selectedCards.clear()
   selectedColumns.forEach(column=>column.classList.remove('selected'))
   selectedColumns.clear()
+  selectedOverviewWorkspace?.classList.remove('selected')
+  selectedOverviewWorkspace=null
   selectionAnchor=null
   columnSelectionAnchor=null
+}
+
+
+function seleccionarTableroVista(workspace){
+
+  limpiarSeleccion()
+  selectedOverviewWorkspace=workspace
+  workspace.classList.add('selected')
 }
 
 
@@ -1575,6 +1586,7 @@ document.addEventListener(
     ){
       e.preventDefault()
       contextTarget=overviewWorkspace
+      seleccionarTableroVista(overviewWorkspace)
       editContext.hidden=false
       copyContext.hidden=true
       pasteContext.hidden=true
@@ -2257,6 +2269,9 @@ function iniciarArrastre(element,e){
 
   if(document.activeElement?.isContentEditable)
     document.activeElement.blur()
+
+  if(element.matches('.overview-workspace'))
+    seleccionarTableroVista(element)
 
   drag=element
   columnDropTarget=null
@@ -3057,6 +3072,8 @@ document.addEventListener(
 
       if(!collapseOnClick)
         seleccionarColumna(origin.element,e)
+    }else if(origin.element.matches('.overview-workspace')){
+      seleccionarTableroVista(origin.element)
     }else{
       limpiarSeleccion()
     }

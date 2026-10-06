@@ -648,6 +648,7 @@ try {
     await new Promise(resolve=>requestAnimationFrame(resolve))
     let boardPlaceholderVisible=
       !!document.querySelector('.overview-workspace-placeholder')
+    let boardFocused=destinationBoard.classList.contains('selected')
     let boardPreviewBackground=getComputedStyle(
       document.querySelector('.drag-image.overview-workspace')
     ).backgroundColor
@@ -719,10 +720,16 @@ try {
     contextCard.dispatchEvent(new MouseEvent('contextmenu',{
       bubbles:true,
       cancelable:true,
-      clientX:100,
+      clientX:850,
       clientY:100
     }))
     document.querySelector('#move-context').click()
+    let moveOpensLeft=document.querySelector('#context-menu')
+      .classList.contains('open-left')
+    let moveBridgeWidth=getComputedStyle(
+      document.querySelector('.move-workspace-option'),
+      '::after'
+    ).width
     let moveBoards=[...document.querySelectorAll(
       '#move-menu .move-workspace-trigger'
     )].map(button=>button.textContent)
@@ -824,6 +831,7 @@ try {
       sourceKeepsRow,
       destinationKeepsGrid,
       boardPlaceholderVisible,
+      boardFocused,
       boardPreviewBackground,
       boardOrder,
       storedBoardOrder:stored.workspaces.map(workspace=>workspace.id),
@@ -839,6 +847,8 @@ try {
       boardEditVisible,
       boardDeleteLabel,
       moveBoards,
+      moveOpensLeft,
+      moveBridgeWidth,
       moveOptions,
       columnMoveOptions,
       rowMode,
@@ -857,6 +867,7 @@ try {
     !overview.sourceKeepsRow ||
     !overview.destinationKeepsGrid ||
     !overview.boardPlaceholderVisible ||
+    !overview.boardFocused ||
     overview.boardPreviewBackground === "rgba(0, 0, 0, 0)" ||
     overview.boardOrder[0] !== overview.destinationId ||
     JSON.stringify(overview.storedBoardOrder) !== JSON.stringify(overview.boardOrder) ||
@@ -870,6 +881,8 @@ try {
     !overview.boardEditVisible ||
     overview.boardDeleteLabel !== "Eliminar tablero" ||
     overview.moveBoards.length !== overview.tabs ||
+    !overview.moveOpensLeft ||
+    overview.moveBridgeWidth !== "6px" ||
     overview.moveOptions.length < overview.moveBoards.length ||
     overview.moveOptions.some(option=>option.includes(" > ")) ||
     overview.columnMoveOptions.some(option=>option.includes(" > ")) ||
