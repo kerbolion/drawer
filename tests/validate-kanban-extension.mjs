@@ -1537,6 +1537,33 @@ try {
       .querySelector('.overview-columns')
       .classList.contains('available-height')
 
+    document.querySelector('#canvas-fit').click()
+    await new Promise(resolve=>setTimeout(resolve,350))
+    let fitViewportRect=viewport.getBoundingClientRect()
+    let fitBoardRects=[...document.querySelectorAll('.overview-workspace')]
+      .map(board=>board.getBoundingClientRect())
+    let fitBounds={
+      left:Math.min(...fitBoardRects.map(rect=>rect.left)),
+      top:Math.min(...fitBoardRects.map(rect=>rect.top)),
+      right:Math.max(...fitBoardRects.map(rect=>rect.right)),
+      bottom:Math.max(...fitBoardRects.map(rect=>rect.bottom))
+    }
+    let fitContained=
+      fitBounds.left>=fitViewportRect.left-1 &&
+      fitBounds.top>=fitViewportRect.top-1 &&
+      fitBounds.right<=fitViewportRect.right+1 &&
+      fitBounds.bottom<=fitViewportRect.bottom+1
+    let fitCenterDelta={
+      x:Math.abs(
+        (fitBounds.left+fitBounds.right)/2-
+        (fitViewportRect.left+fitViewportRect.right)/2
+      ),
+      y:Math.abs(
+        (fitBounds.top+fitBounds.bottom)/2-
+        (fitViewportRect.top+fitViewportRect.bottom)/2
+      )
+    }
+
     document.querySelector('.workspace-tab').click()
     await new Promise(resolve=>setTimeout(resolve,80))
     document.querySelector('#heightMode').value='fixed'
@@ -1559,6 +1586,8 @@ try {
       availableHeightClass,
       fixedHeightHidden,
       boardAvailableHeight,
+      fitContained,
+      fitCenterDelta,
       configuredColumnHeight,
       boards,
       gridAlignContent,
@@ -1606,6 +1635,9 @@ try {
     !canvasView.availableHeightClass ||
     !canvasView.fixedHeightHidden ||
     !canvasView.boardAvailableHeight ||
+    !canvasView.fitContained ||
+    canvasView.fitCenterDelta.x > 2 ||
+    canvasView.fitCenterDelta.y > 2 ||
     canvasView.configuredColumnHeight !== 333 ||
     canvasView.boards !== overview.tabs ||
     canvasView.gridAlignContent !== "start" ||

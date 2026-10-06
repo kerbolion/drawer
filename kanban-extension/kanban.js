@@ -1267,6 +1267,37 @@ function actualizarEscalaLienzo(){
 }
 
 
+function obtenerLimitesTablerosLienzo(){
+
+  let boards=[
+    ...kanban.querySelectorAll('.overview-workspace')
+  ]
+
+  if(!boards.length)
+    return null
+
+  let left=Math.min(...boards.map(board=>board.offsetLeft))
+  let top=Math.min(...boards.map(board=>board.offsetTop))
+  let right=Math.max(...boards.map(
+    board=>board.offsetLeft+board.offsetWidth
+  ))
+  let bottom=Math.max(...boards.map(
+    board=>board.offsetTop+board.offsetHeight
+  ))
+
+  return {
+    left,
+    top,
+    right,
+    bottom,
+    width:Math.max(1,right-left),
+    height:Math.max(1,bottom-top),
+    centerX:(left+right)/2,
+    centerY:(top+bottom)/2
+  }
+}
+
+
 function actualizarLimitesLienzo(){
 
   if(!canvasMode)
@@ -4553,22 +4584,56 @@ canvasFit.onclick=()=>{
   if(!canvasPanzoom)
     return
 
-  let horizontalPadding=40
-  let verticalPadding=40
-  let width=Math.max(1,kanban.scrollWidth)
-  let heightValue=Math.max(1,kanban.scrollHeight)
+  let bounds=obtenerLimitesTablerosLienzo()
+
+  if(!bounds)
+    return
+
+  let horizontalPadding=120
+  let verticalPadding=120
   let scale=Math.min(
-    (canvasViewport.clientWidth-horizontalPadding)/width,
-    (canvasViewport.clientHeight-verticalPadding)/heightValue,
+    Math.max(1,canvasViewport.clientWidth-horizontalPadding)/bounds.width,
+    Math.max(1,canvasViewport.clientHeight-verticalPadding)/bounds.height,
     1
   )
+  scale=Math.max(.35,scale)
+  let panzoom=canvasPanzoom
 
-  canvasPanzoom.zoom(
-    Math.max(.35,scale),
-    {animate:true}
-  )
+  panzoom.zoom(scale,{animate:false})
+
   requestAnimationFrame(()=>{
-    canvasPanzoom?.pan(0,0,{animate:true})
+    if(canvasPanzoom!==panzoom)
+      return
+
+    let boards=[
+      ...kanban.querySelectorAll('.overview-workspace')
+    ]
+
+    if(!boards.length)
+      return
+
+    let rects=boards.map(board=>board.getBoundingClientRect())
+    let left=Math.min(...rects.map(rect=>rect.left))
+    let top=Math.min(...rects.map(rect=>rect.top))
+    let right=Math.max(...rects.map(rect=>rect.right))
+    let bottom=Math.max(...rects.map(rect=>rect.bottom))
+    let viewportRect=canvasViewport.getBoundingClientRect()
+    let deltaX=
+      viewportRect.left+canvasViewport.clientLeft+
+      canvasViewport.clientWidth/2-
+      (left+right)/2
+    let deltaY=
+      viewportRect.top+canvasViewport.clientTop+
+      canvasViewport.clientHeight/2-
+      (top+bottom)/2
+    let currentPan=panzoom.getPan()
+    let renderedScale=panzoom.getScale()
+
+    panzoom.pan(
+      currentPan.x+deltaX/renderedScale,
+      currentPan.y+deltaY/renderedScale,
+      {animate:true}
+    )
   })
 }
 
