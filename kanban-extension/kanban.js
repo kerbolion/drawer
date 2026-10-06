@@ -29,6 +29,12 @@ const acceptConfirm=
 const contextMenu=
   document.querySelector('#context-menu')
 
+const copyContext=
+  document.querySelector('#copy-context')
+
+const duplicateContext=
+  document.querySelector('#duplicate-context')
+
 const deleteContext=
   document.querySelector('#delete-context')
 
@@ -92,6 +98,24 @@ function cerrarMenuContextual(){
 
   contextMenu.hidden=true
   contextTarget=null
+}
+
+
+async function copiarAlPortapapeles(text){
+
+  try{
+    await navigator.clipboard.writeText(text)
+  }catch{
+    let textarea=document.createElement('textarea')
+
+    textarea.value=text
+    textarea.style.position='fixed'
+    textarea.style.opacity='0'
+    document.body.append(textarea)
+    textarea.select()
+    document.execCommand('copy')
+    textarea.remove()
+  }
 }
 
 
@@ -626,6 +650,8 @@ document.addEventListener(
     ){
       e.preventDefault()
       contextTarget=workspaceTab
+      copyContext.hidden=true
+      duplicateContext.hidden=true
       deleteContext.textContent='Eliminar tablero'
     }else if(
       column &&
@@ -633,6 +659,8 @@ document.addEventListener(
     ){
       e.preventDefault()
       contextTarget=card || column
+      copyContext.hidden=false
+      duplicateContext.hidden=false
 
       deleteContext.textContent=
         card
@@ -660,6 +688,56 @@ document.addEventListener(
       )+'px'
   }
 )
+
+
+copyContext.onclick=async()=>{
+
+  let target=contextTarget
+  cerrarMenuContextual()
+
+  if(!target || target.matches('.workspace-tab'))
+    return
+
+  let text=target.matches('.card')
+    ? target.textContent.trim()
+    : [
+        target.querySelector('h3')
+          ?.textContent.trim(),
+        ...[
+          ...target.querySelectorAll('.card')
+        ].map(card=>card.textContent.trim())
+      ].filter(Boolean).join('\n')
+
+  await copiarAlPortapapeles(text)
+}
+
+
+duplicateContext.onclick=()=>{
+
+  let target=contextTarget
+  cerrarMenuContextual()
+
+  if(!target || target.matches('.workspace-tab'))
+    return
+
+  let duplicate=target.cloneNode(true)
+  let card=target.matches('.card')
+
+  duplicate.classList.remove('dragging')
+  duplicate.contentEditable=false
+  duplicate.draggable=card
+
+  duplicate.querySelectorAll('.card,h3')
+    .forEach(item=>{
+      item.classList.remove('dragging')
+      item.contentEditable=false
+      item.draggable=true
+    })
+
+  target.after(duplicate)
+  ajustarColumnas()
+  guardar()
+}
 
 
 deleteContext.onclick=async()=>{
@@ -711,7 +789,7 @@ deleteContext.onclick=async()=>{
           `workspace-${Date.now()}`,
         title:'Tablero 1',
         board:[{
-          title:'Nueva columna',
+          title:'Nueva columna 1',
           cards:[]
         }],
         settings:normalizarConfiguracion()
@@ -1044,7 +1122,8 @@ document.addEventListener(
 
     card.className='card'
     card.draggable=true
-    card.textContent='Nueva tarjeta'
+    card.textContent=
+      `Nueva tarjeta ${cards.querySelectorAll('.card').length+1}`
 
     cards.append(card)
 
@@ -1163,7 +1242,7 @@ document.querySelector('.add-workspace')
     id,
     title:title.trim() || suggested,
     board:[{
-      title:'Nueva columna',
+      title:'Nueva columna 1',
       cards:[]
     }],
     settings:normalizarConfiguracion()
@@ -1185,7 +1264,9 @@ document.querySelector('.add-workspace')
 document.querySelector('.add-column')
 .onclick=()=>{
 
-  let column=crearColumna()
+  let column=crearColumna({
+    title:`Nueva columna ${kanban.querySelectorAll('.column').length+1}`
+  })
 
   kanban.append(column)
 

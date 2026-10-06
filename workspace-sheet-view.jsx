@@ -122,16 +122,28 @@ function Filters({ columns, filters, onChange }) {
   );
 }
 
+const IMMEDIATE_EDITOR_TYPES = new Set(["select", "status", "multiSelect", "date", "datetime", "time", "checkbox"]);
+
 const WorkspaceCellEditor = React.memo(function WorkspaceCellEditor({ property, rawValue, row, renderEditor, toEditorValue, onCommit }) {
   const [editorValue, setEditorValue] = React.useState(() => toEditorValue(rawValue, property));
+  const renderPendingRef = React.useRef(false);
+
+  const flushDeferredCommit = React.useCallback(() => {
+    if (!renderPendingRef.current) return;
+    renderPendingRef.current = false;
+    onCommit(row, property, undefined, { renderOnly: true });
+  }, [onCommit, property, row]);
 
   React.useEffect(() => {
+    renderPendingRef.current = false;
     setEditorValue(toEditorValue(rawValue, property));
   }, [property, rawValue, row, toEditorValue]);
 
   const handleChange = React.useCallback((nextValue) => {
     setEditorValue(nextValue);
-    onCommit(row, property, nextValue);
+    const immediate = IMMEDIATE_EDITOR_TYPES.has(property.type);
+    onCommit(row, property, nextValue, { syncTable: immediate });
+    renderPendingRef.current = !immediate;
   }, [onCommit, property, row]);
 
   return React.createElement(
@@ -141,7 +153,10 @@ const WorkspaceCellEditor = React.memo(function WorkspaceCellEditor({ property, 
       "data-workspace-row": String(row.number),
       "data-workspace-column": String(property.index + 1),
       "data-field-type": property.type,
-      "data-protected": property.protected ? "true" : "false"
+      "data-protected": property.protected ? "true" : "false",
+      onBlur: (event) => {
+        if (!event.currentTarget.contains(event.relatedTarget)) flushDeferredCommit();
+      }
     },
     renderEditor(
       property,
@@ -350,7 +365,7 @@ function DeckView({ columns, table, renderTypeIcon, onAddRow, onOpenRow }) {
   );
 }
 
-function TableView({ columns, hidden, hiddenColumnIds, table, renderEditor, renderTypeIcon, toEditorValue, onAddRow, onCellChange, onClearRows, onHiddenColumnIdsChange, onOpenRow }) {
+const TableView = React.memo(function TableView({ columns, hidden, hiddenColumnIds, table, renderEditor, renderTypeIcon, toEditorValue, onAddRow, onCellChange, onClearRows, onHiddenColumnIdsChange, onOpenRow }) {
   const [search, setSearch] = React.useState("");
   const debouncedSearch = useDebouncedValue(search, 500);
   const [filters, setFilters] = React.useState([]);
@@ -402,6 +417,7 @@ function TableView({ columns, hidden, hiddenColumnIds, table, renderEditor, rend
   );
   const pageSelected = pageRows.length > 0 && selectedPageCount === pageRows.length;
   const stableRenderEditor = useStableEvent(renderEditor);
+  const stableRenderTypeIcon = useStableEvent(renderTypeIcon);
   const stableToEditorValue = useStableEvent(toEditorValue);
   const stableOnAddRow = useStableEvent(onAddRow);
   const stableOnCellChange = useStableEvent(onCellChange);
@@ -545,7 +561,7 @@ function TableView({ columns, hidden, hiddenColumnIds, table, renderEditor, rend
               React.createElement(
                 "div",
                 { className: "workspace-table-column-heading" },
-                React.createElement("span", { className: "property-type-icon" }, renderTypeIcon(column)),
+                React.createElement("span", { className: "property-type-icon" }, stableRenderTypeIcon(column)),
                 React.createElement("span", null, column.name),
                 React.createElement("small", null, column.type)
               )
@@ -586,7 +602,7 @@ function TableView({ columns, hidden, hiddenColumnIds, table, renderEditor, rend
       })
     )
   );
-}
+});
 
 export function WorkspaceSheetView({
   columns,
@@ -609,8 +625,20 @@ export function WorkspaceSheetView({
   sheetName,
   table
 }) {
-  const hiddenColumns = hiddenColumnIds || [];
-  const visibleColumns = columns.filter((column) => !hiddenColumns.includes(column.id));
+  const hiddenColumnsKey = (hiddenColumnIds || []).join("\u0000");
+  const hiddenColumns = React.useMemo(() => hiddenColumnIds || [], [hiddenColumnsKey]);
+  const visibleColumns = React.useMemo(
+    () => columns.filter((column) => !hiddenColumns.includes(column.id)),
+    [columns, hiddenColumns]
+  );
+  const stableOnAddRow = useStableEvent(onAddRow);
+  const stableOnCellChange = useStableEvent(onCellChange);
+  const stableOnClearRows = useStableEvent(onClearRows);
+  const stableOnHiddenColumnIdsChange = useStableEvent(onHiddenColumnIdsChange);
+  const stableOnOpenRow = useStableEvent(onOpenRow);
+  const stableRenderEditor = useStableEvent(renderEditor);
+  const stableRenderTypeIcon = useStableEvent(renderTypeIcon);
+  const stableToEditorValue = useStableEvent(toEditorValue);
   const hasKanban = columns.some((column) => column.type === "status");
   const hasCalendar = columns.some((column) => column.type === "date");
   const hasTimeline = columns.some((column) => column.type === "date" && column.dateTimelineRole === "start")
@@ -647,7 +675,7 @@ export function WorkspaceSheetView({
     if (activeView === "timeline" && !hasTimeline) setActiveView("deck");
   }, [activeView, hasKanban, hasCalendar, hasTimeline]);
 
-  const openRow = (number) => onOpenRow(Number(number));
+  const openRow = React.useCallback((number) => stableOnOpenRow(Number(number)), [stableOnOpenRow]);
 
   return React.createElement(
     "div",
@@ -726,8 +754,8 @@ export function WorkspaceSheetView({
                       : React.createElement(DeckView, {
                     columns: visibleColumns,
                     table,
-                    renderTypeIcon,
-                    onAddRow,
+                    renderTypeIcon: stableRenderTypeIcon,
+                    onAddRow: stableOnAddRow,
                     onOpenRow: openRow
                   }),
         !loading && table && (tableMounted || activeView === "table")
@@ -737,13 +765,13 @@ export function WorkspaceSheetView({
                   hidden: activeView !== "table",
                   hiddenColumnIds: hiddenColumns,
                   table,
-                  renderEditor,
-                  renderTypeIcon,
-                  toEditorValue,
-                  onAddRow,
-                  onCellChange,
-                  onClearRows,
-                  onHiddenColumnIdsChange,
+                  renderEditor: stableRenderEditor,
+                  renderTypeIcon: stableRenderTypeIcon,
+                  toEditorValue: stableToEditorValue,
+                  onAddRow: stableOnAddRow,
+                  onCellChange: stableOnCellChange,
+                  onClearRows: stableOnClearRows,
+                  onHiddenColumnIdsChange: stableOnHiddenColumnIdsChange,
                   onOpenRow: openRow
                 })
           : null

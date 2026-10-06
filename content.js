@@ -2955,6 +2955,67 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     return result;
   }
 
+  function createSheetViewDraftStore() {
+    let version = 0;
+    const listeners = new Set();
+    return {
+      emit() {
+        version += 1;
+        for (const listener of listeners) listener();
+      },
+      getSnapshot() {
+        return version;
+      },
+      subscribe(listener) {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      }
+    };
+  }
+
+  function SheetViewDraftControls({ draftsRef, error, onCancel, onSave, saving, store }) {
+    React.useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
+    const pending = [...draftsRef.current.values()].some((draft) => draft.pending);
+    const mode = error ? "error" : saving ? "saving" : pending ? "pending" : "saved";
+    const label = mode === "error"
+      ? "Error al guardar"
+      : mode === "saving"
+        ? "Guardando"
+        : mode === "pending"
+          ? "Cambios pendientes"
+          : "Guardado";
+
+    return React.createElement(
+      React.Fragment,
+      null,
+      React.createElement(Button, {
+        disabled: saving || !pending,
+        "data-sheet-view-cancel": "",
+        onClick: onCancel
+      }, "Cancelar"),
+      React.createElement(Button, {
+        type: "primary",
+        disabled: saving || !pending,
+        "data-sheet-view-save": "",
+        onClick: onSave
+      }, "Guardar cambios"),
+      React.createElement(
+        "span",
+        {
+          className: `save-state is-${mode}`,
+          title: label,
+          role: "status",
+          "aria-label": label,
+          "aria-live": "polite",
+          "data-sheet-view-save-state": mode
+        },
+        React.createElement("span", { className: "save-state-spinner", "aria-hidden": "true" }),
+        React.createElement(CheckCircleOutlined, { className: "save-state-check", "aria-hidden": "true" }),
+        React.createElement("span", { className: "save-state-error", "aria-hidden": "true" }, "!")
+      )
+    );
+  }
+
   function SheetViewActions({ sheetKey, sheetName, columns, settings, refreshKey }) {
     const [view, setView] = React.useState("");
     const [table, setTable] = React.useState(null);
@@ -2965,8 +3026,8 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     const [workspaceColumns, setWorkspaceColumns] = React.useState(columns);
     const [workspaceLoadRevision, setWorkspaceLoadRevision] = React.useState(0);
     const sheetViewDraftsRef = React.useRef(new Map());
+    const [sheetViewDraftStore] = React.useState(createSheetViewDraftStore);
     const sourceSheetKeyRef = React.useRef(sheetKey);
-    const [, setSheetViewDraftVersion] = React.useState(0);
     const [sheetViewSaving, setSheetViewSaving] = React.useState(false);
     const [sheetViewSaveError, setSheetViewSaveError] = React.useState(false);
     const [, setColumnVisibilityRevision] = React.useState(0);
@@ -2983,7 +3044,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
       setTable(null);
       setError("");
       sheetViewDraftsRef.current.clear();
-      setSheetViewDraftVersion((current) => current + 1);
+      sheetViewDraftStore.emit();
       setSheetViewSaving(false);
       setSheetViewSaveError(false);
       setWorkspaceTarget({ gid: drawerGid(), name: sheetName });
@@ -2992,21 +3053,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
 
     const activeTarget = view === "table" ? workspaceTarget : { gid: drawerGid(), name: sheetName };
     const pendingSheetViewDrafts = () => [...sheetViewDraftsRef.current.values()].filter((draft) => draft.pending);
-    const hasSheetViewChanges = pendingSheetViewDrafts().length > 0;
-    const sheetViewSaveMode = sheetViewSaveError
-      ? "error"
-      : sheetViewSaving
-        ? "saving"
-        : hasSheetViewChanges
-          ? "pending"
-          : "saved";
-    const sheetViewSaveLabel = sheetViewSaveMode === "error"
-      ? "Error al guardar"
-      : sheetViewSaveMode === "saving"
-        ? "Guardando"
-        : sheetViewSaveMode === "pending"
-          ? "Cambios pendientes"
-          : "Guardado";
+    const hasPendingSheetViewChanges = () => pendingSheetViewDrafts().length > 0;
 
     const sheetViewTargetKey = (target = activeTarget) => `${String(target.gid)}:${normalizedColumn(target.name)}`;
     const sheetViewRowKey = (target, rowNumber) => `${sheetViewTargetKey(target)}:${Number(rowNumber)}`;
@@ -3015,7 +3062,6 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
       const prefix = `${sheetViewRowKey(target, rowNumber)}:`;
       return [...sheetViewDraftsRef.current.entries()].some(([key, draft]) => key.startsWith(prefix) && draft.pending);
     };
-    const bumpSheetViewDrafts = () => setSheetViewDraftVersion((current) => current + 1);
     const changeHiddenColumnIds = (gid, sheetName, hiddenColumnIds) => {
       const targetGid = configuredSheetGid(gid, sheetName);
       setSheetViewSetting(targetGid, "hiddenColumnIds", hiddenColumnIds);
@@ -3074,13 +3120,15 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
       setTable((current) => tableWithSheetViewDrafts(current, target));
     };
 
-    const stageSheetViewValue = (row, property, nextValue, target = activeTarget, allowProtected = false) => {
+    const stageSheetViewValue = (row, property, nextValue, target = activeTarget, allowProtected = false, options = {}) => {
       if (!row || (property.protected && !allowProtected)) return false;
       const normalizedValue = String(nextValue ?? "");
       const draftKey = sheetViewDraftKey(target, row.number, property.index);
       const existingDraft = sheetViewDraftsRef.current.get(draftKey);
+      const wasPending = existingDraft?.pending === true;
       const originalValue = existingDraft?.originalValue ?? String(row.cells[property.index] || "");
       const originalRow = existingDraft?.originalRow || { ...row, cells: [...row.cells] };
+      const pending = !valuesEqualForProperty(normalizedValue, originalValue, property);
       sheetViewDraftsRef.current.set(draftKey, {
         targetKey: sheetViewTargetKey(target),
         target: { gid: String(target.gid), name: String(target.name) },
@@ -3089,10 +3137,10 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
         value: normalizedValue,
         originalValue,
         originalRow,
-        pending: !valuesEqualForProperty(normalizedValue, originalValue, property),
+        pending,
         removesRow: existingDraft?.removesRow || false
       });
-      if (sheetViewTargetKey(target) === sheetViewTargetKey(activeTarget)) {
+      if (options.syncTable !== false && sheetViewTargetKey(target) === sheetViewTargetKey(activeTarget)) {
         setTable((current) => {
           if (!current) return current;
           return {
@@ -3108,12 +3156,12 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
       }
       setError("");
       setSheetViewSaveError(false);
-      bumpSheetViewDrafts();
+      if (wasPending !== pending) sheetViewDraftStore.emit();
       return true;
     };
 
     const cancelSheetViewChanges = () => {
-      if (sheetViewSaving || !hasSheetViewChanges) return;
+      if (sheetViewSaving || !hasPendingSheetViewChanges()) return;
       const drafts = pendingSheetViewDrafts();
       setTable((current) => {
         if (!current) return current;
@@ -3127,13 +3175,13 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
         return { ...current, rows: [...rows.values()].sort((left, right) => left.number - right.number) };
       });
       sheetViewDraftsRef.current.clear();
+      sheetViewDraftStore.emit();
       setSheetViewSaveError(false);
       setError("");
-      bumpSheetViewDrafts();
     };
 
     const saveSheetViewChanges = async () => {
-      if (sheetViewSaving || !hasSheetViewChanges) return;
+      if (sheetViewSaving || !hasPendingSheetViewChanges()) return;
       const drafts = pendingSheetViewDrafts();
       const latestTable = tableWithSheetViewDrafts(table, activeTarget);
       setTable(latestTable);
@@ -3156,7 +3204,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
           const draftKey = sheetViewDraftKey(draft.target, draft.row, draft.property.index);
           if (sheetViewDraftsRef.current.get(draftKey) === draft) sheetViewDraftsRef.current.delete(draftKey);
         }
-        bumpSheetViewDrafts();
+        sheetViewDraftStore.emit();
       } catch (saveError) {
         setSheetViewSaveError(true);
         setError(saveError.message);
@@ -3166,7 +3214,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     };
 
     const requestSheetViewClose = () => {
-      if (hasSheetViewChanges || sheetViewSaving) {
+      if (hasPendingSheetViewChanges() || sheetViewSaving) {
         setError("Guarda o cancela los cambios pendientes antes de cerrar la vista.");
         return;
       }
@@ -3225,7 +3273,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     }, [view, statusColumns.length, dateColumns.length, hasTimeline]);
 
     const openSheetViewRow = async (rowNumber, target = workspaceTarget) => {
-      if (hasSheetViewChanges || sheetViewSaving) {
+      if (hasPendingSheetViewChanges() || sheetViewSaving) {
         setError("Guarda o cancela los cambios pendientes antes de abrir otra fila.");
         return;
       }
@@ -3270,17 +3318,21 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
       stageSheetViewValue(row, property, nextValue, activeTarget);
     };
 
-    const editWorkspaceCell = (row, property, nextEditorValue) => {
+    const editWorkspaceCell = (row, property, nextEditorValue, options = {}) => {
+      if (options.renderOnly) {
+        syncSheetViewTable(workspaceTarget);
+        return;
+      }
       if (property.protected) return;
       const nextValue = serializeEditorValue(nextEditorValue, property);
-      const previousValue = String(row.cells[property.index] || "");
-      if (valuesEqualForProperty(nextValue, previousValue, property)) return;
-      stageSheetViewValue(row, property, nextValue, workspaceTarget);
+      stageSheetViewValue(row, property, nextValue, workspaceTarget, false, {
+        syncTable: options.syncTable !== false
+      });
     };
 
     const addWorkspaceRow = async () => {
       if (!table) return;
-      if (hasSheetViewChanges || sheetViewSaving) {
+      if (hasPendingSheetViewChanges() || sheetViewSaving) {
         setError("Guarda o cancela los cambios pendientes antes de agregar un registro.");
         return;
       }
@@ -3319,12 +3371,12 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
         }
       }
       syncSheetViewTable(workspaceTarget);
-      bumpSheetViewDrafts();
+      sheetViewDraftStore.emit();
     };
 
     const selectWorkspaceSheet = (sheet) => {
       if (!sheet?.name) return;
-      if (hasSheetViewChanges || sheetViewSaving) {
+      if (hasPendingSheetViewChanges() || sheetViewSaving) {
         setError("Guarda o cancela los cambios pendientes antes de cambiar de hoja.");
         return;
       }
@@ -3563,31 +3615,14 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
             React.createElement(
               "div",
               { className: "sheet-view-panel-actions" },
-              React.createElement(Button, {
-                disabled: sheetViewSaving || !hasSheetViewChanges,
-                "data-sheet-view-cancel": "",
-                onClick: cancelSheetViewChanges
-              }, "Cancelar"),
-              React.createElement(Button, {
-                type: "primary",
-                disabled: sheetViewSaving || !hasSheetViewChanges,
-                "data-sheet-view-save": "",
-                onClick: () => void saveSheetViewChanges()
-              }, "Guardar cambios"),
-              React.createElement(
-                "span",
-                {
-                  className: `save-state is-${sheetViewSaveMode}`,
-                  title: sheetViewSaveLabel,
-                  role: "status",
-                  "aria-label": sheetViewSaveLabel,
-                  "aria-live": "polite",
-                  "data-sheet-view-save-state": sheetViewSaveMode
-                },
-                React.createElement("span", { className: "save-state-spinner", "aria-hidden": "true" }),
-                React.createElement(CheckCircleOutlined, { className: "save-state-check", "aria-hidden": "true" }),
-                React.createElement("span", { className: "save-state-error", "aria-hidden": "true" }, "!")
-              ),
+              React.createElement(SheetViewDraftControls, {
+                draftsRef: sheetViewDraftsRef,
+                error: sheetViewSaveError,
+                onCancel: cancelSheetViewChanges,
+                onSave: () => void saveSheetViewChanges(),
+                saving: sheetViewSaving,
+                store: sheetViewDraftStore
+              }),
               React.createElement(ThemeToggleControl),
               React.createElement(Button, {
                 type: "text",

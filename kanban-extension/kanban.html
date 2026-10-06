@@ -283,11 +283,23 @@ select{
   padding:8px 10px;
   border-radius:5px;
   background:transparent;
-  color:var(--danger);
+  color:var(--site-button-text);
   text-align:left;
 }
 
 .context-menu button:hover{
+  background:color-mix(in srgb,var(--site-heading) 8%,var(--site-bg));
+}
+
+.context-menu button[hidden]{
+  display:none;
+}
+
+.context-menu #delete-context{
+  color:var(--danger);
+}
+
+.context-menu #delete-context:hover{
   background:color-mix(in srgb,var(--danger) 10%,var(--site-bg));
 }
 
@@ -480,6 +492,12 @@ select{
 </div>
 
 <div class="context-menu" id="context-menu" hidden>
+  <button id="copy-context" type="button">
+    Copiar
+  </button>
+  <button id="duplicate-context" type="button">
+    Duplicar
+  </button>
   <button id="delete-context" type="button">
     Eliminar
   </button>
