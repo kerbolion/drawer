@@ -228,6 +228,10 @@ textarea,
   justify-content: center;
 }
 
+.settings[hidden]{
+  display:none;
+}
+
 .settings label{
   display:flex;
   align-items:center;
@@ -235,6 +239,16 @@ textarea,
 }
 
 .settings .grid-setting[hidden]{
+  display:none;
+}
+
+.height-value{
+  display:flex;
+  gap:6px;
+  align-items:center;
+}
+
+.height-value[hidden]{
   display:none;
 }
 
@@ -418,6 +432,20 @@ select{
 }
 
 .kanban.row .column{
+  height:100%;
+}
+
+.kanban.available-height{
+  flex:1 1 0;
+  min-height:0;
+  grid-auto-rows:minmax(0,1fr);
+  overflow-y:auto;
+}
+
+.kanban.available-height .column,
+.kanban.available-height .column-placeholder,
+.kanban.available-height .overview-workspace,
+.kanban.available-height .overview-workspace-placeholder{
   height:100%;
 }
 
@@ -967,12 +995,18 @@ html.is-dragging *{
 
   <label class="grid-setting">
     Alto
-    <input
-      id="height"
-      type="number"
-      min="150"
-      value="600">
-    px
+    <select id="heightMode">
+      <option value="fixed">FIJO</option>
+      <option value="available">DISPONIBLE</option>
+    </select>
+    <span class="height-value" id="height-value">
+      <input
+        id="height"
+        type="number"
+        min="150"
+        value="600">
+      px
+    </span>
   </label>
 
   <label class="grid-setting">

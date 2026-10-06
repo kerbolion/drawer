@@ -945,6 +945,7 @@ try {
     let canvasActive=document.querySelector('#canvas-viewport')
       .classList.contains('canvas-active')
     let controlsVisible=!document.querySelector('#canvas-controls').hidden
+    let settingsHidden=document.querySelector('.settings').hidden
     let boards=document.querySelectorAll('.overview-workspace').length
     let viewport=document.querySelector('#canvas-viewport')
     let gridAlignContent=getComputedStyle(
@@ -1218,6 +1219,20 @@ try {
     document.querySelector('.workspace-tab').click()
     await new Promise(resolve=>setTimeout(resolve,80))
 
+    let settingsRestored=!document.querySelector('.settings').hidden
+    document.querySelector('#heightMode').value='available'
+    document.querySelector('#heightMode').dispatchEvent(
+      new Event('change',{bubbles:true})
+    )
+    await new Promise(resolve=>setTimeout(resolve,80))
+    let availableHeightClass=document.querySelector('#kanban')
+      .classList.contains('available-height')
+    let fixedHeightHidden=document.querySelector('#height-value').hidden
+    document.querySelector('#heightMode').value='fixed'
+    document.querySelector('#heightMode').dispatchEvent(
+      new Event('change',{bubbles:true})
+    )
+
     let firstCloseWorked=!document.querySelector('#canvas-viewport')
       .classList.contains('canvas-active')
 
@@ -1248,6 +1263,10 @@ try {
       zoomedScale,
       canvasActive,
       controlsVisible,
+      settingsHidden,
+      settingsRestored,
+      availableHeightClass,
+      fixedHeightHidden,
       boards,
       gridAlignContent,
       altDownAccepted,
@@ -1286,6 +1305,10 @@ try {
   if (
     !canvasView.canvasActive ||
     !canvasView.controlsVisible ||
+    !canvasView.settingsHidden ||
+    !canvasView.settingsRestored ||
+    !canvasView.availableHeightClass ||
+    !canvasView.fixedHeightHidden ||
     canvasView.boards !== overview.tabs ||
     canvasView.gridAlignContent !== "start" ||
     canvasView.altDownAccepted ||

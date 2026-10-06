@@ -3,12 +3,22 @@ const THEME_STORAGE='minimal-builder-theme'
 const DEFAULT_SETTINGS={
   columns:'3',
   height:'600',
+  heightMode:'fixed',
   minWidth:'280',
   view:'grid'
 }
 
 const confirmModal=
   document.querySelector('#confirm-modal')
+
+const settingsPanel=
+  document.querySelector('.settings')
+
+const heightMode=
+  document.querySelector('#heightMode')
+
+const heightValue=
+  document.querySelector('#height-value')
 
 const confirmTitle=
   document.querySelector('#confirm-title')
@@ -699,11 +709,18 @@ function ajustarColumnas(){
 
   let grid=
     view.value==='grid'
+  let availableHeight=
+    grid && heightMode.value==='available'
 
   kanban.classList.toggle(
     'row',
     !grid
   )
+  kanban.classList.toggle(
+    'available-height',
+    availableHeight
+  )
+  heightValue.hidden=availableHeight
 
   document.querySelectorAll('.grid-setting')
     .forEach(setting=>setting.hidden=!grid)
@@ -752,6 +769,7 @@ function leerConfiguracion(){
   return {
     columns:columns.value,
     height:height.value,
+    heightMode:heightMode.value,
     minWidth:minWidth.value,
     view:view.value
   }
@@ -763,6 +781,9 @@ function normalizarConfiguracion(settings={}){
   return {
     columns:String(settings.columns || DEFAULT_SETTINGS.columns),
     height:String(settings.height || DEFAULT_SETTINGS.height),
+    heightMode:settings.heightMode==='available'
+      ? 'available'
+      : 'fixed',
     minWidth:String(settings.minWidth || DEFAULT_SETTINGS.minWidth),
     view:settings.view==='row' ? 'row' : 'grid'
   }
@@ -815,6 +836,7 @@ function aplicarConfiguracion(settings){
 
   columns.value=config.columns
   height.value=config.height
+  heightMode.value=config.heightMode
   minWidth.value=config.minWidth
   view.value=config.view
 
@@ -1130,6 +1152,7 @@ function desactivarLienzo(){
   let deactivationVersion=canvasActivationVersion
 
   establecerPaneoConEspacio(false)
+  settingsPanel.hidden=false
 
   if(canvasPanzoom){
     canvasTransform=normalizarTransformLienzo({
@@ -1195,6 +1218,7 @@ function dibujarVistaGeneral(
 ){
 
   desactivarLienzo()
+  settingsPanel.hidden=lienzo
   limpiarSeleccion()
   activeViewId=
     viewId==='all' || views.some(view=>view.id===viewId)
@@ -1591,6 +1615,7 @@ async function importarDatos(data){
   let legacySettings={
     columns:data.columns,
     height:data.height,
+    heightMode:data.heightMode,
     minWidth:data.minWidth,
     view:data.view
   }
@@ -1678,6 +1703,7 @@ async function cargar(){
   let legacySettings={
     columns:data.columns,
     height:data.height,
+    heightMode:data.heightMode,
     minWidth:data.minWidth,
     view:data.view
   }
@@ -1784,6 +1810,13 @@ height.oninput=()=>{
       height.value+'px'
     )
 
+  guardar({tablero:false})
+}
+
+
+heightMode.onchange=()=>{
+
+  ajustarColumnas()
   guardar({tablero:false})
 }
 
@@ -4091,11 +4124,7 @@ newView.onclick=async()=>{
     id:crypto.randomUUID?.() || `view-${Date.now()}`,
     title:result.title,
     workspaceIds:result.workspaceIds,
-    settings:normalizarConfiguracion(),
-    canvasLayout:normalizarDisenoLienzo(
-      {},
-      workspaces.length
-    )
+    settings:normalizarConfiguracion()
   },views.length)
 
   views.push(viewItem)
@@ -4175,7 +4204,11 @@ document.querySelector('.add-workspace')
       title:'Nueva columna 1',
       cards:[]
     }],
-    settings:normalizarConfiguracion()
+    settings:normalizarConfiguracion(),
+    canvasLayout:normalizarDisenoLienzo(
+      {},
+      workspaces.length
+    )
   })
 
   let workspace=mostrarTablero(id)
