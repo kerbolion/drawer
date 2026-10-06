@@ -282,6 +282,7 @@ let workspaceDragMoved=false
 let workspaceClickBlockedUntil=0
 let selectedCards=new Set()
 let selectionAnchor
+let selectedColumn
 let draggedCards=[]
 let cardMoveTarget
 let internalClipboard
@@ -377,7 +378,17 @@ function limpiarSeleccion(){
 
   selectedCards.forEach(card=>card.classList.remove('selected'))
   selectedCards.clear()
+  selectedColumn?.classList.remove('selected')
+  selectedColumn=null
   selectionAnchor=null
+}
+
+
+function seleccionarColumna(column){
+
+  limpiarSeleccion()
+  selectedColumn=column
+  selectedColumn.classList.add('selected')
 }
 
 
@@ -1145,6 +1156,9 @@ document.addEventListener(
       if(card && !selectedCards.has(card))
         seleccionarTarjetas([card])
 
+      if(!card && selectedColumn!==column)
+        seleccionarColumna(column)
+
       deleteContext.textContent=
         card
           ? selectedCards.has(card) && selectedCards.size>1
@@ -1269,9 +1283,12 @@ pasteContext.onclick=()=>{
     clipboard.type==='column' &&
     target===kanban
   ){
-    clipboard.items.forEach(item=>
-      kanban.append(crearColumna(structuredClone(item)))
+    let columns=clipboard.items.map(item=>
+      crearColumna(structuredClone(item))
     )
+
+    kanban.append(...columns)
+    seleccionarColumna(columns.at(-1))
     ajustarColumnas()
     guardar()
     return
@@ -1320,6 +1337,12 @@ duplicateContext.onclick=()=>{
     })
 
   target.after(duplicate)
+
+  if(card)
+    seleccionarTarjetas([duplicate])
+  else
+    seleccionarColumna(duplicate)
+
   ajustarColumnas()
   guardar()
 }
@@ -1522,6 +1545,12 @@ function iniciarArrastre(element,e){
       .filter(card=>selectedCards.has(card))
   }else{
     draggedCards=[]
+
+    if(
+      drag.matches('.column') &&
+      selectedColumn!==drag
+    )
+      seleccionarColumna(drag)
   }
 
   document.documentElement.classList.add('is-dragging')
@@ -1697,10 +1726,15 @@ function procesarArrastre(eventTarget,clientX,clientY){
         cardMoveTarget?.cards!==cards ||
         cardMoveTarget?.next!==next
       ){
-        let fragment=document.createDocumentFragment()
+        if(draggedCards.length===1){
+          cards.insertBefore(draggedCards[0],next || null)
+        }else{
+          let fragment=document.createDocumentFragment()
 
-        draggedCards.forEach(card=>fragment.append(card))
-        cards.insertBefore(fragment,next || null)
+          draggedCards.forEach(card=>fragment.append(card))
+          cards.insertBefore(fragment,next || null)
+        }
+
         cardMoveTarget={cards,next}
         actualizarContadoresColumnas()
       }
@@ -1841,6 +1875,8 @@ document.addEventListener(
 
       if(!collapseOnClick)
         seleccionarTarjeta(origin.element,e)
+    }else if(origin.element.matches('.column')){
+      seleccionarColumna(origin.element)
     }else{
       limpiarSeleccion()
     }

@@ -240,6 +240,7 @@ select{
 .kanban{
   flex:none;
   display:grid;
+  overflow-anchor:none;
   grid-template-columns:repeat(var(--real-columns),minmax(0,1fr));
   gap:15px;
   padding:50px;
@@ -270,6 +271,11 @@ select{
   border-radius:8px;
   display:flex;
   flex-direction:column;
+}
+
+.column.selected{
+  outline:2px solid var(--primary-color);
+  outline-offset:1px;
 }
 
 .column-header{
