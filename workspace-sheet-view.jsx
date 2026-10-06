@@ -230,7 +230,7 @@ function DeckView({ columns, table, renderTypeIcon, onAddRow, onOpenRow }) {
   );
 }
 
-function TableView({ columns, hiddenColumnIds, table, renderEditor, renderTypeIcon, toEditorValue, onAddRow, onCellChange, onClearRows, onHiddenColumnIdsChange, onOpenRow }) {
+function TableView({ columns, hidden, hiddenColumnIds, table, renderEditor, renderTypeIcon, toEditorValue, onAddRow, onCellChange, onClearRows, onHiddenColumnIdsChange, onOpenRow }) {
   const [search, setSearch] = React.useState("");
   const [filters, setFilters] = React.useState([]);
   const [selectedRows, setSelectedRows] = React.useState([]);
@@ -258,7 +258,11 @@ function TableView({ columns, hiddenColumnIds, table, renderEditor, renderTypeIc
 
   return React.createElement(
     "div",
-    { className: "workspace-table-view" },
+    {
+      className: "workspace-table-view",
+      hidden: Boolean(hidden),
+      "aria-hidden": hidden ? "true" : undefined
+    },
     React.createElement(
       "div",
       { className: "workspace-table-toolbar" },
@@ -434,10 +438,30 @@ export function WorkspaceSheetView({
   const hasTimeline = columns.some((column) => column.type === "date" && column.dateTimelineRole === "start")
     && columns.some((column) => column.type === "date" && column.dateTimelineRole === "end");
   const [activeView, setActiveView] = React.useState("deck");
+  const [tableMounted, setTableMounted] = React.useState(false);
 
   React.useEffect(() => {
     setActiveView("deck");
+    setTableMounted(false);
   }, [selectedSheetGid]);
+
+  React.useEffect(() => {
+    if (loading || !table || tableMounted) return undefined;
+    let cancelled = false;
+    const mountTable = () => {
+      if (!cancelled) setTableMounted(true);
+    };
+    const requestIdleCallback = globalThis.requestIdleCallback;
+    const handle = typeof requestIdleCallback === "function"
+      ? requestIdleCallback(mountTable, { timeout: 500 })
+      : globalThis.setTimeout(mountTable, 0);
+
+    return () => {
+      cancelled = true;
+      if (typeof requestIdleCallback === "function") globalThis.cancelIdleCallback?.(handle);
+      else globalThis.clearTimeout(handle);
+    };
+  }, [loading, selectedSheetGid, table, tableMounted]);
 
   React.useEffect(() => {
     if (activeView === "kanban" && !hasKanban) setActiveView("deck");
@@ -511,16 +535,28 @@ export function WorkspaceSheetView({
           ? React.createElement("div", { className: "workspace-browser-loading" }, React.createElement(Spin, { size: "large" }))
           : !table
             ? React.createElement(Empty, { description: "No hay datos para mostrar" })
-            : activeView === "kanban"
-              ? renderKanban(openRow, visibleColumns)
-              : activeView === "calendar"
-                ? renderCalendar(openRow, visibleColumns)
-                : activeView === "timeline"
-                  ? renderTimeline(openRow, visibleColumns)
-                  : activeView === "charts"
-                    ? renderCharts(visibleColumns)
-                    : activeView === "table" ? React.createElement(TableView, {
+            : activeView === "table"
+              ? null
+              : activeView === "kanban"
+                ? renderKanban(openRow, visibleColumns)
+                : activeView === "calendar"
+                  ? renderCalendar(openRow, visibleColumns)
+                  : activeView === "timeline"
+                    ? renderTimeline(openRow, visibleColumns)
+                    : activeView === "charts"
+                      ? renderCharts(visibleColumns)
+                      : React.createElement(DeckView, {
+                    columns: visibleColumns,
+                    table,
+                    renderTypeIcon,
+                    onAddRow,
+                    onOpenRow: openRow
+                  }),
+        !loading && table && (tableMounted || activeView === "table")
+          ? React.createElement(TableView, {
+                  key: `table:${selectedSheetGid}`,
                   columns,
+                  hidden: activeView !== "table",
                   hiddenColumnIds: hiddenColumns,
                   table,
                   renderEditor,
@@ -531,13 +567,8 @@ export function WorkspaceSheetView({
                   onClearRows,
                   onHiddenColumnIdsChange,
                   onOpenRow: openRow
-                }) : React.createElement(DeckView, {
-                  columns: visibleColumns,
-                  table,
-                  renderTypeIcon,
-                  onAddRow,
-                  onOpenRow: openRow
                 })
+          : null
       )
     )
   );

@@ -841,6 +841,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     .workspace-browser-error { flex: 0 0 auto; margin: 10px 12px 0; }
     .workspace-browser-loading { display: flex; flex: 1; align-items: center; justify-content: center; }
     .workspace-table-view { display: flex; flex: 1; min-width: 0; min-height: 0; flex-direction: column; background: var(--workspace-surface); }
+    .workspace-table-view[hidden] { display: none; }
     .workspace-table-toolbar { display: flex; flex: 0 0 auto; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--workspace-border); background: var(--workspace-surface-raised); }
     .workspace-table-filters { display: flex; min-width: 0; flex: 1; flex-wrap: wrap; align-items: center; gap: 6px; }
     .workspace-table-filter { display: flex; align-items: center; gap: 4px; padding: 3px; border: 1px solid var(--workspace-border); border-radius: 6px; background: var(--workspace-surface); }

@@ -1,6 +1,12 @@
 const STORAGE='kanban-data'
 const THEME_STORAGE='minimal-builder-theme'
 const COLUMN_MOVE_MARGIN=16
+const DEFAULT_SETTINGS={
+  columns:'3',
+  height:'600',
+  minWidth:'280',
+  view:'grid'
+}
 
 const confirmModal=
   document.querySelector('#confirm-modal')
@@ -277,6 +283,47 @@ function ajustarColumnas(){
 }
 
 
+function leerConfiguracion(){
+
+  return {
+    columns:columns.value,
+    height:height.value,
+    minWidth:minWidth.value,
+    view:view.value
+  }
+}
+
+
+function normalizarConfiguracion(settings={}){
+
+  return {
+    columns:String(settings.columns || DEFAULT_SETTINGS.columns),
+    height:String(settings.height || DEFAULT_SETTINGS.height),
+    minWidth:String(settings.minWidth || DEFAULT_SETTINGS.minWidth),
+    view:settings.view==='row' ? 'row' : 'grid'
+  }
+}
+
+
+function aplicarConfiguracion(settings){
+
+  let config=normalizarConfiguracion(settings)
+
+  columns.value=config.columns
+  height.value=config.height
+  minWidth.value=config.minWidth
+  view.value=config.view
+
+  document.documentElement.style
+    .setProperty(
+      '--height',
+      height.value+'px'
+    )
+
+  ajustarColumnas()
+}
+
+
 function leerTablero(){
 
   return [
@@ -410,15 +457,13 @@ function guardar(){
       workspace=>workspace.id===activeWorkspace
     )
 
-  if(current)
+  if(current){
     current.board=leerTablero()
+    current.settings=leerConfiguracion()
+  }
 
   let data=structuredClone({
 
-    columns:columns.value,
-    height:height.value,
-    minWidth:minWidth.value,
-    view:view.value,
     activeWorkspace,
     workspaces
   })
@@ -459,24 +504,12 @@ async function cargar(){
     aplicarTema(storedTheme)
 
 
-  columns.value=
-    data.columns || 3
-
-  height.value=
-    data.height || 600
-
-  minWidth.value=
-    data.minWidth || 280
-
-  view.value=
-    data.view==='row' ? 'row' : 'grid'
-
-
-  document.documentElement.style
-    .setProperty(
-      '--height',
-      height.value+'px'
-    )
+  let legacySettings={
+    columns:data.columns,
+    height:data.height,
+    minWidth:data.minWidth,
+    view:data.view
+  }
 
 
   workspaces=Array.isArray(data.workspaces) &&
@@ -486,14 +519,18 @@ async function cargar(){
           title:String(workspace.title || `Tablero ${index+1}`),
           board:Array.isArray(workspace.board)
             ? workspace.board
-            : []
+            : [],
+          settings:normalizarConfiguracion(
+            workspace.settings || legacySettings
+          )
         }))
       : [{
           id:'workspace-1',
           title:'Tablero 1',
           board:Array.isArray(data.board)
             ? data.board
-            : initialBoard
+            : initialBoard,
+          settings:normalizarConfiguracion(legacySettings)
         }]
 
   activeWorkspace=workspaces.some(
@@ -502,13 +539,12 @@ async function cargar(){
     ? data.activeWorkspace
     : workspaces[0].id
 
-  dibujarTablero(
-    workspaces.find(
-      workspace=>workspace.id===activeWorkspace
-    ).board
+  let current=workspaces.find(
+    workspace=>workspace.id===activeWorkspace
   )
 
-  ajustarColumnas()
+  dibujarTablero(current.board)
+  aplicarConfiguracion(current.settings)
   guardar()
 }
 
@@ -660,6 +696,7 @@ deleteContext.onclick=async()=>{
 
   if(workspace){
     let id=target.dataset.workspace
+    let deletingActive=id===activeWorkspace
     let index=workspaces.findIndex(
       item=>item.id===id
     )
@@ -676,10 +713,11 @@ deleteContext.onclick=async()=>{
         board:[{
           title:'Nueva columna',
           cards:[]
-        }]
+        }],
+        settings:normalizarConfiguracion()
       })
 
-    if(id===activeWorkspace){
+    if(deletingActive){
       let next=workspaces[
         Math.min(
           Math.max(index,0),
@@ -689,9 +727,11 @@ deleteContext.onclick=async()=>{
 
       activeWorkspace=next.id
       dibujarTablero(next.board)
+      aplicarConfiguracion(next.settings)
+    }else{
+      ajustarColumnas()
     }
 
-    ajustarColumnas()
     guardar()
     return
   }
@@ -1039,13 +1079,12 @@ workspaceTabs.addEventListener(
     activeWorkspace=
       tab.dataset.workspace
 
-    dibujarTablero(
-      workspaces.find(
-        workspace=>workspace.id===activeWorkspace
-      ).board
+    let workspace=workspaces.find(
+      item=>item.id===activeWorkspace
     )
 
-    ajustarColumnas()
+    dibujarTablero(workspace.board)
+    aplicarConfiguracion(workspace.settings)
     guardar()
   }
 )
@@ -1126,7 +1165,8 @@ document.querySelector('.add-workspace')
     board:[{
       title:'Nueva columna',
       cards:[]
-    }]
+    }],
+    settings:normalizarConfiguracion()
   })
 
   activeWorkspace=id
@@ -1135,7 +1175,9 @@ document.querySelector('.add-workspace')
     workspaces.at(-1).board
   )
 
-  ajustarColumnas()
+  aplicarConfiguracion(
+    workspaces.at(-1).settings
+  )
   guardar()
 }
 

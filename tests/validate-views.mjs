@@ -295,6 +295,18 @@ try {
   const changedChartType = await cdp.evaluate(viewExpression('return view.querySelector(".charts-canvas")?.dataset.chartType || "";'));
   if (changedChartType !== "pie") throw new Error(`Charts no cambio a Dona: ${changedChartType}`);
 
+  const backgroundTableDeadline = Date.now() + 2_000;
+  let backgroundTableMounted = false;
+  while (Date.now() < backgroundTableDeadline) {
+    backgroundTableMounted = await cdp.evaluate(viewExpression(`
+      const tableView = view.querySelector('.workspace-table-view');
+      return Boolean(tableView?.hidden && tableView.querySelector('[data-workspace-row="2"]'));
+    `));
+    if (backgroundTableMounted) break;
+    await delay(40);
+  }
+  if (!backgroundTableMounted) throw new Error("Tabla no se monto en segundo plano despues de cargar Deck");
+
   await cdp.evaluate(viewExpression('view.querySelector("[data-workspace-view=table]").click();'));
   const workspaceRowsDeadline = Date.now() + 3_000;
   while (Date.now() < workspaceRowsDeadline) {
@@ -321,6 +333,29 @@ try {
   `));
   if (!directEditors.allDirect || directEditors.actionsZIndex <= directEditors.editorZIndex || JSON.stringify(directEditors.headerActions) !== JSON.stringify(["cancel", "save", "state", "theme", "close"])) {
     throw new Error(`Tabla no mantuvo los editores directos debajo de sus acciones: ${JSON.stringify(directEditors)}`);
+  }
+  await cdp.evaluate(viewExpression(`
+    const tableView = view.querySelector('.workspace-table-view');
+    const scroll = tableView.querySelector('.workspace-table-scroll');
+    scroll.scrollLeft = 37;
+    view.__workspaceTableInstance = tableView;
+    view.querySelector('[data-workspace-view=deck]').click();
+  `));
+  await delay(80);
+  const hiddenTable = await cdp.evaluate(viewExpression(`return {
+    same: view.querySelector('.workspace-table-view') === view.__workspaceTableInstance,
+    hidden: view.querySelector('.workspace-table-view').hidden,
+    scrollLeft: view.querySelector('.workspace-table-scroll').scrollLeft
+  };`));
+  await cdp.evaluate(viewExpression(`view.querySelector('[data-workspace-view=table]').click();`));
+  await delay(80);
+  const retainedTable = await cdp.evaluate(viewExpression(`return {
+    same: view.querySelector('.workspace-table-view') === view.__workspaceTableInstance,
+    hidden: view.querySelector('.workspace-table-view').hidden,
+    scrollLeft: view.querySelector('.workspace-table-scroll').scrollLeft
+  };`));
+  if (!hiddenTable.same || !hiddenTable.hidden || !retainedTable.same || retainedTable.hidden || retainedTable.scrollLeft !== 37) {
+    throw new Error(`Tabla se volvio a montar al cambiar de vista: ${JSON.stringify(retainedTable)}`);
   }
   await cdp.evaluate(viewExpression(`
     const row = view.querySelector('[data-workspace-row="2"]');
