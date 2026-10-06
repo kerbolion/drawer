@@ -21,7 +21,8 @@ import {
   UnorderedListOutlined
 } from "@ant-design/icons";
 
-const PAGE_SIZES = [10, 20, 30, 50];
+const PAGE_SIZES = [10, 20, 30, 40, 50];
+const EMPTY_ROWS = [];
 
 function text(value) {
   return String(value ?? "");
@@ -29,6 +30,38 @@ function text(value) {
 
 function normalized(value) {
   return text(value).normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+}
+
+function useDebouncedValue(value, delay = 500) {
+  const [debouncedValue, setDebouncedValue] = React.useState(value);
+
+  React.useEffect(() => {
+    const timeoutId = globalThis.setTimeout(() => setDebouncedValue(value), delay);
+    return () => globalThis.clearTimeout(timeoutId);
+  }, [delay, value]);
+
+  return debouncedValue;
+}
+
+function useStableEvent(callback) {
+  const callbackRef = React.useRef(callback);
+  React.useLayoutEffect(() => {
+    callbackRef.current = callback;
+  }, [callback]);
+  return React.useCallback((...args) => callbackRef.current(...args), []);
+}
+
+function buildRowsSearchIndex(rows, columns) {
+  return new Map(rows.map((row) => [
+    String(row.number),
+    normalized(columns.map((column) => row.cells[column.index]).join(" "))
+  ]));
+}
+
+function filterRowsBySearchIndex(rows, search, searchIndex) {
+  const query = normalized(search);
+  if (!query) return rows;
+  return rows.filter((row) => (searchIndex.get(String(row.number)) || "").includes(query));
 }
 
 function recordTitle(row, columns) {
@@ -96,6 +129,11 @@ const WorkspaceCellEditor = React.memo(function WorkspaceCellEditor({ property, 
     setEditorValue(toEditorValue(rawValue, property));
   }, [property, rawValue, row, toEditorValue]);
 
+  const handleChange = React.useCallback((nextValue) => {
+    setEditorValue(nextValue);
+    onCommit(row, property, nextValue);
+  }, [onCommit, property, row]);
+
   return React.createElement(
     "div",
     {
@@ -108,11 +146,93 @@ const WorkspaceCellEditor = React.memo(function WorkspaceCellEditor({ property, 
     renderEditor(
       property,
       editorValue,
-      (nextValue) => {
-        setEditorValue(nextValue);
-        onCommit(row, property, nextValue);
-      }
+      handleChange
     )
+  );
+});
+
+const WorkspaceTableRow = React.memo(function WorkspaceTableRow({
+  onCellChange,
+  onClearRows,
+  onOpenRow,
+  onToggleSelected,
+  renderEditor,
+  row,
+  selected,
+  toEditorValue,
+  visibleColumns
+}) {
+  return React.createElement(
+    "tr",
+    { "data-workspace-row": String(row.number) },
+    React.createElement("td", { className: "workspace-table-select" }, React.createElement(Checkbox, {
+      checked: selected,
+      onChange: (event) => onToggleSelected(row.number, event.target.checked)
+    })),
+    React.createElement("td", { className: "workspace-table-row-number" }, String(row.number)),
+    ...visibleColumns.map((property) => React.createElement(
+      "td",
+      { key: `${property.id}:${property.index}`, "data-column-id": property.id },
+      React.createElement(WorkspaceCellEditor, {
+        property,
+        rawValue: row.cells[property.index] ?? "",
+        row,
+        renderEditor,
+        toEditorValue,
+        onCommit: onCellChange
+      })
+    )),
+    React.createElement(
+      "td",
+      { className: "workspace-table-actions" },
+      React.createElement(Button, {
+        size: "small",
+        icon: React.createElement(FileTextOutlined),
+        "data-workspace-open-row": String(row.number),
+        onClick: () => onOpenRow(row.number)
+      }, "Abrir"),
+      React.createElement(Button, {
+        danger: true,
+        type: "text",
+        size: "small",
+        icon: React.createElement(DeleteOutlined),
+        "aria-label": `Limpiar fila ${row.number}`,
+        onClick: () => onClearRows([row.number])
+      })
+    )
+  );
+});
+
+const WorkspaceTablePage = React.memo(function WorkspaceTablePage({
+  active,
+  onCellChange,
+  onClearRows,
+  onOpenRow,
+  onToggleSelected,
+  renderEditor,
+  rows,
+  selectedSet,
+  toEditorValue,
+  visibleColumns
+}) {
+  return React.createElement(
+    "tbody",
+    {
+      hidden: !active,
+      "aria-hidden": active ? undefined : "true"
+    },
+    ...rows.map((row) => React.createElement(WorkspaceTableRow, {
+      key: row.number,
+      onCellChange,
+      onClearRows,
+      onOpenRow,
+      onToggleSelected,
+      renderEditor,
+      row,
+      selected: selectedSet.has(row.number),
+      toEditorValue,
+      visibleColumns
+    }))
   );
 });
 
@@ -232,29 +352,129 @@ function DeckView({ columns, table, renderTypeIcon, onAddRow, onOpenRow }) {
 
 function TableView({ columns, hidden, hiddenColumnIds, table, renderEditor, renderTypeIcon, toEditorValue, onAddRow, onCellChange, onClearRows, onHiddenColumnIdsChange, onOpenRow }) {
   const [search, setSearch] = React.useState("");
+  const debouncedSearch = useDebouncedValue(search, 500);
   const [filters, setFilters] = React.useState([]);
   const [selectedRows, setSelectedRows] = React.useState([]);
   const [page, setPage] = React.useState(1);
   const [pageSize, setPageSize] = React.useState(20);
-  const hiddenColumns = hiddenColumnIds || [];
-  const visibleColumns = columns.filter((column) => !hiddenColumns.includes(column.id));
-  const rows = table?.rows || [];
-  const query = normalized(search);
-  const filteredRows = rows.filter((row) => {
-    if (query && !normalized(row.cells.join(" ")).includes(query)) return false;
-    return filters.every((filter) => {
-      const property = columns.find((column) => column.id === filter.columnId);
-      if (!property || !normalized(filter.value)) return true;
-      return normalized(row.cells[property.index]).includes(normalized(filter.value));
-    });
-  });
+  const [mountedPages, setMountedPages] = React.useState([1]);
+  const hiddenColumnsKey = (hiddenColumnIds || []).join("\u0000");
+  const hiddenColumns = React.useMemo(() => hiddenColumnIds || [], [hiddenColumnsKey]);
+  const hiddenColumnSet = React.useMemo(() => new Set(hiddenColumns), [hiddenColumns]);
+  const visibleColumns = React.useMemo(
+    () => columns.filter((column) => !hiddenColumnSet.has(column.id)),
+    [columns, hiddenColumnSet]
+  );
+  const columnsById = React.useMemo(
+    () => new Map(columns.map((column) => [column.id, column])),
+    [columns]
+  );
+  const rows = table?.rows || EMPTY_ROWS;
+  const searchIndex = React.useMemo(
+    () => buildRowsSearchIndex(rows, visibleColumns),
+    [rows, visibleColumns]
+  );
+  const searchedRows = React.useMemo(
+    () => filterRowsBySearchIndex(rows, debouncedSearch, searchIndex),
+    [debouncedSearch, rows, searchIndex]
+  );
+  const filteredRows = React.useMemo(() => searchedRows.filter((row) => filters.every((filter) => {
+    const property = columnsById.get(filter.columnId);
+    const filterValue = normalized(filter.value);
+    if (!property || !filterValue) return true;
+    return normalized(row.cells[property.index]).includes(filterValue);
+  })), [columnsById, filters, searchedRows]);
   const totalPages = Math.max(1, Math.ceil(filteredRows.length / pageSize));
   const safePage = Math.min(page, totalPages);
-  const pageRows = filteredRows.slice((safePage - 1) * pageSize, safePage * pageSize);
-  const pageSelected = pageRows.length > 0 && pageRows.every((row) => selectedRows.includes(row.number));
+  const pageRows = React.useMemo(
+    () => filteredRows.slice((safePage - 1) * pageSize, safePage * pageSize),
+    [filteredRows, pageSize, safePage]
+  );
+  const mountedPageRows = React.useMemo(() => new Map(mountedPages.map((mountedPage) => [
+    mountedPage,
+    filteredRows.slice((mountedPage - 1) * pageSize, mountedPage * pageSize)
+  ])), [filteredRows, mountedPages, pageSize]);
+  const pageRowNumbers = React.useMemo(() => pageRows.map((row) => row.number), [pageRows]);
+  const selectedSet = React.useMemo(() => new Set(selectedRows), [selectedRows]);
+  const selectedPageCount = React.useMemo(
+    () => pageRowNumbers.filter((number) => selectedSet.has(number)).length,
+    [pageRowNumbers, selectedSet]
+  );
+  const pageSelected = pageRows.length > 0 && selectedPageCount === pageRows.length;
+  const stableRenderEditor = useStableEvent(renderEditor);
+  const stableToEditorValue = useStableEvent(toEditorValue);
+  const stableOnAddRow = useStableEvent(onAddRow);
+  const stableOnCellChange = useStableEvent(onCellChange);
+  const stableOnClearRows = useStableEvent(onClearRows);
+  const stableOnHiddenColumnIdsChange = useStableEvent(onHiddenColumnIdsChange);
+  const stableOnOpenRow = useStableEvent(onOpenRow);
 
-  React.useEffect(() => setPage(1), [search, pageSize, filters.map((filter) => `${filter.columnId}:${filter.value}`).join("|")]);
+  React.useEffect(() => {
+    setPage(1);
+    setMountedPages([1]);
+  }, [debouncedSearch, pageSize, filters]);
   React.useEffect(() => setSelectedRows([]), [table?.name]);
+
+  React.useEffect(() => {
+    setMountedPages((current) => current.filter((mountedPage) => mountedPage <= totalPages));
+  }, [totalPages]);
+
+  React.useEffect(() => {
+    const nextPage = safePage + 1;
+    if (nextPage > totalPages || mountedPages.includes(nextPage)) return undefined;
+    let cancelled = false;
+    const mountNextPage = () => {
+      if (!cancelled) {
+        setMountedPages((current) => current.includes(nextPage) ? current : [...current, nextPage].sort((left, right) => left - right));
+      }
+    };
+    const requestIdleCallback = globalThis.requestIdleCallback;
+    const handle = typeof requestIdleCallback === "function"
+      ? requestIdleCallback(mountNextPage, { timeout: 500 })
+      : globalThis.setTimeout(mountNextPage, 0);
+
+    return () => {
+      cancelled = true;
+      if (typeof requestIdleCallback === "function") globalThis.cancelIdleCallback?.(handle);
+      else globalThis.clearTimeout(handle);
+    };
+  }, [mountedPages, safePage, totalPages]);
+
+  const toggleSelected = React.useCallback((rowNumber, checked) => {
+    setSelectedRows((current) => checked
+      ? Array.from(new Set([...current, rowNumber]))
+      : current.filter((number) => number !== rowNumber));
+  }, []);
+
+  const togglePageSelected = React.useCallback((checked) => {
+    setSelectedRows((current) => checked
+      ? Array.from(new Set([...current, ...pageRowNumbers]))
+      : current.filter((number) => !pageRowNumbers.includes(number)));
+  }, [pageRowNumbers]);
+
+  const changeColumnVisibility = React.useCallback((columnId, checked) => {
+    stableOnHiddenColumnIdsChange(checked
+      ? hiddenColumns.filter((id) => id !== columnId)
+      : [...hiddenColumns, columnId]);
+  }, [hiddenColumns, stableOnHiddenColumnIdsChange]);
+
+  const clearSelected = React.useCallback(async () => {
+    await stableOnClearRows(selectedRows);
+    setSelectedRows([]);
+  }, [selectedRows, stableOnClearRows]);
+
+  const handlePaginationChange = React.useCallback((nextPage, nextSize) => {
+    if (nextSize !== pageSize) {
+      setPageSize(nextSize);
+      setPage(1);
+      setMountedPages([1]);
+      return;
+    }
+    setMountedPages((current) => current.includes(nextPage)
+      ? current
+      : [...current, nextPage].sort((left, right) => left - right));
+    setPage(nextPage);
+  }, [pageSize]);
 
   return React.createElement(
     "div",
@@ -285,25 +505,20 @@ function TableView({ columns, hidden, hiddenColumnIds, table, renderEditor, rend
           ...columns.map((column) => React.createElement(Checkbox, {
             checked: !hiddenColumns.includes(column.id),
             key: `${column.id}:${column.index}`,
-            onChange: (event) => onHiddenColumnIdsChange(event.target.checked
-              ? hiddenColumns.filter((id) => id !== column.id)
-              : [...hiddenColumns, column.id])
+            onChange: (event) => changeColumnVisibility(column.id, event.target.checked)
           }, column.name))
         )
       ),
       selectedRows.length ? React.createElement(Button, {
         danger: true,
         icon: React.createElement(DeleteOutlined),
-        onClick: async () => {
-          await onClearRows(selectedRows);
-          setSelectedRows([]);
-        }
+        onClick: clearSelected
       }, `Limpiar (${selectedRows.length})`) : null,
       React.createElement(Button, {
         type: "primary",
         icon: React.createElement(PlusOutlined),
         "data-workspace-add-row": "",
-        onClick: () => void onAddRow()
+        onClick: () => void stableOnAddRow()
       }, "Nuevo registro")
     ),
     React.createElement(
@@ -320,10 +535,8 @@ function TableView({ columns, hidden, hiddenColumnIds, table, renderEditor, rend
             null,
             React.createElement("th", { className: "workspace-table-select" }, React.createElement(Checkbox, {
               checked: pageSelected,
-              indeterminate: pageRows.some((row) => selectedRows.includes(row.number)) && !pageSelected,
-              onChange: (event) => setSelectedRows((current) => event.target.checked
-                ? [...new Set([...current, ...pageRows.map((row) => row.number)])]
-                : current.filter((number) => !pageRows.some((row) => row.number === number)))
+              indeterminate: selectedPageCount > 0 && !pageSelected,
+              onChange: (event) => togglePageSelected(event.target.checked)
             })),
             React.createElement("th", { className: "workspace-table-row-number" }, "#"),
             ...visibleColumns.map((column) => React.createElement(
@@ -340,55 +553,23 @@ function TableView({ columns, hidden, hiddenColumnIds, table, renderEditor, rend
             React.createElement("th", { className: "workspace-table-actions" }, "Acciones")
           )
         ),
-        React.createElement(
-          "tbody",
-          null,
-          ...(pageRows.length ? pageRows.map((row) => React.createElement(
-            "tr",
-            { key: row.number, "data-workspace-row": String(row.number) },
-            React.createElement("td", { className: "workspace-table-select" }, React.createElement(Checkbox, {
-              checked: selectedRows.includes(row.number),
-              onChange: (event) => setSelectedRows((current) => event.target.checked
-                ? [...current, row.number]
-                : current.filter((number) => number !== row.number))
-            })),
-            React.createElement("td", { className: "workspace-table-row-number" }, String(row.number)),
-            ...visibleColumns.map((property) => React.createElement(
-              "td",
-              { key: `${property.id}:${property.index}`, "data-column-id": property.id },
-              React.createElement(WorkspaceCellEditor, {
-                property,
-                rawValue: row.cells[property.index] || "",
-                row,
-                renderEditor,
-                toEditorValue,
-                onCommit: onCellChange
-              })
-            )),
-            React.createElement(
-              "td",
-              { className: "workspace-table-actions" },
-              React.createElement(Button, {
-                size: "small",
-                icon: React.createElement(FileTextOutlined),
-                "data-workspace-open-row": String(row.number),
-                onClick: () => onOpenRow(row.number)
-              }, "Abrir"),
-              React.createElement(Button, {
-                danger: true,
-                type: "text",
-                size: "small",
-                icon: React.createElement(DeleteOutlined),
-                "aria-label": `Limpiar fila ${row.number}`,
-                onClick: () => onClearRows([row.number])
-              })
-            )
-          )) : [React.createElement("tr", { key: "empty" }, React.createElement(
+        ...(filteredRows.length ? mountedPages.map((mountedPage) => React.createElement(WorkspaceTablePage, {
+          key: mountedPage,
+          active: mountedPage === safePage,
+          onCellChange: stableOnCellChange,
+          onClearRows: stableOnClearRows,
+          onOpenRow: stableOnOpenRow,
+          onToggleSelected: toggleSelected,
+          renderEditor: stableRenderEditor,
+          rows: mountedPageRows.get(mountedPage) || EMPTY_ROWS,
+          selectedSet,
+          toEditorValue: stableToEditorValue,
+          visibleColumns
+        })) : [React.createElement("tbody", { key: "empty" }, React.createElement("tr", null, React.createElement(
             "td",
             { colSpan: visibleColumns.length + 3 },
             React.createElement(Empty, { image: Empty.PRESENTED_IMAGE_SIMPLE, description: "No hay registros para mostrar" })
-          ))])
-        )
+          )))])
       )
     ),
     React.createElement(
@@ -401,10 +582,7 @@ function TableView({ columns, hidden, hiddenColumnIds, table, renderEditor, rend
         pageSizeOptions: PAGE_SIZES,
         showSizeChanger: true,
         total: filteredRows.length,
-        onChange: (nextPage, nextSize) => {
-          setPage(nextPage);
-          setPageSize(nextSize);
-        }
+        onChange: handlePaginationChange
       })
     )
   );

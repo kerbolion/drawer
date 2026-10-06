@@ -852,6 +852,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     .workspace-table-columns-menu { position: absolute; z-index: 8; top: calc(100% + 5px); right: 0; display: grid; width: 220px; max-height: 320px; gap: 8px; overflow: auto; padding: 12px; border: 1px solid var(--workspace-border); border-radius: 8px; background: var(--workspace-surface); box-shadow: 0 12px 32px var(--workspace-shadow); }
     .workspace-table-scroll { flex: 1; min-width: 0; min-height: 0; overflow: auto; }
     .workspace-data-table { width: max-content; min-width: 100%; border-collapse: separate; border-spacing: 0; table-layout: fixed; }
+    .workspace-data-table tbody[hidden] { display: none; }
     .workspace-data-table th { position: sticky; z-index: 2; top: 0; min-width: 190px; padding: 9px 10px; border-right: 1px solid var(--workspace-border-subtle); border-bottom: 1px solid var(--workspace-border); background: var(--workspace-surface-muted); color: var(--workspace-text-secondary); font-size: 12px; font-weight: 700; text-align: left; }
     .workspace-data-table td { position: relative; z-index: 0; min-width: 190px; max-width: 320px; height: 48px; overflow: hidden; padding: 5px 8px; border-right: 1px solid var(--workspace-border-subtle); border-bottom: 1px solid var(--workspace-border-subtle); background: var(--workspace-surface); vertical-align: middle; }
     .workspace-data-table tbody tr:hover td { background: var(--workspace-surface-raised); }
