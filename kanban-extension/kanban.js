@@ -1267,11 +1267,9 @@ function actualizarEscalaLienzo(){
 }
 
 
-function obtenerLimitesTablerosLienzo(){
-
-  let boards=[
-    ...kanban.querySelectorAll('.overview-workspace')
-  ]
+function obtenerLimitesTablerosLienzo(
+  boards=[...kanban.querySelectorAll('.overview-workspace')]
+){
 
   if(!boards.length)
     return null
@@ -4259,6 +4257,16 @@ document.addEventListener(
   'dblclick',
   e=>{
 
+    if(canvasMode){
+      let board=e.target.closest('.overview-workspace')
+
+      if(board && kanban.contains(board)){
+        e.preventDefault()
+        ajustarLienzoA([board],{ampliar:true})
+        return
+      }
+    }
+
     if(
       !e.target.matches('.card,h3,.card-group-title')
     )
@@ -4579,12 +4587,18 @@ canvasScale.onclick=()=>{
 }
 
 
-canvasFit.onclick=()=>{
+function ajustarLienzoA(
+  boards,
+  {ampliar=false}={}
+){
 
   if(!canvasPanzoom)
     return
 
-  let bounds=obtenerLimitesTablerosLienzo()
+  let targets=(boards || [
+    ...kanban.querySelectorAll('.overview-workspace')
+  ]).filter(board=>board?.isConnected)
+  let bounds=obtenerLimitesTablerosLienzo(targets)
 
   if(!bounds)
     return
@@ -4594,7 +4608,7 @@ canvasFit.onclick=()=>{
   let scale=Math.min(
     Math.max(1,canvasViewport.clientWidth-horizontalPadding)/bounds.width,
     Math.max(1,canvasViewport.clientHeight-verticalPadding)/bounds.height,
-    1
+    ampliar ? 2.5 : 1
   )
   scale=Math.max(.35,scale)
   let panzoom=canvasPanzoom
@@ -4605,14 +4619,10 @@ canvasFit.onclick=()=>{
     if(canvasPanzoom!==panzoom)
       return
 
-    let boards=[
-      ...kanban.querySelectorAll('.overview-workspace')
-    ]
-
-    if(!boards.length)
+    if(!targets.length)
       return
 
-    let rects=boards.map(board=>board.getBoundingClientRect())
+    let rects=targets.map(board=>board.getBoundingClientRect())
     let left=Math.min(...rects.map(rect=>rect.left))
     let top=Math.min(...rects.map(rect=>rect.top))
     let right=Math.max(...rects.map(rect=>rect.right))
@@ -4635,6 +4645,11 @@ canvasFit.onclick=()=>{
       {animate:true}
     )
   })
+}
+
+
+canvasFit.onclick=()=>{
+  ajustarLienzoA()
 }
 
 

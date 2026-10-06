@@ -1563,6 +1563,35 @@ try {
         (fitViewportRect.top+fitViewportRect.bottom)/2
       )
     }
+    let generalFitScale=canvasPanzoom.getScale()
+
+    restoredBoard.querySelector('.card').dispatchEvent(
+      new MouseEvent('dblclick',{
+        bubbles:true,
+        cancelable:true,
+        clientX:fitBounds.left+20,
+        clientY:fitBounds.top+20
+      })
+    )
+    await new Promise(resolve=>setTimeout(resolve,350))
+    let focusedRect=restoredBoard.getBoundingClientRect()
+    let focusedViewportRect=viewport.getBoundingClientRect()
+    let focusedContained=
+      focusedRect.left>=focusedViewportRect.left-1 &&
+      focusedRect.top>=focusedViewportRect.top-1 &&
+      focusedRect.right<=focusedViewportRect.right+1 &&
+      focusedRect.bottom<=focusedViewportRect.bottom+1
+    let focusedCenterDelta={
+      x:Math.abs(
+        (focusedRect.left+focusedRect.right)/2-
+        (focusedViewportRect.left+focusedViewportRect.right)/2
+      ),
+      y:Math.abs(
+        (focusedRect.top+focusedRect.bottom)/2-
+        (focusedViewportRect.top+focusedViewportRect.bottom)/2
+      )
+    }
+    let focusedScale=canvasPanzoom.getScale()
 
     document.querySelector('.workspace-tab').click()
     await new Promise(resolve=>setTimeout(resolve,80))
@@ -1588,6 +1617,10 @@ try {
       boardAvailableHeight,
       fitContained,
       fitCenterDelta,
+      generalFitScale,
+      focusedContained,
+      focusedCenterDelta,
+      focusedScale,
       configuredColumnHeight,
       boards,
       gridAlignContent,
@@ -1638,6 +1671,10 @@ try {
     !canvasView.fitContained ||
     canvasView.fitCenterDelta.x > 2 ||
     canvasView.fitCenterDelta.y > 2 ||
+    !canvasView.focusedContained ||
+    canvasView.focusedCenterDelta.x > 2 ||
+    canvasView.focusedCenterDelta.y > 2 ||
+    canvasView.focusedScale < canvasView.generalFitScale ||
     canvasView.configuredColumnHeight !== 333 ||
     canvasView.boards !== overview.tabs ||
     canvasView.gridAlignContent !== "start" ||
