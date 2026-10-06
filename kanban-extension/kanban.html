@@ -108,6 +108,11 @@ textarea,
   background:color-mix(in srgb,var(--primary-color) 10%,var(--site-bg));
 }
 
+.view-button.active{
+  border-color:var(--primary-color);
+  background:color-mix(in srgb,var(--primary-color) 10%,var(--site-bg));
+}
+
 .workspace-count{
   min-width:22px;
   padding:2px 6px;
@@ -129,6 +134,7 @@ textarea,
 }
 
 .add-workspace,
+.view-button,
 .data-button,
 .add-column{
   border:1px solid var(--site-secondary-button-border);
@@ -137,16 +143,19 @@ textarea,
   border-radius:20px;
 }
 
-.data-control{
+.data-control,
+.view-control{
   position:relative;
   flex:none;
 }
 
-.data-button{
+.data-button,
+.view-button{
   padding:7px 10px;
 }
 
-.data-menu{
+.data-menu,
+.view-menu{
   position:absolute;
   z-index:9999;
   top:calc(100% + 6px);
@@ -159,11 +168,13 @@ textarea,
   box-shadow:0 10px 30px var(--site-shadow);
 }
 
-.data-menu[hidden]{
+.data-menu[hidden],
+.view-menu[hidden]{
   display:none;
 }
 
-.data-menu button{
+.data-menu button,
+.view-menu button{
   width:100%;
   padding:8px 10px;
   border-radius:5px;
@@ -172,8 +183,16 @@ textarea,
   text-align:left;
 }
 
-.data-menu button:hover{
+.data-menu button:hover,
+.view-menu button:hover{
   background:color-mix(in srgb,var(--site-heading) 8%,var(--site-bg));
+}
+
+#saved-views:not(:empty){
+  padding:5px 0;
+  margin:5px 0;
+  border-top:1px solid var(--site-border);
+  border-bottom:1px solid var(--site-border);
 }
 
 [data-theme-toggle]{
@@ -269,6 +288,112 @@ select{
 
 .kanban.row .column{
   height:100%;
+}
+
+.overview-workspace{
+  width:100%;
+  min-width:0;
+  height:var(--height);
+  padding:10px;
+  overflow-y:auto;
+  border:1px solid var(--site-border);
+  border-radius:8px;
+  background:color-mix(in srgb,var(--site-button-bg) 82%,var(--site-border));
+  cursor:grab;
+}
+
+.kanban.overview.row .overview-workspace{
+  height:100%;
+}
+
+.overview-workspace-header{
+  position:sticky;
+  z-index:2;
+  top:-10px;
+  display:flex;
+  gap:8px;
+  align-items:center;
+  padding:10px 0;
+  margin-top:-10px;
+  background:inherit;
+}
+
+.overview-open{
+  flex:1;
+  min-width:0;
+  margin:0;
+  padding:0;
+  overflow:hidden;
+  background:transparent;
+  color:var(--site-heading);
+  font-size:16px;
+  font-weight:700;
+  text-align:left;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+  cursor:grab;
+}
+
+.overview-workspace-placeholder{
+  height:var(--height);
+  border:2px dashed var(--primary-color);
+  border-radius:8px;
+  background:color-mix(in srgb,var(--primary-color) 5%,transparent);
+  pointer-events:none;
+}
+
+.kanban.overview.row .overview-workspace-placeholder{
+  height:100%;
+}
+
+.overview-workspace-drag-source{
+  position:fixed !important;
+  visibility:hidden;
+  pointer-events:none;
+}
+
+.overview-columns{
+  display:grid;
+  gap:10px;
+  min-height:70px;
+  padding-bottom:4px;
+  overflow-x:auto;
+}
+
+.overview-columns.grid{
+  grid-template-columns:repeat(
+    var(--board-columns),
+    minmax(var(--board-min-width),1fr)
+  );
+  align-items:start;
+}
+
+.overview-columns.row{
+  grid-auto-flow:column;
+  grid-auto-columns:minmax(var(--board-min-width),1fr);
+  grid-template-columns:none;
+  grid-template-rows:var(--board-height);
+}
+
+.kanban.overview .overview-workspace .column,
+.drag-image.overview-workspace .column{
+  height:var(--board-height);
+  min-height:0;
+  border:1px solid var(--site-border);
+  background:var(--site-bg);
+}
+
+.overview-workspace .column .cards{
+  flex:1;
+  overflow-y:auto;
+}
+
+.overview-empty{
+  padding:18px 10px;
+  border:1px dashed var(--site-border);
+  border-radius:6px;
+  color:var(--site-muted);
+  text-align:center;
 }
 
 .column{
@@ -443,6 +568,76 @@ html.is-dragging *{
   display:none;
 }
 
+.move-menu{
+  position:absolute;
+  z-index:1;
+  top:0;
+  left:calc(100% + 6px);
+  width:max-content;
+  min-width:190px;
+  max-width:320px;
+  padding:5px;
+  overflow:visible;
+  border:1px solid var(--site-border);
+  border-radius:7px;
+  background:var(--site-bg);
+  box-shadow:0 10px 30px var(--site-shadow);
+}
+
+.context-menu.open-left .move-menu{
+  right:calc(100% + 6px);
+  left:auto;
+}
+
+.move-menu[hidden]{
+  display:none;
+}
+
+.move-menu button{
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+
+.move-workspace-option{
+  position:relative;
+}
+
+.move-workspace-trigger::after{
+  content:'>';
+  float:right;
+  margin-left:18px;
+}
+
+.move-columns-menu{
+  position:absolute;
+  z-index:2;
+  top:-6px;
+  left:calc(100% + 6px);
+  display:none;
+  width:max-content;
+  min-width:190px;
+  max-width:320px;
+  max-height:min(420px,70vh);
+  padding:5px;
+  overflow-y:auto;
+  border:1px solid var(--site-border);
+  border-radius:7px;
+  background:var(--site-bg);
+  box-shadow:0 10px 30px var(--site-shadow);
+}
+
+.move-workspace-option:hover > .move-columns-menu,
+.move-workspace-option:focus-within > .move-columns-menu,
+.move-workspace-option.open > .move-columns-menu{
+  display:block;
+}
+
+.context-menu.open-left .move-columns-menu{
+  right:calc(100% + 6px);
+  left:auto;
+}
+
 .context-menu #delete-context{
   color:var(--danger);
 }
@@ -498,6 +693,31 @@ html.is-dragging *{
   padding:8px 10px;
 }
 
+.view-workspaces{
+  display:grid;
+  gap:6px;
+  max-height:260px;
+  padding:8px;
+  overflow-y:auto;
+  border:1px solid var(--site-border);
+  border-radius:6px;
+}
+
+.view-workspaces[hidden]{
+  display:none;
+}
+
+.view-workspaces label{
+  display:flex;
+  gap:8px;
+  align-items:center;
+  cursor:pointer;
+}
+
+.view-workspaces input{
+  width:auto;
+}
+
 .modal .actions{
   display:flex;
   justify-content:flex-end;
@@ -537,6 +757,21 @@ html.is-dragging *{
   <button class="add-workspace">
     + Tablero
   </button>
+
+  <div class="view-control">
+    <button class="view-button" type="button">
+      + Vista
+    </button>
+    <div class="view-menu" hidden>
+      <button id="show-overview" type="button">
+        Todos los tableros
+      </button>
+      <div id="saved-views"></div>
+      <button id="new-view" type="button">
+        Nueva vista
+      </button>
+    </div>
+  </div>
 
   <div class="data-control">
     <button class="data-button" type="button">
@@ -662,9 +897,13 @@ html.is-dragging *{
   <button id="duplicate-context" type="button">
     Duplicar
   </button>
+  <button id="move-context" type="button">
+    Mover a...
+  </button>
   <button id="delete-context" type="button">
     Eliminar
   </button>
+  <div class="move-menu" id="move-menu" hidden></div>
 </div>
 
 <div class="modal-backdrop" id="confirm-modal" hidden>
@@ -673,6 +912,7 @@ html.is-dragging *{
     <p id="confirm-message">Escribe el nombre del tablero.</p>
     <input id="confirm-input" autocomplete="off">
     <input id="confirm-file" type="file" accept=".json,application/json" hidden>
+    <div class="view-workspaces" id="view-workspaces" hidden></div>
     <div class="actions">
       <button id="cancel-confirm" type="button">Cancelar</button>
       <button class="primary" id="accept-confirm" type="button">Guardar</button>

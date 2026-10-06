@@ -22,6 +22,9 @@ const confirmInput=
 const confirmFile=
   document.querySelector('#confirm-file')
 
+const viewWorkspaces=
+  document.querySelector('#view-workspaces')
+
 const cancelConfirm=
   document.querySelector('#cancel-confirm')
 
@@ -43,8 +46,32 @@ const pasteContext=
 const duplicateContext=
   document.querySelector('#duplicate-context')
 
+const moveContext=
+  document.querySelector('#move-context')
+
+const moveMenu=
+  document.querySelector('#move-menu')
+
 const deleteContext=
   document.querySelector('#delete-context')
+
+const viewControl=
+  document.querySelector('.view-control')
+
+const viewButton=
+  document.querySelector('.view-button')
+
+const viewMenu=
+  document.querySelector('.view-menu')
+
+const showOverview=
+  document.querySelector('#show-overview')
+
+const savedViews=
+  document.querySelector('#saved-views')
+
+const newView=
+  document.querySelector('#new-view')
 
 const dataControl=
   document.querySelector('.data-control')
@@ -64,12 +91,18 @@ const importData=
 let resolveModal
 let modalMode='input'
 let contextTarget
+let overviewMode=false
+let overviewSettings=normalizarConfiguracion()
+let views=[]
+let activeViewId='all'
 
 
 function cerrarModal(value=null){
 
   confirmModal.hidden=true
   confirmFile.value=''
+  viewWorkspaces.hidden=true
+  viewWorkspaces.replaceChildren()
   resolveModal?.(value)
   resolveModal=null
 }
@@ -83,6 +116,7 @@ function pedirNombre(title,message,value=''){
   confirmInput.value=value
   confirmInput.hidden=false
   confirmFile.hidden=true
+  viewWorkspaces.hidden=true
   cancelConfirm.hidden=false
   acceptConfirm.textContent='Guardar'
   acceptConfirm.className='primary'
@@ -107,6 +141,7 @@ function pedirConfirmacion(title,message){
   confirmInput.value=''
   confirmInput.hidden=true
   confirmFile.hidden=true
+  viewWorkspaces.hidden=true
   cancelConfirm.hidden=false
   acceptConfirm.textContent='Eliminar'
   acceptConfirm.className='danger'
@@ -132,6 +167,7 @@ function pedirArchivo(){
   confirmInput.hidden=true
   confirmFile.value=''
   confirmFile.hidden=false
+  viewWorkspaces.hidden=true
   cancelConfirm.hidden=false
   acceptConfirm.textContent='Importar'
   acceptConfirm.className='primary'
@@ -154,6 +190,7 @@ function mostrarMensaje(title,message){
   confirmMessage.textContent=message
   confirmInput.hidden=true
   confirmFile.hidden=true
+  viewWorkspaces.hidden=true
   cancelConfirm.hidden=true
   acceptConfirm.textContent='Aceptar'
   acceptConfirm.className='primary'
@@ -169,9 +206,51 @@ function mostrarMensaje(title,message){
 }
 
 
+function pedirVista(){
+
+  modalMode='view'
+  confirmTitle.textContent='Nueva vista'
+  confirmMessage.textContent=
+    'Escribe un nombre y selecciona los tableros que quieres incluir.'
+  confirmInput.value=`Vista ${views.length+1}`
+  confirmInput.hidden=false
+  confirmFile.hidden=true
+  viewWorkspaces.hidden=false
+  cancelConfirm.hidden=false
+  acceptConfirm.textContent='Crear vista'
+  acceptConfirm.className='primary'
+  viewWorkspaces.replaceChildren(
+    ...workspaces.map(workspace=>{
+      let label=document.createElement('label')
+      let checkbox=document.createElement('input')
+      let text=document.createElement('span')
+
+      checkbox.type='checkbox'
+      checkbox.value=workspace.id
+      text.textContent=workspace.title
+      label.append(checkbox,text)
+      return label
+    })
+  )
+  confirmModal.hidden=false
+
+  requestAnimationFrame(()=>{
+    confirmInput.focus()
+    confirmInput.select()
+  })
+
+  return new Promise(resolve=>{
+    resolveModal=resolve
+  })
+}
+
+
 function cerrarMenuContextual(){
 
   contextMenu.hidden=true
+  contextMenu.classList.remove('open-left')
+  moveMenu.hidden=true
+  moveMenu.replaceChildren()
   contextTarget=null
 }
 
@@ -217,6 +296,24 @@ acceptConfirm.onclick=()=>{
     return
   }
 
+  if(modalMode==='view'){
+    let workspaceIds=[
+      ...viewWorkspaces.querySelectorAll(
+        'input:checked'
+      )
+    ].map(input=>input.value)
+
+    if(!workspaceIds.length)
+      return
+
+    cerrarModal({
+      title:confirmInput.value.trim() ||
+        `Vista ${views.length+1}`,
+      workspaceIds
+    })
+    return
+  }
+
   cerrarModal(
     modalMode==='confirm' ||
     modalMode==='message'
@@ -233,7 +330,10 @@ confirmModal.onclick=e=>{
 
 confirmInput.onkeydown=e=>{
 
-  if(e.key==='Enter')
+  if(e.key==='Enter' && modalMode==='view'){
+    e.preventDefault()
+    acceptConfirm.click()
+  }else if(e.key==='Enter')
     cerrarModal(
       modalMode==='confirm'
         ? true
@@ -302,8 +402,12 @@ let cardPointerDirection=0
 let cardPointerContainer
 let columnDropTarget
 let columnPlaceholders=[]
-let columnOriginalOrder=[]
+let columnOriginalLayouts=[]
 let columnOverPlaceholder=false
+let overviewDropTarget
+let overviewPlaceholder
+let overviewOriginalOrder=[]
+let overviewOverPlaceholder=false
 let internalClipboard
 let workspaces=[]
 let activeWorkspace=''
@@ -625,9 +729,15 @@ function aplicarConfiguracion(settings){
 
 function leerTablero(){
 
-  return [
-    ...kanban.querySelectorAll('.column')
-  ].map(column=>({
+  return leerColumnas(kanban)
+}
+
+
+function leerColumnas(container){
+
+  return [...container.children]
+    .filter(element=>element.matches('.column'))
+    .map(column=>({
 
     title:
       column.querySelector('h3').innerHTML,
@@ -635,7 +745,7 @@ function leerTablero(){
     cards:[
       ...column.querySelectorAll('.card')
     ].map(card=>card.innerHTML)
-  }))
+    }))
 }
 
 
@@ -692,6 +802,160 @@ function actualizarContadoresColumnas(){
     column.querySelector('.column-count').textContent=
       column.querySelectorAll('.card').length
   })
+
+  kanban.querySelectorAll('.overview-workspace')
+    .forEach(workspace=>{
+      workspace.querySelector(
+        '.overview-workspace-header .workspace-count'
+      ).textContent=
+        workspace.querySelectorAll('.card').length
+    })
+}
+
+
+function normalizarVista(item,index=0){
+
+  return {
+    id:String(
+      item?.id ||
+      crypto.randomUUID?.() ||
+      `view-${Date.now()}-${index}`
+    ),
+    title:String(item?.title || `Vista ${index+1}`),
+    workspaceIds:Array.isArray(item?.workspaceIds)
+      ? [...new Set(item.workspaceIds.map(String))]
+      : [],
+    settings:normalizarConfiguracion(item?.settings)
+  }
+}
+
+
+function obtenerVistaActiva(){
+
+  return activeViewId==='all'
+    ? null
+    : views.find(view=>view.id===activeViewId) || null
+}
+
+
+function dibujarMenuVistas(){
+
+  savedViews.replaceChildren(
+    ...views.map(viewItem=>{
+      let button=document.createElement('button')
+
+      button.type='button'
+      button.dataset.view=viewItem.id
+      button.textContent=viewItem.title
+      return button
+    })
+  )
+}
+
+
+function crearVistaGeneral(){
+
+  let customView=obtenerVistaActiva()
+  let allowed=customView
+    ? new Set(customView.workspaceIds)
+    : null
+
+  return workspaces
+    .filter(workspace=>!allowed || allowed.has(workspace.id))
+    .map(workspace=>{
+    let section=document.createElement('section')
+    let header=document.createElement('header')
+    let title=document.createElement('h2')
+    let count=document.createElement('span')
+    let columnsContainer=document.createElement('div')
+    let boardSettings=normalizarConfiguracion(
+      workspace.settings
+    )
+
+    section.className='overview-workspace'
+    section.dataset.workspace=workspace.id
+    header.className='overview-workspace-header'
+    title.className='overview-open'
+    title.textContent=workspace.title
+    count.className='workspace-count'
+    count.textContent=(workspace.board || []).reduce(
+      (total,column)=>total+(column.cards || []).length,
+      0
+    )
+    columnsContainer.className=
+      `overview-columns ${boardSettings.view}`
+    columnsContainer.style.setProperty(
+      '--board-columns',
+      boardSettings.columns
+    )
+    columnsContainer.style.setProperty(
+      '--board-min-width',
+      `${boardSettings.minWidth}px`
+    )
+    columnsContainer.style.setProperty(
+      '--board-height',
+      `${boardSettings.height}px`
+    )
+
+    ;(workspace.board || []).forEach((item,index)=>{
+      let column=crearColumna(item)
+
+      column.dataset.columnIndex=index
+      columnsContainer.append(column)
+    })
+
+    if(!columnsContainer.children.length){
+      let empty=document.createElement('div')
+
+      empty.className='overview-empty'
+      empty.textContent='Sin columnas'
+      columnsContainer.append(empty)
+    }
+
+    header.append(title,count)
+    section.append(header,columnsContainer)
+    return section
+    })
+}
+
+
+function sincronizarDesdeVistaGeneral(){
+
+  let byId=new Map(
+    workspaces.map(workspace=>[workspace.id,workspace])
+  )
+
+  kanban.querySelectorAll('.overview-workspace')
+    .forEach(section=>{
+      let workspace=byId.get(section.dataset.workspace)
+
+      if(workspace)
+        workspace.board=leerColumnas(
+          section.querySelector('.overview-columns')
+        )
+    })
+
+  workspaceBoards.clear()
+  boardPreparationVersion++
+}
+
+
+function dibujarVistaGeneral(viewId=activeViewId){
+
+  limpiarSeleccion()
+  activeViewId=
+    viewId==='all' || views.some(view=>view.id===viewId)
+      ? viewId
+      : 'all'
+  overviewMode=true
+  kanban.classList.add('overview')
+  kanban.replaceChildren(...crearVistaGeneral())
+  viewButton.classList.add('active')
+  document.querySelector('.add-column').hidden=true
+  aplicarConfiguracion(
+    obtenerVistaActiva()?.settings || overviewSettings
+  )
+  sincronizarWorkspaces()
 }
 
 
@@ -712,6 +976,10 @@ function dibujarTablero(board,id=activeWorkspace){
   let nodes=(board || []).map(crearColumna)
 
   limpiarSeleccion()
+  overviewMode=false
+  kanban.classList.remove('overview')
+  viewButton.classList.remove('active')
+  document.querySelector('.add-column').hidden=false
   workspaceBoards.set(id,nodes)
   kanban.replaceChildren(...nodes)
 }
@@ -719,7 +987,11 @@ function dibujarTablero(board,id=activeWorkspace){
 
 function mostrarTablero(id,{preservarActual=true}={}){
 
-  if(preservarActual && activeWorkspace)
+  if(
+    preservarActual &&
+    activeWorkspace &&
+    !overviewMode
+  )
     workspaceBoards.set(
       activeWorkspace,
       [...kanban.children]
@@ -731,6 +1003,10 @@ function mostrarTablero(id,{preservarActual=true}={}){
     return null
 
   limpiarSeleccion()
+  overviewMode=false
+  kanban.classList.remove('overview')
+  viewButton.classList.remove('active')
+  document.querySelector('.add-column').hidden=false
   activeWorkspace=id
   kanban.replaceChildren(...prepararTablero(workspace))
 
@@ -788,7 +1064,7 @@ function dibujarWorkspaces(){
 
       button.className=
         'workspace-tab' +
-        (workspace.id===activeWorkspace
+        (!overviewMode && workspace.id===activeWorkspace
           ? ' active'
           : '')
 
@@ -866,7 +1142,9 @@ function sincronizarWorkspaces(){
   tabs.forEach((tab,index)=>{
 
     let workspace=workspaces[index]
-    let active=workspace.id===activeWorkspace
+    let active=
+      !overviewMode &&
+      workspace.id===activeWorkspace
 
     if(tab.classList.contains('active')!==active)
       activeChanged=true
@@ -890,6 +1168,8 @@ function escribirDatos(){
 
   let data=structuredClone({
     activeWorkspace,
+    overviewSettings,
+    views,
     workspaces
   })
 
@@ -948,6 +1228,28 @@ function guardar({
   configuracion=true
 }={}){
 
+  if(overviewMode){
+    if(tablero){
+      actualizarContadoresColumnas()
+      sincronizarDesdeVistaGeneral()
+    }
+
+    if(configuracion){
+      let customView=obtenerVistaActiva()
+
+      if(customView)
+        customView.settings=leerConfiguracion()
+      else
+        overviewSettings=leerConfiguracion()
+    }
+
+    sincronizarWorkspaces()
+
+    return inmediato
+      ? ejecutarGuardadoProgramado()
+      : programarGuardado()
+  }
+
   let current=
     workspaces.find(
       workspace=>workspace.id===activeWorkspace
@@ -978,6 +1280,8 @@ async function exportarDatos(){
   let data=JSON.stringify({
     version:1,
     activeWorkspace,
+    overviewSettings,
+    views,
     workspaces
   },null,2)
 
@@ -1043,6 +1347,13 @@ async function importarDatos(data){
     )
   }))
 
+  overviewSettings=normalizarConfiguracion(
+    data.overviewSettings
+  )
+  views=Array.isArray(data.views)
+    ? data.views.map(normalizarVista)
+    : []
+
   activeWorkspace=workspaces.some(
     workspace=>workspace.id===String(data.activeWorkspace)
   )
@@ -1058,6 +1369,7 @@ async function importarDatos(data){
   dibujarTablero(current.board,current.id)
   aplicarConfiguracion(current.settings)
   dibujarWorkspaces()
+  dibujarMenuVistas()
   prepararTablerosRestantes()
   await guardar({inmediato:true})
 }
@@ -1093,6 +1405,13 @@ async function cargar(){
     minWidth:data.minWidth,
     view:data.view
   }
+
+  overviewSettings=normalizarConfiguracion(
+    data.overviewSettings
+  )
+  views=Array.isArray(data.views)
+    ? data.views.map(normalizarVista)
+    : []
 
 
   workspaces=Array.isArray(data.workspaces) &&
@@ -1131,6 +1450,7 @@ async function cargar(){
   dibujarTablero(current.board,current.id)
   aplicarConfiguracion(current.settings)
   dibujarWorkspaces()
+  dibujarMenuVistas()
   prepararTablerosRestantes()
   await guardar({inmediato:true})
 }
@@ -1206,6 +1526,8 @@ document.addEventListener(
 
     let card=e.target.closest('.card')
     let column=e.target.closest('.column')
+    let overviewWorkspace=
+      e.target.closest('.overview-workspace')
 
     if(
       workspaceTab &&
@@ -1217,6 +1539,7 @@ document.addEventListener(
       copyContext.hidden=true
       pasteContext.hidden=true
       duplicateContext.hidden=true
+      moveContext.hidden=true
       deleteContext.hidden=false
       deleteContext.textContent='Eliminar tablero'
     }else if(
@@ -1229,6 +1552,7 @@ document.addEventListener(
       copyContext.hidden=false
       pasteContext.hidden=internalClipboard?.type!=='card'
       duplicateContext.hidden=false
+      moveContext.hidden=false
       deleteContext.hidden=false
 
       if(card && !selectedCards.has(card))
@@ -1246,6 +1570,20 @@ document.addEventListener(
             ? `Eliminar ${selectedColumns.size} columnas`
             : 'Eliminar columna'
     }else if(
+      overviewWorkspace &&
+      kanban.contains(overviewWorkspace)
+    ){
+      e.preventDefault()
+      contextTarget=overviewWorkspace
+      editContext.hidden=false
+      copyContext.hidden=true
+      pasteContext.hidden=true
+      duplicateContext.hidden=true
+      moveContext.hidden=true
+      deleteContext.hidden=false
+      deleteContext.textContent='Eliminar tablero'
+    }else if(
+      !overviewMode &&
       kanban.contains(e.target) &&
       internalClipboard?.type==='column'
     ){
@@ -1255,6 +1593,7 @@ document.addEventListener(
       copyContext.hidden=true
       pasteContext.hidden=false
       duplicateContext.hidden=true
+      moveContext.hidden=true
       deleteContext.hidden=true
     }else{
       cerrarMenuContextual()
@@ -1276,6 +1615,11 @@ document.addEventListener(
         6,
         Math.min(e.clientY,innerHeight-rect.height-6)
       )+'px'
+
+    contextMenu.classList.toggle(
+      'open-left',
+      e.clientX+rect.width+460>innerWidth
+    )
   }
 )
 
@@ -1285,7 +1629,11 @@ editContext.onclick=async()=>{
   let target=contextTarget
   cerrarMenuContextual()
 
-  if(!target?.matches('.workspace-tab'))
+  if(
+    !target?.matches(
+      '.workspace-tab,.overview-workspace'
+    )
+  )
     return
 
   let workspace=workspaces.find(
@@ -1305,6 +1653,16 @@ editContext.onclick=async()=>{
     return
 
   workspace.title=title.trim()
+
+  if(overviewMode){
+    let overviewTitle=kanban.querySelector(
+      `.overview-workspace[data-workspace="${CSS.escape(workspace.id)}"] .overview-open`
+    )
+
+    if(overviewTitle)
+      overviewTitle.textContent=workspace.title
+  }
+
   guardar({tablero:false,configuracion:false})
 }
 
@@ -1314,7 +1672,10 @@ copyContext.onclick=async()=>{
   let target=contextTarget
   cerrarMenuContextual()
 
-  if(!target || target.matches('.workspace-tab'))
+  if(
+    !target ||
+    target.matches('.workspace-tab,.overview-workspace')
+  )
     return
 
   let text
@@ -1350,6 +1711,229 @@ copyContext.onclick=async()=>{
   }
 
   await copiarAlPortapapeles(text)
+}
+
+
+function textoDesdeHtml(html){
+
+  let element=document.createElement('div')
+
+  element.innerHTML=html
+  return element.textContent.trim()
+}
+
+
+function sincronizarModeloVisible(){
+
+  if(overviewMode){
+    sincronizarDesdeVistaGeneral()
+    return
+  }
+
+  let current=workspaces.find(
+    workspace=>workspace.id===activeWorkspace
+  )
+
+  if(current)
+    current.board=leerTablero()
+}
+
+
+function crearOpcionesMover(target){
+
+  sincronizarModeloVisible()
+  moveMenu.replaceChildren()
+
+  let card=target.matches('.card')
+
+  workspaces.forEach(workspace=>{
+    if(card){
+      let option=document.createElement('div')
+      let trigger=document.createElement('button')
+      let columnsMenu=document.createElement('div')
+
+      option.className='move-workspace-option'
+      trigger.className='move-workspace-trigger'
+      trigger.type='button'
+      trigger.textContent=workspace.title
+      columnsMenu.className='move-columns-menu'
+
+      ;(workspace.board || []).forEach((column,index)=>{
+        let button=document.createElement('button')
+
+        button.type='button'
+        button.dataset.workspace=workspace.id
+        button.dataset.column=String(index)
+        button.textContent=textoDesdeHtml(column.title)
+        columnsMenu.append(button)
+      })
+
+      if(!columnsMenu.children.length){
+        let empty=document.createElement('button')
+
+        empty.type='button'
+        empty.disabled=true
+        empty.textContent='Sin columnas'
+        columnsMenu.append(empty)
+      }
+
+      option.append(trigger,columnsMenu)
+      moveMenu.append(option)
+      return
+    }
+
+    let button=document.createElement('button')
+
+    button.type='button'
+    button.dataset.workspace=workspace.id
+    button.textContent=workspace.title
+    moveMenu.append(button)
+  })
+}
+
+
+function moverSeleccionA(workspaceId,columnIndex){
+
+  let targetWorkspace=workspaces.find(
+    workspace=>workspace.id===workspaceId
+  )
+
+  if(!targetWorkspace)
+    return
+
+  let target=contextTarget
+  let card=target?.matches('.card')
+  let items=card
+    ? selectedCards.has(target)
+      ? [...kanban.querySelectorAll('.card')]
+          .filter(item=>selectedCards.has(item))
+      : [target]
+    : selectedColumns.has(target)
+      ? [...kanban.querySelectorAll('.column')]
+          .filter(item=>selectedColumns.has(item))
+      : [target]
+
+  if(!items.length)
+    return
+
+  if(overviewMode){
+    let workspaceElement=kanban.querySelector(
+      `.overview-workspace[data-workspace="${CSS.escape(workspaceId)}"]`
+    )
+
+    if(card){
+      let column=workspaceElement
+        ?.querySelectorAll('.overview-columns > .column')
+        [columnIndex]
+      let container=column?.querySelector('.cards')
+
+      if(!container)
+        return
+
+      container.append(...items)
+    }else{
+      let container=workspaceElement
+        ?.querySelector('.overview-columns')
+
+      if(!container)
+        return
+
+      container.querySelector('.overview-empty')?.remove()
+      container.append(...items)
+      actualizarVaciosVistaGeneral()
+    }
+
+    limpiarSeleccion()
+    guardar()
+    return
+  }
+
+  if(card){
+    let contents=items.map(item=>item.innerHTML)
+
+    if(workspaceId===activeWorkspace){
+      let column=[...kanban.children]
+        .filter(item=>item.matches('.column'))
+        [columnIndex]
+      let container=column?.querySelector('.cards')
+
+      if(!container)
+        return
+
+      container.append(...items)
+    }else{
+      items.forEach(item=>item.remove())
+      let column=targetWorkspace.board[columnIndex]
+
+      if(!column)
+        return
+
+      column.cards.push(...contents)
+      workspaceBoards.delete(workspaceId)
+    }
+  }else{
+    let contents=items.map(column=>({
+      title:column.querySelector('h3').innerHTML,
+      cards:[...column.querySelectorAll('.card')]
+        .map(item=>item.innerHTML)
+    }))
+
+    if(workspaceId===activeWorkspace)
+      kanban.append(...items)
+    else{
+      items.forEach(item=>item.remove())
+      targetWorkspace.board.push(...contents)
+      workspaceBoards.delete(workspaceId)
+    }
+  }
+
+  limpiarSeleccion()
+  guardar()
+}
+
+
+moveContext.onclick=()=>{
+
+  if(!contextTarget)
+    return
+
+  if(moveMenu.hidden)
+    crearOpcionesMover(contextTarget)
+
+  moveMenu.hidden=!moveMenu.hidden
+}
+
+
+moveMenu.onclick=e=>{
+
+  let trigger=e.target.closest('.move-workspace-trigger')
+
+  if(trigger){
+    let option=trigger.closest('.move-workspace-option')
+
+    moveMenu.querySelectorAll('.move-workspace-option.open')
+      .forEach(item=>{
+        if(item!==option)
+          item.classList.remove('open')
+      })
+    option.classList.toggle('open')
+    return
+  }
+
+  let option=e.target.closest(
+    'button[data-workspace]'
+  )
+
+  if(!option)
+    return
+
+  let workspaceId=option.dataset.workspace
+  let columnIndex=option.dataset.column===undefined
+    ? undefined
+    : Number(option.dataset.column)
+
+  moverSeleccionA(workspaceId,columnIndex)
+  cerrarMenuContextual()
 }
 
 
@@ -1402,7 +1986,10 @@ duplicateContext.onclick=()=>{
   let target=contextTarget
   cerrarMenuContextual()
 
-  if(!target || target.matches('.workspace-tab'))
+  if(
+    !target ||
+    target.matches('.workspace-tab,.overview-workspace')
+  )
     return
 
   let duplicate=target.cloneNode(true)
@@ -1435,7 +2022,9 @@ deleteContext.onclick=async()=>{
 
   let target=contextTarget
   let card=target?.matches('.card')
-  let workspace=target?.matches('.workspace-tab')
+  let workspace=target?.matches(
+    '.workspace-tab,.overview-workspace'
+  )
   let column=target?.matches('.column')
   let cardTargets=card && selectedCards.has(target)
     ? [...kanban.querySelectorAll('.card')]
@@ -1462,7 +2051,9 @@ deleteContext.onclick=async()=>{
         : 'columna'
 
   let label=workspace
-    ? target.querySelector('span')
+    ? target.querySelector(
+        '.overview-open,span'
+      )
         ?.textContent.trim()
     : card
       ? multipleCards
@@ -1498,6 +2089,7 @@ deleteContext.onclick=async()=>{
   if(workspace){
     let id=target.dataset.workspace
     let deletingActive=id===activeWorkspace
+    let deletingFromOverview=overviewMode
     let index=workspaces.findIndex(
       item=>item.id===id
     )
@@ -1505,6 +2097,12 @@ deleteContext.onclick=async()=>{
     workspaces=workspaces.filter(
       item=>item.id!==id
     )
+    views.forEach(viewItem=>{
+      viewItem.workspaceIds=
+        viewItem.workspaceIds.filter(
+          workspaceId=>workspaceId!==id
+        )
+    })
     workspaceBoards.delete(id)
 
     if(!workspaces.length)
@@ -1519,7 +2117,17 @@ deleteContext.onclick=async()=>{
         settings:normalizarConfiguracion()
       })
 
-    if(deletingActive){
+    if(deletingFromOverview){
+      if(deletingActive)
+        activeWorkspace=workspaces[
+          Math.min(
+            Math.max(index,0),
+            workspaces.length-1
+          )
+        ].id
+
+      dibujarVistaGeneral()
+    }else if(deletingActive){
       let next=workspaces[
         Math.min(
           Math.max(index,0),
@@ -1550,6 +2158,7 @@ deleteContext.onclick=async()=>{
 
   columnTargets.forEach(item=>item.remove())
   limpiarSeleccion()
+  actualizarVaciosVistaGeneral()
   ajustarColumnas()
   guardar()
 }
@@ -1573,6 +2182,7 @@ document.addEventListener(
     if(e.key==='Escape'){
       cerrarMenuContextual()
       dataMenu.hidden=true
+      viewMenu.hidden=true
 
       if(!confirmModal.hidden)
         cerrarModal()
@@ -1621,6 +2231,21 @@ function obtenerOrigenArrastre(target){
       handle:target.closest?.('h3') || column
     }
 
+  let overviewWorkspace=
+    target.closest?.('.overview-workspace')
+
+  if(
+    overviewMode &&
+    overviewWorkspace &&
+    kanban.contains(overviewWorkspace) &&
+    (!target.closest?.('button,input,select,textarea,a') ||
+      target.closest?.('.overview-open'))
+  )
+    return {
+      element:overviewWorkspace,
+      handle:overviewWorkspace
+    }
+
   return null
 }
 
@@ -1636,8 +2261,12 @@ function iniciarArrastre(element,e){
   drag=element
   columnDropTarget=null
   columnPlaceholders=[]
-  columnOriginalOrder=[]
+  columnOriginalLayouts=[]
   columnOverPlaceholder=false
+  overviewDropTarget=null
+  overviewPlaceholder=null
+  overviewOriginalOrder=[]
+  overviewOverPlaceholder=false
   cardDropTarget=null
   cardPlaceholders=[]
   cardOriginalLayouts=[]
@@ -1681,6 +2310,8 @@ function iniciarArrastre(element,e){
     prepararArrastreColumnas()
   else if(drag.matches('.card'))
     prepararArrastreTarjetas()
+  else if(drag.matches('.overview-workspace'))
+    prepararArrastreVistaGeneral()
 
   return true
 }
@@ -1711,9 +2342,14 @@ function programarArrastre(target,x,y){
 
 function prepararArrastreColumnas(){
 
-  columnOriginalOrder=[
-    ...kanban.querySelectorAll('.column')
-  ]
+  let containers=overviewMode
+    ? [...kanban.querySelectorAll('.overview-columns')]
+    : [kanban]
+
+  columnOriginalLayouts=containers.map(container=>({
+    container,
+    children:[...container.children]
+  }))
 
   let first=draggedColumns[0]
   let fragment=document.createDocumentFragment()
@@ -1731,6 +2367,109 @@ function prepararArrastreColumnas(){
   })
 
   first.before(fragment)
+}
+
+
+function prepararArrastreVistaGeneral(){
+
+  overviewOriginalOrder=[...kanban.children]
+  overviewPlaceholder=document.createElement('section')
+  overviewPlaceholder.className=
+    'overview-workspace-placeholder'
+  overviewPlaceholder.setAttribute('aria-hidden','true')
+  overviewPlaceholder.style.height=
+    `${drag.getBoundingClientRect().height}px`
+  drag.before(overviewPlaceholder)
+  drag.classList.add('overview-workspace-drag-source')
+}
+
+
+function puntoSobreMarcadorVistaGeneral(x,y){
+
+  if(!overviewPlaceholder?.isConnected)
+    return false
+
+  let rect=overviewPlaceholder.getBoundingClientRect()
+
+  return (
+    x>=rect.left &&
+    x<=rect.right &&
+    y>=rect.top &&
+    y<=rect.bottom
+  )
+}
+
+
+function actualizarDestinoVistaGeneral(target,x,y){
+
+  if(!target){
+    overviewOverPlaceholder=
+      puntoSobreMarcadorVistaGeneral(x,y)
+
+    if(!overviewOverPlaceholder)
+      overviewDropTarget=null
+
+    return
+  }
+
+  if(
+    overviewDropTarget===target &&
+    !overviewOverPlaceholder
+  )
+    return
+
+  let layout=[...kanban.children]
+    .filter(item=>
+      !item.classList.contains(
+        'overview-workspace-drag-source'
+      )
+    )
+  let targetIndex=layout.indexOf(target)
+  let placeholderIndex=layout.indexOf(overviewPlaceholder)
+
+  if(placeholderIndex < targetIndex)
+    target.after(overviewPlaceholder)
+  else
+    target.before(overviewPlaceholder)
+
+  overviewDropTarget=target
+  overviewOverPlaceholder=false
+}
+
+
+function resolverArrastreVistaGeneral(cancelado){
+
+  let aplicar=
+    !cancelado &&
+    overviewDropTarget?.isConnected
+
+  drag.classList.remove('overview-workspace-drag-source')
+
+  if(aplicar)
+    overviewPlaceholder.replaceWith(drag)
+  else{
+    overviewPlaceholder?.remove()
+    kanban.replaceChildren(...overviewOriginalOrder)
+  }
+
+  let byId=new Map(
+    workspaces.map(workspace=>[workspace.id,workspace])
+  )
+
+  let ordered=[...kanban.querySelectorAll('.overview-workspace')]
+    .map(section=>byId.get(section.dataset.workspace))
+    .filter(Boolean)
+  let visibleIds=new Set(
+    ordered.map(workspace=>workspace.id)
+  )
+  let nextIndex=0
+
+  workspaces=workspaces.map(workspace=>
+    visibleIds.has(workspace.id)
+      ? ordered[nextIndex++]
+      : workspace
+  )
+  dibujarWorkspaces()
 }
 
 
@@ -1894,28 +2633,53 @@ function puntoSobreMarcadorColumnas(x,y){
 }
 
 
-function actualizarDestinoColumnas(target,x,y){
+function actualizarDestinoColumnas(container,target,x,y){
+
+  if(!container){
+    columnDropTarget=null
+    columnOverPlaceholder=false
+    return
+  }
 
   if(!target){
     columnOverPlaceholder=
       puntoSobreMarcadorColumnas(x,y)
 
-    if(!columnOverPlaceholder)
-      columnDropTarget=null
+    if(columnOverPlaceholder)
+      return
 
+    if(
+      columnDropTarget?.container===container &&
+      columnDropTarget?.target===null
+    )
+      return
+
+    container.querySelector('.overview-empty')?.remove()
+
+    let fragment=document.createDocumentFragment()
+
+    columnPlaceholders.forEach(
+      placeholder=>fragment.append(placeholder)
+    )
+    container.append(fragment)
+    columnDropTarget={container,target:null}
     return
   }
 
   if(
-    columnDropTarget===target &&
+    columnDropTarget?.container===container &&
+    columnDropTarget?.target===target &&
     !columnOverPlaceholder
   )
     return
 
-  let layout=[...kanban.children]
-    .filter(item=>
-      !item.classList.contains('column-drag-source')
+  let layout=[
+    ...kanban.querySelectorAll(
+      '.column,.column-placeholder'
     )
+  ].filter(item=>
+    !item.classList.contains('column-drag-source')
+  )
   let targetIndex=layout.indexOf(target)
   let placeholderIndex=Math.min(
     ...columnPlaceholders.map(
@@ -1933,8 +2697,33 @@ function actualizarDestinoColumnas(target,x,y){
   else
     target.before(fragment)
 
-  columnDropTarget=target
+  container.querySelector('.overview-empty')?.remove()
+  columnDropTarget={container,target}
   columnOverPlaceholder=false
+}
+
+
+function actualizarVaciosVistaGeneral(){
+
+  if(!overviewMode)
+    return
+
+  kanban.querySelectorAll('.overview-columns')
+    .forEach(container=>{
+      let empty=container.querySelector('.overview-empty')
+
+      if(container.querySelector('.column')){
+        empty?.remove()
+        return
+      }
+
+      if(!empty){
+        empty=document.createElement('div')
+        empty.className='overview-empty'
+        empty.textContent='Sin columnas'
+        container.append(empty)
+      }
+    })
 }
 
 
@@ -1942,7 +2731,7 @@ function resolverArrastreColumnas(cancelado){
 
   let aplicar=
     !cancelado &&
-    columnDropTarget?.isConnected
+    columnDropTarget?.container?.isConnected
 
   if(aplicar){
     columnPlaceholders.forEach((placeholder,index)=>{
@@ -1958,8 +2747,12 @@ function resolverArrastreColumnas(cancelado){
     draggedColumns.forEach(
       column=>column.classList.remove('column-drag-source')
     )
-    kanban.replaceChildren(...columnOriginalOrder)
+    columnOriginalLayouts.forEach(({container,children})=>{
+      container.replaceChildren(...children)
+    })
   }
+
+  actualizarVaciosVistaGeneral()
 }
 
 
@@ -1991,6 +2784,9 @@ function finalizarArrastre({cancelado=false}={}){
     if(completedDrag?.matches('.column'))
       resolverArrastreColumnas(cancelado)
 
+    if(completedDrag?.matches('.overview-workspace'))
+      resolverArrastreVistaGeneral(cancelado)
+
     if(completedDrag?.matches('.workspace-tab')){
       let byId=new Map(
         workspaces.map(workspace=>[workspace.id,workspace])
@@ -2000,6 +2796,18 @@ function finalizarArrastre({cancelado=false}={}){
         ...workspaceTabs.querySelectorAll('.workspace-tab')
       ].map(tab=>byId.get(tab.dataset.workspace))
         .filter(Boolean)
+
+      if(overviewMode){
+        let sections=new Map(
+          [...kanban.querySelectorAll('.overview-workspace')]
+            .map(section=>[section.dataset.workspace,section])
+        )
+
+        kanban.replaceChildren(
+          ...workspaces.map(workspace=>sections.get(workspace.id))
+            .filter(Boolean)
+        )
+      }
 
       if(workspaceDragMoved)
         workspaceClickBlockedUntil=performance.now()+200
@@ -2026,8 +2834,12 @@ function finalizarArrastre({cancelado=false}={}){
     cardPointerContainer=null
     columnDropTarget=null
     columnPlaceholders=[]
-    columnOriginalOrder=[]
+    columnOriginalLayouts=[]
     columnOverPlaceholder=false
+    overviewDropTarget=null
+    overviewPlaceholder=null
+    overviewOriginalOrder=[]
+    overviewOverPlaceholder=false
 
     if(completedDrag?.matches('.workspace-tab'))
       guardar({tablero:false,configuracion:false})
@@ -2094,6 +2906,21 @@ function procesarArrastre(eventTarget,clientX,clientY){
     return
   }
 
+  if(drag.matches('.overview-workspace')){
+    let hovered=eventTarget.closest('.overview-workspace')
+
+    actualizarDestinoVistaGeneral(
+      hovered?.classList.contains(
+        'overview-workspace-drag-source'
+      )
+        ? null
+        : hovered,
+      clientX,
+      clientY
+    )
+    return
+  }
+
   if(drag.matches('.card')){
 
       let column=
@@ -2149,8 +2976,15 @@ function procesarArrastre(eventTarget,clientX,clientY){
 
       let hovered=
         eventTarget.closest('.column')
+      let container=hovered
+        ? hovered.parentElement
+        : eventTarget.closest('.overview-columns') ||
+          (kanban.contains(eventTarget) && !overviewMode
+            ? kanban
+            : null)
 
       actualizarDestinoColumnas(
+        container,
         hovered?.classList.contains('dragging')
           ? null
           : hovered,
@@ -2463,14 +3297,16 @@ workspaceTabs.addEventListener(
 
     if(
       !tab ||
-      tab.dataset.workspace===activeWorkspace
+      (!overviewMode &&
+        tab.dataset.workspace===activeWorkspace)
     )
       return
 
     guardar()
 
     let workspace=mostrarTablero(
-      tab.dataset.workspace
+      tab.dataset.workspace,
+      {preservarActual:!overviewMode}
     )
 
     aplicarConfiguracion(workspace.settings)
@@ -2501,6 +3337,71 @@ workspaceTabs.addEventListener(
 dataButton.onclick=()=>{
 
   dataMenu.hidden=!dataMenu.hidden
+}
+
+
+viewButton.onclick=()=>{
+
+  viewMenu.hidden=!viewMenu.hidden
+}
+
+
+showOverview.onclick=()=>{
+
+  viewMenu.hidden=true
+
+  if(overviewMode && activeViewId==='all')
+    return
+
+  guardar()
+  dibujarVistaGeneral('all')
+  prepararTablerosRestantes()
+  guardar({tablero:false})
+}
+
+
+savedViews.onclick=e=>{
+
+  let button=e.target.closest('button[data-view]')
+
+  if(!button)
+    return
+
+  viewMenu.hidden=true
+
+  if(overviewMode && activeViewId===button.dataset.view)
+    return
+
+  guardar()
+  dibujarVistaGeneral(button.dataset.view)
+  prepararTablerosRestantes()
+  guardar({tablero:false})
+}
+
+
+newView.onclick=async()=>{
+
+  viewMenu.hidden=true
+
+  let result=await pedirVista()
+
+  if(!result)
+    return
+
+  guardar()
+
+  let viewItem=normalizarVista({
+    id:crypto.randomUUID?.() || `view-${Date.now()}`,
+    title:result.title,
+    workspaceIds:result.workspaceIds,
+    settings:normalizarConfiguracion()
+  },views.length)
+
+  views.push(viewItem)
+  dibujarMenuVistas()
+  dibujarVistaGeneral(viewItem.id)
+  prepararTablerosRestantes()
+  guardar({tablero:false})
 }
 
 
@@ -2538,6 +3439,9 @@ document.addEventListener(
 
     if(!dataControl.contains(e.target))
       dataMenu.hidden=true
+
+    if(!viewControl.contains(e.target))
+      viewMenu.hidden=true
   }
 )
 

@@ -604,7 +604,289 @@ try {
     throw new Error(`La eliminacion del tablero no persistio: ${JSON.stringify({ boardDeletion, boardDeletionRestored })}`);
   }
 
-  console.log("KANBAN_EXTENSION_OK: scroll, menus de tarjeta, columna y tablero, y persistencia confirmados.");
+  const overview = await cdp.evaluate(`(async()=>{
+    let sourceId=document.querySelector('.workspace-tab.active').dataset.workspace
+
+    document.querySelector('.add-workspace').click()
+    await new Promise(resolve=>requestAnimationFrame(resolve))
+    document.querySelector('#confirm-input').value='Destino general'
+    document.querySelector('#accept-confirm').click()
+    await new Promise(resolve=>setTimeout(resolve,80))
+
+    let destinationId=document.querySelector('.workspace-tab.active').dataset.workspace
+    document.querySelector('.workspace-tab[data-workspace="'+sourceId+'"]').click()
+    await new Promise(resolve=>setTimeout(resolve,40))
+    document.querySelector('#view').value='row'
+    document.querySelector('#view').dispatchEvent(new Event('change',{bubbles:true}))
+    await new Promise(resolve=>setTimeout(resolve,40))
+    document.querySelector('.view-button').click()
+    let menuVisible=!document.querySelector('.view-menu').hidden
+    document.querySelector('#show-overview').click()
+    await new Promise(resolve=>setTimeout(resolve,40))
+
+    let sourceBoard=document.querySelector('.overview-workspace[data-workspace="'+sourceId+'"]')
+    let destinationBoard=document.querySelector('.overview-workspace[data-workspace="'+destinationId+'"]')
+    let sourceKeepsRow=sourceBoard.querySelector('.overview-columns')
+      .classList.contains('row')
+    let destinationKeepsGrid=destinationBoard.querySelector('.overview-columns')
+      .classList.contains('grid')
+    let boardTransfer=new DataTransfer()
+    let boardRect=sourceBoard.getBoundingClientRect()
+
+    destinationBoard.dispatchEvent(new DragEvent('dragstart',{
+      bubbles:true,
+      cancelable:true,
+      dataTransfer:boardTransfer
+    }))
+    sourceBoard.dispatchEvent(new DragEvent('dragover',{
+      bubbles:true,
+      cancelable:true,
+      clientX:boardRect.left+boardRect.width/2,
+      clientY:boardRect.top+boardRect.height/2,
+      dataTransfer:boardTransfer
+    }))
+    await new Promise(resolve=>requestAnimationFrame(resolve))
+    let boardPlaceholderVisible=
+      !!document.querySelector('.overview-workspace-placeholder')
+    let boardPreviewBackground=getComputedStyle(
+      document.querySelector('.drag-image.overview-workspace')
+    ).backgroundColor
+    destinationBoard.dispatchEvent(new DragEvent('dragend',{
+      bubbles:true,
+      cancelable:true,
+      dataTransfer:boardTransfer
+    }))
+    await new Promise(resolve=>setTimeout(resolve,80))
+
+    let boardOrder=[...document.querySelectorAll('.overview-workspace')]
+      .map(workspace=>workspace.dataset.workspace)
+    let card=sourceBoard.querySelector('.card')
+    let cardContent=card.innerHTML
+    let targetCards=destinationBoard.querySelector('.cards')
+    let transfer=new DataTransfer()
+    let rect=targetCards.getBoundingClientRect()
+
+    card.dispatchEvent(new DragEvent('dragstart',{
+      bubbles:true,
+      cancelable:true,
+      dataTransfer:transfer
+    }))
+    targetCards.dispatchEvent(new DragEvent('dragover',{
+      bubbles:true,
+      cancelable:true,
+      clientX:rect.left+rect.width/2,
+      clientY:rect.top+10,
+      dataTransfer:transfer
+    }))
+    card.dispatchEvent(new DragEvent('dragend',{
+      bubbles:true,
+      cancelable:true,
+      dataTransfer:transfer
+    }))
+    await new Promise(resolve=>setTimeout(resolve,80))
+
+    let cardMoved=[...destinationBoard.querySelectorAll('.card')]
+      .some(item=>item.innerHTML===cardContent)
+
+    let sourceColumn=sourceBoard.querySelector('.column')
+    let columnTitle=sourceColumn.querySelector('h3').innerHTML
+    let targetColumn=destinationBoard.querySelector('.column')
+    rect=targetColumn.getBoundingClientRect()
+    transfer=new DataTransfer()
+    sourceColumn.querySelector('h3').dispatchEvent(new DragEvent('dragstart',{
+      bubbles:true,
+      cancelable:true,
+      dataTransfer:transfer
+    }))
+    targetColumn.dispatchEvent(new DragEvent('dragover',{
+      bubbles:true,
+      cancelable:true,
+      clientX:rect.left+rect.width/2,
+      clientY:rect.top+rect.height/2,
+      dataTransfer:transfer
+    }))
+    sourceColumn.querySelector('h3').dispatchEvent(new DragEvent('dragend',{
+      bubbles:true,
+      cancelable:true,
+      dataTransfer:transfer
+    }))
+    await new Promise(resolve=>setTimeout(resolve,80))
+
+    let columnMoved=[...destinationBoard.querySelectorAll('.column')]
+      .some(item=>item.querySelector('h3').innerHTML===columnTitle)
+    let contextCard=destinationBoard.querySelector('.card')
+
+    contextCard.dispatchEvent(new MouseEvent('contextmenu',{
+      bubbles:true,
+      cancelable:true,
+      clientX:100,
+      clientY:100
+    }))
+    document.querySelector('#move-context').click()
+    let moveBoards=[...document.querySelectorAll(
+      '#move-menu .move-workspace-trigger'
+    )].map(button=>button.textContent)
+    let moveOptions=[...document.querySelectorAll(
+      '#move-menu .move-columns-menu button[data-column]'
+    )]
+      .map(button=>button.textContent)
+    let sourceOption=[...document.querySelectorAll(
+      '#move-menu .move-columns-menu button[data-column]'
+    )]
+      .find(button=>button.dataset.workspace===sourceId)
+    sourceOption.click()
+    await new Promise(resolve=>setTimeout(resolve,80))
+
+    let contextColumn=destinationBoard.querySelector('.column')
+    let contextColumnTitle=contextColumn.querySelector('h3').innerHTML
+
+    contextColumn.dispatchEvent(new MouseEvent('contextmenu',{
+      bubbles:true,
+      cancelable:true,
+      clientX:110,
+      clientY:110
+    }))
+    document.querySelector('#move-context').click()
+    let columnMoveOptions=[...document.querySelectorAll('#move-menu button')]
+      .map(button=>button.textContent)
+    document.querySelector(
+      '#move-menu button[data-workspace="'+sourceId+'"]'
+    ).click()
+    await new Promise(resolve=>setTimeout(resolve,80))
+
+    let contextColumnMoved=[...sourceBoard.querySelectorAll('.column')]
+      .some(column=>column.querySelector('h3').innerHTML===contextColumnTitle)
+
+    sourceBoard.querySelector('.overview-workspace-header')
+      .dispatchEvent(new MouseEvent('contextmenu',{
+        bubbles:true,
+        cancelable:true,
+        clientX:120,
+        clientY:120
+      }))
+    let boardEditVisible=!document.querySelector('#edit-context').hidden
+    let boardDeleteLabel=document.querySelector('#delete-context').textContent.trim()
+    document.body.click()
+
+    document.querySelector('#view').value='row'
+    document.querySelector('#view').dispatchEvent(new Event('change',{bubbles:true}))
+    let rowMode=document.querySelector('#kanban').classList.contains('row')
+    document.querySelector('#view').value='grid'
+    document.querySelector('#view').dispatchEvent(new Event('change',{bubbles:true}))
+    await new Promise(resolve=>setTimeout(resolve,80))
+    let allViewWorkspaces=document.querySelectorAll(
+      '.overview-workspace'
+    ).length
+
+    document.querySelector('.view-button').click()
+    document.querySelector('#new-view').click()
+    await new Promise(resolve=>requestAnimationFrame(resolve))
+    let viewCheckboxes=[...document.querySelectorAll(
+      '#view-workspaces input[type="checkbox"]'
+    )]
+    document.querySelector('#confirm-input').value='Vista enfocada'
+    viewCheckboxes.find(input=>input.value===sourceId).checked=true
+    document.querySelector('#accept-confirm').click()
+    await new Promise(resolve=>setTimeout(resolve,80))
+
+    let customViewButton=[...document.querySelectorAll(
+      '#saved-views button[data-view]'
+    )].find(button=>button.textContent==='Vista enfocada')
+    let customViewId=customViewButton?.dataset.view || ''
+    let customWorkspaceIds=[...document.querySelectorAll(
+      '.overview-workspace'
+    )].map(workspace=>workspace.dataset.workspace)
+    document.querySelector('#view').value='row'
+    document.querySelector('#view').dispatchEvent(new Event('change',{bubbles:true}))
+    await new Promise(resolve=>setTimeout(resolve,80))
+    document.querySelector('#show-overview').click()
+    await new Promise(resolve=>setTimeout(resolve,40))
+    customViewButton.click()
+    await new Promise(resolve=>setTimeout(resolve,40))
+    let customKeepsRow=document.querySelector('#kanban').classList.contains('row')
+
+    let stored=(await chrome.storage.local.get(['kanban-data']))['kanban-data']
+    let sourceStored=stored.workspaces.find(workspace=>workspace.id===sourceId)
+    let destinationStored=stored.workspaces.find(workspace=>workspace.id===destinationId)
+    let contextMoved=sourceStored.board.some(column=>
+      column.cards.includes(contextCard.innerHTML)
+    )
+    let countersMatch=[...document.querySelectorAll('.overview-workspace')]
+      .every(workspace=>
+        Number(workspace.querySelector(
+          '.overview-workspace-header .workspace-count'
+        ).textContent)===workspace.querySelectorAll('.card').length
+      )
+
+    return {
+      menuVisible,
+      destinationId,
+      sourceKeepsRow,
+      destinationKeepsGrid,
+      boardPlaceholderVisible,
+      boardPreviewBackground,
+      boardOrder,
+      storedBoardOrder:stored.workspaces.map(workspace=>workspace.id),
+      overviewClass:document.querySelector('#kanban').classList.contains('overview'),
+      workspaces:document.querySelectorAll('.overview-workspace').length,
+      allViewWorkspaces,
+      tabs:document.querySelectorAll('.workspace-tab').length,
+      cardMoved,
+      columnMoved,
+      contextMoved,
+      contextColumnMoved,
+      countersMatch,
+      boardEditVisible,
+      boardDeleteLabel,
+      moveBoards,
+      moveOptions,
+      columnMoveOptions,
+      rowMode,
+      viewCheckboxes:viewCheckboxes.length,
+      customViewId,
+      customWorkspaceIds,
+      customKeepsRow,
+      storedCustomView:stored.views.find(view=>view.id===customViewId),
+      storedDestinationColumns:destinationStored.board.length,
+      storedOverviewView:stored.overviewSettings.view
+    }
+  })()`);
+
+  if (
+    !overview.menuVisible ||
+    !overview.sourceKeepsRow ||
+    !overview.destinationKeepsGrid ||
+    !overview.boardPlaceholderVisible ||
+    overview.boardPreviewBackground === "rgba(0, 0, 0, 0)" ||
+    overview.boardOrder[0] !== overview.destinationId ||
+    JSON.stringify(overview.storedBoardOrder) !== JSON.stringify(overview.boardOrder) ||
+    !overview.overviewClass ||
+    overview.allViewWorkspaces !== overview.tabs ||
+    !overview.cardMoved ||
+    !overview.columnMoved ||
+    !overview.contextMoved ||
+    !overview.contextColumnMoved ||
+    !overview.countersMatch ||
+    !overview.boardEditVisible ||
+    overview.boardDeleteLabel !== "Eliminar tablero" ||
+    overview.moveBoards.length !== overview.tabs ||
+    overview.moveOptions.length < overview.moveBoards.length ||
+    overview.moveOptions.some(option=>option.includes(" > ")) ||
+    overview.columnMoveOptions.some(option=>option.includes(" > ")) ||
+    !overview.rowMode ||
+    overview.viewCheckboxes !== overview.tabs ||
+    !overview.customViewId ||
+    JSON.stringify(overview.customWorkspaceIds) !== JSON.stringify([boardDeletion.activeId]) ||
+    !overview.customKeepsRow ||
+    JSON.stringify(overview.storedCustomView?.workspaceIds) !== JSON.stringify([boardDeletion.activeId]) ||
+    overview.storedCustomView?.settings?.view !== "row" ||
+    overview.storedDestinationColumns < 1 ||
+    overview.storedOverviewView !== "grid"
+  ) {
+    throw new Error(`La vista general no sincronizo movimientos: ${JSON.stringify(overview)}`);
+  }
+
+  console.log("KANBAN_EXTENSION_OK: scroll, menus, vista general, movimientos y persistencia confirmados.");
 } finally {
   cdp?.close();
   browser.kill();
