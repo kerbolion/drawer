@@ -133,6 +133,8 @@ let canvasMode=false
 let canvasPanzoom
 let canvasSaveTimer
 let canvasActivationVersion=0
+let canvasFitVersion=0
+let canvasFitMotion
 let canvasTransform={x:0,y:0,scale:1}
 let canvasBoardGesture
 let canvasSpacePressed=false
@@ -1267,6 +1269,14 @@ function actualizarEscalaLienzo(){
 }
 
 
+function cancelarAnimacionAjusteLienzo(){
+
+  canvasFitVersion++
+  canvasFitMotion?.cancel()
+  canvasFitMotion=null
+}
+
+
 function obtenerLimitesTablerosLienzo(
   boards=[...kanban.querySelectorAll('.overview-workspace')]
 ){
@@ -1344,6 +1354,7 @@ function establecerPaneoConEspacio(active){
 function desactivarLienzo(){
 
   canvasActivationVersion++
+  cancelarAnimacionAjusteLienzo()
   let deactivationVersion=canvasActivationVersion
 
   establecerPaneoConEspacio(false)
@@ -4543,7 +4554,10 @@ kanban.addEventListener(
 
 kanban.addEventListener(
   'panzoomstart',
-  ()=>canvasViewport.classList.add('is-panning')
+  ()=>{
+    cancelarAnimacionAjusteLienzo()
+    canvasViewport.classList.add('is-panning')
+  }
 )
 
 
@@ -4566,6 +4580,7 @@ canvasViewport.addEventListener(
       return
 
     e.preventDefault()
+    cancelarAnimacionAjusteLienzo()
     canvasPanzoom.zoomWithWheel(e)
   },
   {passive:false}
@@ -4573,16 +4588,19 @@ canvasViewport.addEventListener(
 
 
 canvasZoomOut.onclick=()=>{
+  cancelarAnimacionAjusteLienzo()
   canvasPanzoom?.zoomOut({animate:true})
 }
 
 
 canvasZoomIn.onclick=()=>{
+  cancelarAnimacionAjusteLienzo()
   canvasPanzoom?.zoomIn({animate:true})
 }
 
 
 canvasScale.onclick=()=>{
+  cancelarAnimacionAjusteLienzo()
   canvasPanzoom?.zoom(1,{animate:true})
 }
 
@@ -4612,15 +4630,31 @@ function ajustarLienzoA(
   )
   scale=Math.max(.35,scale)
   let panzoom=canvasPanzoom
+  let version=++canvasFitVersion
+  let fromTransform=getComputedStyle(kanban).transform
+
+  canvasFitMotion?.cancel()
+
+  let hold=kanban.animate(
+    [
+      {transform:fromTransform},
+      {transform:fromTransform}
+    ],
+    {duration:1,fill:'both'}
+  )
 
   panzoom.zoom(scale,{animate:false})
 
   requestAnimationFrame(()=>{
-    if(canvasPanzoom!==panzoom)
+    if(
+      version!==canvasFitVersion ||
+      canvasPanzoom!==panzoom
+    ){
+      hold.cancel()
       return
+    }
 
-    if(!targets.length)
-      return
+    hold.cancel()
 
     let rects=targets.map(board=>board.getBoundingClientRect())
     let left=Math.min(...rects.map(rect=>rect.left))
@@ -4639,11 +4673,47 @@ function ajustarLienzoA(
     let currentPan=panzoom.getPan()
     let renderedScale=panzoom.getScale()
 
+    hold=kanban.animate(
+      [
+        {transform:fromTransform},
+        {transform:fromTransform}
+      ],
+      {duration:1,fill:'both'}
+    )
+
     panzoom.pan(
       currentPan.x+deltaX/renderedScale,
       currentPan.y+deltaY/renderedScale,
-      {animate:true}
+      {animate:false}
     )
+
+    requestAnimationFrame(()=>{
+      if(
+        version!==canvasFitVersion ||
+        canvasPanzoom!==panzoom
+      ){
+        hold.cancel()
+        return
+      }
+
+      hold.cancel()
+
+      let toTransform=getComputedStyle(kanban).transform
+
+      canvasFitMotion=kanban.animate(
+        [
+          {transform:fromTransform},
+          {transform:toTransform}
+        ],
+        {
+          duration:320,
+          easing:'cubic-bezier(.22,1,.36,1)'
+        }
+      )
+      canvasFitMotion.onfinish=()=>{
+        canvasFitMotion=null
+      }
+    })
   })
 }
 

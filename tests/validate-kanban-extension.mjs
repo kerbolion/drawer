@@ -1537,8 +1537,12 @@ try {
       .querySelector('.overview-columns')
       .classList.contains('available-height')
 
+    let fitStartTransform=getComputedStyle(document.querySelector('#kanban')).transform
     document.querySelector('#canvas-fit').click()
-    await new Promise(resolve=>setTimeout(resolve,350))
+    await new Promise(resolve=>setTimeout(resolve,100))
+    let fitMiddleTransform=getComputedStyle(document.querySelector('#kanban')).transform
+    await new Promise(resolve=>setTimeout(resolve,300))
+    let fitEndTransform=getComputedStyle(document.querySelector('#kanban')).transform
     let fitViewportRect=viewport.getBoundingClientRect()
     let fitBoardRects=[...document.querySelectorAll('.overview-workspace')]
       .map(board=>board.getBoundingClientRect())
@@ -1617,6 +1621,10 @@ try {
       boardAvailableHeight,
       fitContained,
       fitCenterDelta,
+      fitAnimated:
+        fitStartTransform!==fitMiddleTransform &&
+        fitMiddleTransform!==fitEndTransform &&
+        fitStartTransform!==fitEndTransform,
       generalFitScale,
       focusedContained,
       focusedCenterDelta,
@@ -1669,6 +1677,7 @@ try {
     !canvasView.fixedHeightHidden ||
     !canvasView.boardAvailableHeight ||
     !canvasView.fitContained ||
+    !canvasView.fitAnimated ||
     canvasView.fitCenterDelta.x > 2 ||
     canvasView.fitCenterDelta.y > 2 ||
     !canvasView.focusedContained ||
