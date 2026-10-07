@@ -1778,6 +1778,30 @@ try {
 
   await cdp.evaluate(panelExpression(`
     const input = panel.querySelector('.data-menu input[type=file]');
+    const oldPayload = {
+      format: 'sheets-row-drawer-workspace',
+      version: 1,
+      workspace: { version: 2, spreadsheetId: 'views', sheets: {}, relationViews: {}, sheetViews: {}, updatedAt: 1 }
+    };
+    const file = new panel.defaultView.File([JSON.stringify(oldPayload)], 'formato-anterior.json', { type: 'application/json' });
+    const transfer = new panel.defaultView.DataTransfer();
+    transfer.items.add(file);
+    input.files = transfer.files;
+    input.dispatchEvent(new panel.defaultView.Event('change', { bubbles: true }));
+  `));
+  const oldImportDeadline = Date.now() + 5_000;
+  let oldImportError = "";
+  while (Date.now() < oldImportDeadline) {
+    oldImportError = await cdp.evaluate(panelExpression(`return panel.querySelector('.data-message.error')?.textContent.trim() || '';`));
+    if (oldImportError) break;
+    await delay(50);
+  }
+  if (oldImportError !== "El archivo no contiene un respaldo válido de Sheets CRM.") {
+    throw new Error(`Drawer acepto un formato anterior: ${oldImportError}`);
+  }
+
+  await cdp.evaluate(panelExpression(`
+    const input = panel.querySelector('.data-menu input[type=file]');
     const payload = {
       format: 'sheets-row-drawer-account',
       version: 1,
