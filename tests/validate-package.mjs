@@ -16,6 +16,9 @@ const allowed = new Set([
   "THIRD_PARTY_NOTICES.md",
   "background.js",
   "dist/content.js",
+  "icons/icon128.png",
+  "icons/icon16.png",
+  "icons/icon48.png",
   "manifest.json",
   "page-write.js"
 ]);
@@ -48,6 +51,22 @@ if (manifest.version !== sourceManifest.version || manifest.version !== packageJ
 }
 if (!manifest.host_permissions?.includes("https://abrircrm.com/*")) {
   throw new Error("El paquete no declara el servidor autorizado.");
+}
+
+const expectedIcons = { 16: "icons/icon16.png", 48: "icons/icon48.png", 128: "icons/icon128.png" };
+if (JSON.stringify(manifest.icons) !== JSON.stringify(expectedIcons)) {
+  throw new Error("El manifiesto no declara todos los iconos de la extensión.");
+}
+for (const [size, relativePath] of Object.entries(expectedIcons)) {
+  const icon = await readFile(path.join(output, relativePath));
+  if (
+    icon.length < 24
+    || icon.subarray(1, 4).toString("ascii") !== "PNG"
+    || icon.readUInt32BE(16) !== Number(size)
+    || icon.readUInt32BE(20) !== Number(size)
+  ) {
+    throw new Error(`El icono ${relativePath} no es un PNG de ${size}x${size}.`);
+  }
 }
 
 for (const file of files.filter(file => file.endsWith(".js"))) {

@@ -20,6 +20,7 @@ await rm(output, { recursive: true, force: true });
 await mkdir(path.join(output, "dist"), { recursive: true });
 await Promise.all([
   cp(path.join(root, "manifest.json"), path.join(output, "manifest.json")),
+  cp(path.join(root, "icons"), path.join(output, "icons"), { recursive: true }),
   cp(path.join(root, "THIRD_PARTY_NOTICES.md"), path.join(output, "THIRD_PARTY_NOTICES.md")),
   minifyFile("background.js", "background.js"),
   minifyFile("page-write.js", "page-write.js"),
