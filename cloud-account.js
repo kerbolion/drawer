@@ -47,6 +47,7 @@ export function createCloudAccountUi(options) {
     send,
     openExternal,
     onSessionChange,
+    onContinueWithoutAccount,
     onAccountDataCleared,
     onBlockedClose,
     createFormControl
@@ -64,6 +65,7 @@ export function createCloudAccountUi(options) {
     adminUsers: [],
     adminPlans: [],
     busy: false,
+    localAccess: false,
     error: "",
     notice: ""
   };
@@ -142,6 +144,7 @@ export function createCloudAccountUi(options) {
 
   function setSession(session) {
     state.session = session?.authenticated ? session : { authenticated: false };
+    state.localAccess = false;
     state.mode = state.session.authenticated ? "profile" : "login";
     state.tab = "profile";
     state.error = "";
@@ -213,6 +216,7 @@ export function createCloudAccountUi(options) {
     const login = button(document, "Iniciar sesión", "primary-button");
     login.type = "submit";
     const signup = button(document, "Contratar");
+    const local = button(document, "Continuar sin cuenta");
     card.addEventListener("submit", async (event) => {
       event.preventDefault();
       try {
@@ -228,7 +232,16 @@ export function createCloudAccountUi(options) {
         render();
       } catch (error) { showError(error.message); }
     });
-    card.append(email.item, password.item, actionRow(signup, login));
+    local.addEventListener("click", async () => {
+      try {
+        await onContinueWithoutAccount?.();
+        state.localAccess = true;
+        state.error = "";
+        state.notice = "";
+        root.hidden = true;
+      } catch (error) { showError(error.message); }
+    });
+    card.append(email.item, password.item, actionRow(local, signup, login));
     body.appendChild(card);
   }
 
@@ -555,7 +568,7 @@ export function createCloudAccountUi(options) {
   }
 
   close.addEventListener("click", () => {
-    if (!state.session.authenticated) onBlockedClose?.();
+    if (!state.session.authenticated && !state.localAccess) onBlockedClose?.();
     else root.hidden = true;
   });
 
@@ -565,7 +578,7 @@ export function createCloudAccountUi(options) {
     element: root,
     get session() { return state.session; },
     open() { root.hidden = false; render(); },
-    close() { if (state.session.authenticated) root.hidden = true; },
+    close() { if (state.session.authenticated || state.localAccess) root.hidden = true; },
     refresh,
     setSession
   };

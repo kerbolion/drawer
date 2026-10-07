@@ -196,10 +196,12 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     indicatorError: false,
     cloudRequired: Boolean(globalThis.chrome?.runtime?.id && globalThis.chrome?.runtime?.sendMessage),
     cloudSession: null,
+    cloudLocalMode: false,
     cloudWorkspaceRevision: 0,
     cloudWorkspaceHydrated: false,
     cloudWorkspaceTimer: null,
     cloudWorkspaceWriteQueue: Promise.resolve(),
+    workspaceContextVersion: 0,
     workspaceRecordOverlay: false,
     sheetViewOpen: false,
     sheetViewRestorePanel: false
@@ -4078,6 +4080,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     send: cloudMessage,
     openExternal: (url) => panelFrame.contentWindow.open(url, "_blank", "noopener,noreferrer"),
     onSessionChange: handleCloudSessionChange,
+    onContinueWithoutAccount: continueWithoutAccount,
     onAccountDataCleared: async () => {
       resetWorkspaceForAccount();
       state.headerCache.clear();
@@ -4176,9 +4179,9 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
   }, true);
   ui.reopen.addEventListener("click", async () => {
     ui.frame.hidden = false;
-    if (state.cloudRequired) {
+    if (state.cloudRequired && !state.cloudLocalMode) {
       await refreshCloudAccess();
-      if (!cloudAccessAllowed()) ui.cloudAccountUi.open();
+      if (!appAccessAllowed()) ui.cloudAccountUi.open();
     }
   });
   ui.accountButton.addEventListener("click", () => ui.cloudAccountUi?.open());
@@ -4219,6 +4222,10 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     return session.account?.status === "active" && !session.account?.expired;
   }
 
+  function appAccessAllowed(session = state.cloudSession) {
+    return !state.cloudRequired || state.cloudLocalMode || cloudAccessAllowed(session);
+  }
+
   function cloudAccountId(session = state.cloudSession) {
     return session?.user?.accountId || session?.account?.id || "";
   }
@@ -4226,21 +4233,30 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
   function resetWorkspaceForAccount() {
     window.clearTimeout(state.cloudWorkspaceTimer);
     state.cloudWorkspaceTimer = null;
+    state.request?.abort();
+    state.workspaceContextVersion += 1;
     state.cloudWorkspaceRevision = 0;
     state.cloudWorkspaceHydrated = false;
     state.workspace = null;
     state.workspacePromise = null;
     state.lastSelection = "";
+    ui.fields.replaceChildren();
+    clearRelations();
+    syncPendingActions();
   }
 
   function handleCloudSessionChange(session) {
-    const previousAccountId = cloudAccountId();
-    state.cloudSession = session;
-    const nextAccountId = cloudAccountId(session);
+    const previousOwner = workspaceOwner();
+    state.cloudLocalMode = false;
+    state.cloudSession = session?.authenticated
+      ? session
+      : { authenticated: false, serviceError: session?.serviceError || "" };
+    const nextOwner = workspaceOwner();
     ui.accountButton.dataset.authenticated = String(Boolean(session?.authenticated));
+    ui.accountButton.dataset.local = "false";
     ui.accountButton.title = session?.authenticated ? `Cuenta · ${session.user?.name || session.user?.email || "Usuario"}` : "Iniciar sesión";
     host.dataset.cloudAccess = cloudAccessAllowed(session) ? "allowed" : session?.serviceError ? "unavailable" : "blocked";
-    if (String(previousAccountId || "") !== String(nextAccountId || "")) resetWorkspaceForAccount();
+    if (previousOwner !== nextOwner) resetWorkspaceForAccount();
     if (!cloudAccessAllowed(session)) {
       state.request?.abort();
       ui.fields.replaceChildren();
@@ -4249,13 +4265,39 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
       return;
     }
     ui.cloudAccountUi?.close();
-    void ensureWorkspaceLoaded().then(() => hydrateCloudWorkspace());
+    void activateWorkspaceContext(true);
+  }
+
+  async function continueWithoutAccount() {
+    const previousOwner = workspaceOwner();
+    state.cloudLocalMode = true;
+    state.cloudSession = { authenticated: false, local: true };
+    if (previousOwner !== workspaceOwner()) resetWorkspaceForAccount();
+    ui.accountButton.dataset.authenticated = "false";
+    ui.accountButton.dataset.local = "true";
+    ui.accountButton.title = "Cuenta · modo local";
+    host.dataset.cloudAccess = "local";
+    host.dataset.cloudSync = "local";
+    await activateWorkspaceContext(false);
   }
 
   async function refreshCloudAccess() {
     if (!state.cloudRequired) return true;
     await ui.cloudAccountUi.refresh();
     return cloudAccessAllowed();
+  }
+
+  async function activateWorkspaceContext(syncCloud) {
+    const contextVersion = state.workspaceContextVersion;
+    await ensureWorkspaceLoaded();
+    if (contextVersion !== state.workspaceContextVersion) return;
+    if (syncCloud) await hydrateCloudWorkspace();
+    if (contextVersion !== state.workspaceContextVersion) return;
+    state.headerCache.clear();
+    state.sheetCache.clear();
+    state.lastSelection = "";
+    renderSheetViewActions();
+    pollSelection();
   }
 
   function currentGid() {
@@ -4437,9 +4479,14 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     return `${CACHE_PREFIX}:${kind}:${encodeURIComponent(spreadsheetId())}:${encodeURIComponent(gid)}:${row}`;
   }
 
+  function workspaceOwner() {
+    if (!state.cloudRequired || state.cloudLocalMode) return "local";
+    const accountId = cloudAccountId();
+    return accountId ? `account:${encodeURIComponent(accountId)}` : "signed-out";
+  }
+
   function workspaceKey() {
-    const owner = state.cloudRequired ? `account:${encodeURIComponent(cloudAccountId() || "signed-out")}` : "local";
-    return `${WORKSPACE_PREFIX}:${owner}:${encodeURIComponent(spreadsheetId())}`;
+    return `${WORKSPACE_PREFIX}:${workspaceOwner()}:${encodeURIComponent(spreadsheetId())}`;
   }
 
   function storageArea() {
@@ -4653,19 +4700,23 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     if (state.workspace) return state.workspace;
     if (state.workspacePromise) return state.workspacePromise;
     state.workspacePromise = (async () => {
+      const contextVersion = state.workspaceContextVersion;
+      const key = workspaceKey();
       const area = storageArea();
       if (!area) {
-        state.workspace = createWorkspace();
-        return state.workspace;
+        const workspace = createWorkspace();
+        if (contextVersion === state.workspaceContextVersion && key === workspaceKey()) state.workspace = workspace;
+        return workspace;
       }
       try {
-        const key = workspaceKey();
         const result = await area.get(key);
-        state.workspace = normalizeWorkspace(result[key]);
+        const workspace = normalizeWorkspace(result[key]);
+        if (contextVersion === state.workspaceContextVersion && key === workspaceKey()) state.workspace = workspace;
       } catch {
-        state.workspace = createWorkspace();
+        const workspace = createWorkspace();
+        if (contextVersion === state.workspaceContextVersion && key === workspaceKey()) state.workspace = workspace;
       }
-      return state.workspace;
+      return state.workspace || createWorkspace();
     })();
     return state.workspacePromise;
   }
@@ -4676,8 +4727,9 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     const area = storageArea();
     if (!area) return Promise.resolve();
     const key = workspaceKey();
+    const snapshot = JSON.parse(JSON.stringify(state.workspace));
     state.workspaceWriteQueue = state.workspaceWriteQueue
-      .then(() => area.set({ [key]: state.workspace }))
+      .then(() => area.set({ [key]: snapshot }))
       .catch(() => {});
     scheduleCloudWorkspaceWrite();
     return state.workspaceWriteQueue;
@@ -4690,7 +4742,8 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     const area = storageArea();
     if (area) {
       const key = workspaceKey();
-      state.workspaceWriteQueue = state.workspaceWriteQueue.then(() => area.set({ [key]: state.workspace })).catch(() => {});
+      const snapshot = JSON.parse(JSON.stringify(state.workspace));
+      state.workspaceWriteQueue = state.workspaceWriteQueue.then(() => area.set({ [key]: snapshot })).catch(() => {});
     }
     if (state.fields.length) {
       reconcileSheetConfiguration(currentGid(), state.sheetName || activeSheetName() || `Hoja ${currentGid()}`, state.fields);
@@ -4702,9 +4755,13 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
   }
 
   async function hydrateCloudWorkspace() {
-    if (!state.cloudRequired || !cloudAccessAllowed() || state.cloudWorkspaceHydrated) return state.workspace;
+    if (!state.cloudRequired || state.cloudLocalMode || !cloudAccessAllowed() || state.cloudWorkspaceHydrated) return state.workspace;
+    const contextVersion = state.workspaceContextVersion;
+    const accountId = String(cloudAccountId());
     await ensureWorkspaceLoaded();
+    if (contextVersion !== state.workspaceContextVersion || accountId !== String(cloudAccountId())) return state.workspace;
     const result = await cloudMessage("workspace.get", { spreadsheetId: spreadsheetId() });
+    if (contextVersion !== state.workspaceContextVersion || accountId !== String(cloudAccountId())) return state.workspace;
     if (!result?.ok) {
       host.dataset.cloudSync = "error";
       if ([401, 403].includes(result?.status)) await refreshCloudAccess();
@@ -4727,7 +4784,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
   }
 
   function scheduleCloudWorkspaceWrite() {
-    if (!state.cloudRequired || !cloudAccessAllowed() || !state.cloudWorkspaceHydrated) return;
+    if (!state.cloudRequired || state.cloudLocalMode || !cloudAccessAllowed() || !state.cloudWorkspaceHydrated) return;
     window.clearTimeout(state.cloudWorkspaceTimer);
     state.cloudWorkspaceTimer = window.setTimeout(() => {
       state.cloudWorkspaceTimer = null;
@@ -4736,9 +4793,12 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
   }
 
   function persistCloudWorkspace() {
-    if (!state.cloudRequired || !cloudAccessAllowed() || !state.workspace) return Promise.resolve();
+    if (!state.cloudRequired || state.cloudLocalMode || !cloudAccessAllowed() || !state.workspace) return Promise.resolve();
     const snapshot = JSON.parse(JSON.stringify(state.workspace));
+    const contextVersion = state.workspaceContextVersion;
+    const accountId = String(cloudAccountId());
     state.cloudWorkspaceWriteQueue = state.cloudWorkspaceWriteQueue.then(async () => {
+      if (contextVersion !== state.workspaceContextVersion || accountId !== String(cloudAccountId()) || state.cloudLocalMode) return;
       host.dataset.cloudSync = "saving";
       let result = await cloudMessage("workspace.put", {
         spreadsheetId: spreadsheetId(),
@@ -4746,8 +4806,10 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
         workspace: snapshot,
         revision: state.cloudWorkspaceRevision
       });
+      if (contextVersion !== state.workspaceContextVersion || accountId !== String(cloudAccountId()) || state.cloudLocalMode) return;
       if (!result?.ok && result?.code === "WORKSPACE_CONFLICT") {
         const latest = await cloudMessage("workspace.get", { spreadsheetId: spreadsheetId() });
+        if (contextVersion !== state.workspaceContextVersion || accountId !== String(cloudAccountId()) || state.cloudLocalMode) return;
         if (latest?.ok && latest.found) {
           const remote = normalizeWorkspace(latest.workspace);
           if (Number(remote.updatedAt || 0) > Number(snapshot.updatedAt || 0)) {
@@ -4768,6 +4830,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
         if ([401, 403].includes(result?.status)) await refreshCloudAccess();
         return;
       }
+      if (contextVersion !== state.workspaceContextVersion || accountId !== String(cloudAccountId()) || state.cloudLocalMode) return;
       state.cloudWorkspaceRevision = Number(result.revision) || state.cloudWorkspaceRevision;
       host.dataset.cloudSync = "ready";
     }).catch(() => { host.dataset.cloudSync = "error"; });
@@ -8355,7 +8418,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
   }
 
   async function refreshOpenSheetData() {
-    if (panelFrame.hidden || state.saving || state.primaryCreation || state.writeInteractionDepth > 0 || !cloudAccessAllowed()) return true;
+    if (panelFrame.hidden || state.saving || state.primaryCreation || state.writeInteractionDepth > 0 || !appAccessAllowed()) return true;
     const previousValues = [...state.values];
     state.sheetCache.clear();
     state.sheetDataRevision += 1;
@@ -8405,7 +8468,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
 
   function pollSelection() {
     if (state.saving || state.primaryCreation || state.writeInteractionDepth > 0) return;
-    if (!cloudAccessAllowed()) return;
+    if (!appAccessAllowed()) return;
     const reference = nameBoxValue();
     if (!reference) return;
     const gid = currentGid();
@@ -8442,7 +8505,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
   void (async () => {
     if (state.cloudRequired) {
       await refreshCloudAccess();
-      if (!cloudAccessAllowed()) {
+      if (!appAccessAllowed()) {
         ui.cloudAccountUi.open();
         return;
       }

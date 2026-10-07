@@ -127,6 +127,7 @@ if (!automaticallyRestored.ok || automaticallyRestored.user?.role !== "superadmi
 stored.set("srd:workspace:v2:account:1:sheet-123456", { version: 2 });
 stored.set("srd:workspace:v1:account:1:sheet-old", { version: 1 });
 stored.set("srd:workspace:v2:account:2:sheet-other", { version: 2 });
+stored.set("srd:workspace:v2:local:sheet-123456", { version: 2, local: true });
 stored.set("srd:v2:row:sheet-123456:0:2", { values: ["dato"] });
 stored.set("srd:theme-mode", "dark");
 const deleted = await message("account.clear", { confirmation: "ELIMINAR TODO" });
@@ -141,6 +142,7 @@ if (
   || stored.has("srd:workspace:v1:account:1:sheet-old")
   || stored.has("srd:v2:row:sheet-123456:0:2")
   || !stored.has("srd:workspace:v2:account:2:sheet-other")
+  || !stored.has("srd:workspace:v2:local:sheet-123456")
   || stored.get("srd:theme-mode") !== "dark"
 ) {
   throw new Error("La limpieza no eliminó únicamente los datos locales de la cuenta.");
