@@ -6,14 +6,12 @@
   "scripts": {
     "build": "vite build",
     "build:extension": "npm run build && node scripts/build-extension.mjs",
-    "build:kanban-extension": "node scripts/build-kanban-extension.mjs",
     "sheets": "node .codex/skills/google-sheets-browser/scripts/sheets.mjs",
-    "test": "npm run build:extension && npm run build:kanban-extension && node tests/validate-package.mjs && node tests/validate-cloud.mjs && node tests/validate-bridge.mjs && node tests/validate-public-sheet.mjs && node tests/validate-relations.mjs && node tests/validate-views.mjs && node tests/validate-kanban-extension.mjs"
+    "test": "npm run build:extension && node tests/validate-package.mjs && node tests/validate-cloud.mjs && node tests/validate-bridge.mjs && node tests/validate-public-sheet.mjs && node tests/validate-relations.mjs && node tests/validate-views.mjs"
   },
   "dependencies": {
     "@ant-design/cssinjs": "1.24.0",
     "@ant-design/icons": "5.6.1",
-    "@panzoom/panzoom": "^4.6.2",
     "antd": "5.29.3",
     "dayjs": "1.11.21",
     "lucide-react": "^0.468.0",
