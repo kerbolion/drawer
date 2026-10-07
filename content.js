@@ -104,6 +104,9 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
   const CACHE_PREFIX = "srd:v2";
   const CACHE_INDEX_KEY = `${CACHE_PREFIX}:index`;
   const WORKSPACE_PREFIX = "srd:workspace:v2";
+  const WORKSPACE_EXPORT_FORMAT = "sheets-row-drawer-account";
+  const WORKSPACE_EXPORT_VERSION = 1;
+  const MAX_WORKSPACE_IMPORT_BYTES = 50_000_000;
   const THEME_STORAGE_KEY = "srd:theme-mode";
   const MAX_PERSISTENT_ENTRIES = 120;
   const SHEET_MEMORY_TTL = 5_000;
@@ -499,6 +502,27 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     .header-actions {
       display: flex; flex: 0 0 auto; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px;
     }
+    .data-control { position: relative; }
+    .data-button {
+      min-height: 28px; border: 1px solid var(--antd-border); border-radius: ${antdTokens.borderRadius}px;
+      padding: 2px 10px; background: var(--antd-bg-container); color: var(--antd-text); cursor: pointer;
+    }
+    .data-button:hover, .data-button[aria-expanded="true"] { border-color: var(--antd-primary); color: var(--antd-primary); }
+    .data-menu {
+      position: absolute; z-index: 1200; top: calc(100% + 6px); right: 0; min-width: 154px;
+      padding: 5px; border: 1px solid var(--antd-border); border-radius: ${antdTokens.borderRadiusLG}px;
+      background: var(--antd-bg-elevated); box-shadow: var(--antd-shadow-secondary);
+    }
+    .data-menu[hidden] { display: none; }
+    .data-menu > button {
+      display: block; width: 100%; border: 0; border-radius: ${antdTokens.borderRadiusSM}px;
+      padding: 7px 10px; background: transparent; color: var(--antd-text); text-align: left; cursor: pointer;
+    }
+    .data-menu > button:hover { background: var(--antd-fill-tertiary); }
+    .data-menu > button:disabled { color: var(--antd-text-disabled); cursor: default; }
+    .data-message { max-width: 220px; padding: 6px 10px; color: var(--antd-text-secondary); font-size: 11px; line-height: 1.35; }
+    .data-message.error { color: var(--antd-error); }
+    .data-message.success { color: var(--antd-success); }
     .sheet-view-actions { display: inline-flex; align-items: center; gap: 2px; }
     .sheet-view-actions .ant-btn { color: var(--workspace-text-muted); }
     .sheet-view-actions .ant-btn:hover { color: var(--workspace-primary); }
@@ -3946,6 +3970,28 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
   drawerTitle.append(title, byline);
   const headerActions = element("div", "header-actions");
   const sheetViewActions = element("div", "sheet-view-actions");
+  const dataControl = element("div", "data-control");
+  const dataButton = element("button", "data-button", "Datos");
+  dataButton.type = "button";
+  dataButton.setAttribute("aria-haspopup", "menu");
+  dataButton.setAttribute("aria-expanded", "false");
+  const dataMenu = element("div", "data-menu");
+  dataMenu.hidden = true;
+  dataMenu.setAttribute("role", "menu");
+  const exportDataButton = element("button", "", "Exportar");
+  exportDataButton.type = "button";
+  exportDataButton.setAttribute("role", "menuitem");
+  const importDataButton = element("button", "", "Importar");
+  importDataButton.type = "button";
+  importDataButton.setAttribute("role", "menuitem");
+  const importDataInput = element("input");
+  importDataInput.type = "file";
+  importDataInput.accept = "application/json,.json";
+  importDataInput.hidden = true;
+  const dataMessage = element("div", "data-message");
+  dataMessage.hidden = true;
+  dataMenu.append(exportDataButton, importDataButton, importDataInput, dataMessage);
+  dataControl.append(dataButton, dataMenu);
   const themeToggle = element("div", "theme-toggle");
   themeToggle._reactRoot = createRoot(themeToggle);
   flushSync(() => themeToggle._reactRoot.render(antdTree(React.createElement(ThemeToggleControl))));
@@ -4004,7 +4050,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
   close.type = "button";
   close.title = "Cerrar";
   close.setAttribute("aria-label", "Cerrar");
-  headerActions.append(sheetViewActions, saveState, themeToggle, accountButton, close);
+  headerActions.append(sheetViewActions, saveState, dataControl, themeToggle, accountButton, close);
   panelHeader.append(drawerTitle, headerActions);
 
   const main = element("main");
@@ -4105,6 +4151,13 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     accountButton,
     cloudAccountUi,
     sheetViewActions,
+    dataControl,
+    dataButton,
+    dataMenu,
+    exportDataButton,
+    importDataButton,
+    importDataInput,
+    dataMessage,
     saveState,
     status,
     emptyState,
@@ -4185,6 +4238,20 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     }
   });
   ui.accountButton.addEventListener("click", () => ui.cloudAccountUi?.open());
+  ui.dataButton.addEventListener("click", (event) => {
+    event.stopPropagation();
+    const open = ui.dataMenu.hidden;
+    ui.dataMenu.hidden = !open;
+    ui.dataButton.setAttribute("aria-expanded", String(open));
+  });
+  ui.exportDataButton.addEventListener("click", () => void exportWorkspaceConfiguration());
+  ui.importDataButton.addEventListener("click", () => ui.importDataInput.click());
+  ui.importDataInput.addEventListener("change", () => void importSelectedWorkspaceConfiguration());
+  panelDocument.addEventListener("click", (event) => {
+    if (ui.dataControl.contains(event.target)) return;
+    ui.dataMenu.hidden = true;
+    ui.dataButton.setAttribute("aria-expanded", "false");
+  });
   ui.cancel.addEventListener("click", cancelChanges);
   ui.save.addEventListener("click", saveChanges);
   ui.propertyCancel.addEventListener("click", closePropertyEditor);
@@ -4477,6 +4544,223 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
 
   function cacheKey(kind, gid, row) {
     return `${CACHE_PREFIX}:${kind}:${encodeURIComponent(spreadsheetId())}:${encodeURIComponent(gid)}:${row}`;
+  }
+
+  function setDataMenuMessage(message = "", type = "") {
+    ui.dataMessage.textContent = String(message || "");
+    ui.dataMessage.className = `data-message ${type}`.trim();
+    ui.dataMessage.hidden = !message;
+  }
+
+  function setDataTransferBusy(busy) {
+    ui.exportDataButton.disabled = Boolean(busy);
+    ui.importDataButton.disabled = Boolean(busy);
+    ui.dataControl.setAttribute("aria-busy", String(Boolean(busy)));
+  }
+
+  function workspaceExportName() {
+    const contextName = state.cloudLocalMode || !state.cloudRequired
+      ? "local"
+      : state.cloudSession?.account?.name || state.cloudSession?.user?.name || "cuenta";
+    const name = String(contextName)
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 48) || "cuenta";
+    const now = new Date();
+    const date = [now.getFullYear(), String(now.getMonth() + 1).padStart(2, "0"), String(now.getDate()).padStart(2, "0")].join("-");
+    return `sheets-crm-respaldo-${name}-${date}.json`;
+  }
+
+  function workspaceStoragePrefix(owner = workspaceOwner()) {
+    return `${WORKSPACE_PREFIX}:${owner}:`;
+  }
+
+  function workspaceIdFromStorageKey(key, prefix) {
+    try {
+      return decodeURIComponent(String(key).slice(prefix.length));
+    } catch {
+      return "";
+    }
+  }
+
+  function workspaceListId(item) {
+    return String(item?.spreadsheetId || item?.spreadsheet_id || "").trim();
+  }
+
+  async function collectWorkspaceBackup() {
+    await ensureWorkspaceLoaded();
+    await state.workspaceWriteQueue;
+
+    if (state.cloudRequired && !state.cloudLocalMode) {
+      await hydrateCloudWorkspace();
+      if (!state.cloudWorkspaceHydrated) {
+        throw new Error("No se pudo sincronizar la cuenta antes de crear el respaldo.");
+      }
+      window.clearTimeout(state.cloudWorkspaceTimer);
+      state.cloudWorkspaceTimer = null;
+      await persistCloudWorkspace();
+      await state.cloudWorkspaceWriteQueue;
+      const listed = await cloudMessage("workspace.list");
+      if (!listed?.ok) throw new Error(listed?.error || "No se pudieron consultar los documentos de la cuenta.");
+      const entries = await Promise.all((listed.workspaces || []).map(async (metadata) => {
+        const id = workspaceListId(metadata);
+        if (!id) return null;
+        const result = await cloudMessage("workspace.get", { spreadsheetId: id });
+        if (!result?.ok || !result.found) throw new Error(result?.error || `No se pudo exportar ${metadata.name || id}.`);
+        return {
+          spreadsheetId: id,
+          name: String(result.name || metadata.name || id),
+          workspace: normalizeWorkspace(result.workspace)
+        };
+      }));
+      return entries.filter(Boolean);
+    }
+
+    const area = storageArea();
+    const prefix = workspaceStoragePrefix();
+    const stored = area ? await area.get(null) : {};
+    const entries = Object.entries(stored || {})
+      .filter(([key]) => key.startsWith(prefix))
+      .map(([key, workspace]) => {
+        const id = workspaceIdFromStorageKey(key, prefix);
+        return id ? {
+          spreadsheetId: id,
+          name: id === spreadsheetId() ? String(document.title || activeSheetName() || id) : id,
+          workspace: normalizeWorkspace(workspace)
+        } : null;
+      })
+      .filter(Boolean);
+    if (!entries.some((entry) => entry.spreadsheetId === spreadsheetId())) {
+      entries.push({
+        spreadsheetId: spreadsheetId(),
+        name: String(document.title || activeSheetName() || spreadsheetId()),
+        workspace: normalizeWorkspace(state.workspace)
+      });
+    }
+    return entries;
+  }
+
+  async function exportWorkspaceConfiguration() {
+    if (!appAccessAllowed()) {
+      ui.dataMenu.hidden = true;
+      ui.dataButton.setAttribute("aria-expanded", "false");
+      ui.cloudAccountUi?.open();
+      return;
+    }
+    setDataTransferBusy(true);
+    setDataMenuMessage();
+    try {
+      const workspaces = await collectWorkspaceBackup();
+      const payload = {
+        format: WORKSPACE_EXPORT_FORMAT,
+        version: WORKSPACE_EXPORT_VERSION,
+        exportedAt: new Date().toISOString(),
+        scope: state.cloudRequired && !state.cloudLocalMode ? "account" : "local",
+        account: state.cloudRequired && !state.cloudLocalMode ? {
+          name: String(state.cloudSession?.account?.name || ""),
+          email: String(state.cloudSession?.user?.email || "")
+        } : null,
+        workspaces: JSON.parse(JSON.stringify(workspaces))
+      };
+      const view = panelFrame.contentWindow;
+      const BlobConstructor = view?.Blob || Blob;
+      const UrlConstructor = view?.URL || URL;
+      const url = UrlConstructor.createObjectURL(new BlobConstructor([JSON.stringify(payload, null, 2)], { type: "application/json" }));
+      const link = panelDocument.createElement("a");
+      link.href = url;
+      link.download = workspaceExportName();
+      panelDocument.body.appendChild(link);
+      link.click();
+      link.remove();
+      view?.setTimeout?.(() => UrlConstructor.revokeObjectURL(url), 0);
+      ui.dataMenu.hidden = true;
+      ui.dataButton.setAttribute("aria-expanded", "false");
+    } catch (error) {
+      setDataMenuMessage(error?.message || "No se pudo exportar la configuración.", "error");
+    } finally {
+      setDataTransferBusy(false);
+    }
+  }
+
+  async function importSelectedWorkspaceConfiguration() {
+    const file = ui.importDataInput.files?.[0] || null;
+    ui.importDataInput.value = "";
+    if (!file) return;
+    setDataTransferBusy(true);
+    setDataMenuMessage();
+    try {
+      if (!appAccessAllowed()) throw new Error("Inicia sesión o continúa sin cuenta antes de importar.");
+      if (file.size > MAX_WORKSPACE_IMPORT_BYTES) throw new Error("El archivo supera el límite de 50 MB.");
+      if (state.saving || state.primaryCreation || state.primaryDrafts.size || state.relatedDrafts.size) {
+        throw new Error("Guarda o cancela los cambios pendientes antes de importar.");
+      }
+      const payload = JSON.parse(await file.text());
+      if (
+        payload?.format !== WORKSPACE_EXPORT_FORMAT
+        || Number(payload?.version) !== WORKSPACE_EXPORT_VERSION
+        || !Array.isArray(payload?.workspaces)
+        || !payload.workspaces.length
+        || payload.workspaces.length > 500
+      ) {
+        throw new Error("El archivo no contiene un respaldo válido de Sheets CRM.");
+      }
+
+      const syncCloud = state.cloudRequired && !state.cloudLocalMode && cloudAccessAllowed();
+      await state.workspaceWriteQueue;
+      const imported = new Map();
+      for (const entry of payload.workspaces) {
+        const id = workspaceListId(entry);
+        if (!id || Number(entry?.workspace?.version) !== 2 || imported.has(id)) {
+          throw new Error("El respaldo contiene documentos inválidos o repetidos.");
+        }
+        const workspace = normalizeWorkspace(entry.workspace);
+        workspace.spreadsheetId = id;
+        workspace.updatedAt = Date.now();
+        imported.set(id, { spreadsheetId: id, name: String(entry.name || id), workspace });
+      }
+
+      if (state.propertyColumn !== null) closePropertyEditor();
+      if (syncCloud) {
+        window.clearTimeout(state.cloudWorkspaceTimer);
+        state.cloudWorkspaceTimer = null;
+        await state.cloudWorkspaceWriteQueue;
+        const cleared = await cloudMessage("account.clear", { confirmation: "ELIMINAR TODO" });
+        if (!cleared?.ok) throw new Error(cleared?.error || "No se pudieron limpiar los datos de la cuenta.");
+        for (const entry of imported.values()) {
+          const result = await cloudMessage("workspace.put", {
+            spreadsheetId: entry.spreadsheetId,
+            name: entry.name,
+            workspace: entry.workspace,
+            revision: 0
+          });
+          if (!result?.ok) throw new Error(result?.error || `No se pudo importar ${entry.name}.`);
+        }
+      }
+
+      const area = storageArea();
+      if (area) {
+        const prefix = workspaceStoragePrefix();
+        const stored = await area.get(null);
+        const obsoleteKeys = Object.keys(stored || {}).filter((key) => key.startsWith(prefix));
+        if (obsoleteKeys.length) await area.remove(obsoleteKeys);
+        const replacements = {};
+        for (const entry of imported.values()) {
+          replacements[`${prefix}${encodeURIComponent(entry.spreadsheetId)}`] = entry.workspace;
+        }
+        await area.set(replacements);
+      }
+
+      resetWorkspaceForAccount();
+      await activateWorkspaceContext(syncCloud);
+      setDataMenuMessage(`${imported.size} ${imported.size === 1 ? "documento importado" : "documentos importados"} correctamente.`, "success");
+    } catch (error) {
+      setDataMenuMessage(error?.message || "No se pudo importar la configuración.", "error");
+    } finally {
+      setDataTransferBusy(false);
+    }
   }
 
   function workspaceOwner() {

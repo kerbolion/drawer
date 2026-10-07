@@ -1763,6 +1763,49 @@ try {
   }
   if (!rectangularClearSaved) throw new Error("Tabla no verifico el borrado rectangular de varias filas");
 
+  const dataMenu = await cdp.evaluate(panelExpression(`
+    const control = panel.querySelector('.data-control');
+    control.querySelector('.data-button').click();
+    return {
+      label: control.querySelector('.data-button')?.textContent.trim() || '',
+      expanded: control.querySelector('.data-button')?.getAttribute('aria-expanded'),
+      actions: Array.from(control.querySelectorAll('.data-menu > button'), button => button.textContent.trim())
+    };
+  `));
+  if (dataMenu.label !== "Datos" || dataMenu.expanded !== "true" || JSON.stringify(dataMenu.actions) !== JSON.stringify(["Exportar", "Importar"])) {
+    throw new Error(`El menu de datos no contiene Exportar e Importar: ${JSON.stringify(dataMenu)}`);
+  }
+
+  await cdp.evaluate(panelExpression(`
+    const input = panel.querySelector('.data-menu input[type=file]');
+    const payload = {
+      format: 'sheets-row-drawer-account',
+      version: 1,
+      scope: 'local',
+      workspaces: [{
+        spreadsheetId: 'views',
+        name: 'Documento de prueba',
+        workspace: { version: 2, spreadsheetId: 'views', sheets: {}, relationViews: {}, sheetViews: {}, updatedAt: 1 }
+      }]
+    };
+    const file = new panel.defaultView.File([JSON.stringify(payload)], 'sheets-crm.json', { type: 'application/json' });
+    const transfer = new panel.defaultView.DataTransfer();
+    transfer.items.add(file);
+    input.files = transfer.files;
+    input.dispatchEvent(new panel.defaultView.Event('change', { bubbles: true }));
+  `));
+  const importDeadline = Date.now() + 5_000;
+  let importMessage = "";
+  while (Date.now() < importDeadline) {
+    importMessage = await cdp.evaluate(panelExpression(`return panel.querySelector('.data-message.success')?.textContent.trim() || '';`));
+    if (importMessage) break;
+    await delay(50);
+  }
+  if (importMessage !== "1 documento importado correctamente.") {
+    const error = await cdp.evaluate(panelExpression(`return panel.querySelector('.data-message.error')?.textContent.trim() || '';`));
+    throw new Error(`No se pudo importar una configuracion valida: ${error || importMessage}`);
+  }
+
   console.log("VISTAS_OK: Tabla, Kanban, Calendario, Cronograma y Charts usan una superficie independiente; sus registros reutilizan el drawer original.");
 } finally {
   cdp?.close();

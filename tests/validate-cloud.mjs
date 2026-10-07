@@ -46,6 +46,9 @@ async function fetchMock(url, options = {}) {
     if (options.method === "PUT") return jsonResponse({ ok: true, revision: 4, updatedAt: "2026-10-03T00:00:00Z" });
     return jsonResponse({ workspace: { version: 2, sheets: {}, updatedAt: 10 }, revision: 3, name: "Prueba" });
   }
+  if (pathname.endsWith("/workspaces")) {
+    return jsonResponse({ workspaces: [{ spreadsheet_id: "sheet-123456", name: "Prueba", revision: 3 }] });
+  }
   if (pathname.endsWith("/admin/users/2/impersonate")) {
     return jsonResponse({
       token: "user-token",
@@ -106,6 +109,9 @@ if (authorizedRequest?.options?.headers?.Authorization !== "Bearer admin-token")
 
 const saved = await message("workspace.put", { spreadsheetId: "sheet-123456", workspace: { version: 2 }, revision: 3 });
 if (!saved.ok || saved.revision !== 4) throw new Error("No se persistió la revisión del workspace.");
+
+const listed = await message("workspace.list");
+if (!listed.ok || listed.workspaces?.[0]?.spreadsheet_id !== "sheet-123456") throw new Error("No se listaron los workspaces de la cuenta.");
 
 const impersonated = await message("admin.impersonate", { userId: 2 });
 if (!impersonated.ok || !impersonated.canStopImpersonation || stored.get("srd:cloud:admin-token") !== "admin-token" || stored.get("srd:cloud:auth-token") !== "user-token") {
