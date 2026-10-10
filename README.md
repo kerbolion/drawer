@@ -77,30 +77,33 @@ Antes de publicar, hospeda [`PRIVACY.md`](PRIVACY.md) en una URL pública y decl
 
 ## Compartir la carpeta
 
-El directorio ya incluye el skill de Codex en `.codex/skills/google-sheets-browser`. Para usarlo en otra computadora basta con compartir la carpeta completa:
+El directorio incluye el skill de Codex en `.codex/skills/google-sheets-browser` y el servidor MCP en `mcp/server.mjs`. Para usarlo en otra computadora:
 
 1. Instala una versión actual de Node.js.
 2. Ejecuta `npm install` y `npm run build:extension`; abre `chrome://extensions`, activa **Modo de desarrollador** y carga `dist-extension` con **Cargar descomprimida**.
-3. Abre esta misma carpeta como proyecto en Codex e inicia una conversación nueva.
-4. Abre en el navegador la hoja de Google Sheets y conserva iniciada la sesión de Google.
-5. Escribe: `Usa $google-sheets-browser para inspeccionar esta hoja: URL_DE_LA_HOJA`.
+3. En Abrir CRM abre **Mi cuenta > Conexiones**, crea una credencial y guárdala como `ABRIR_CRM_API_TOKEN` en la configuración del MCP.
+4. Configura Codex para ejecutar `node mcp/server.mjs` desde esta carpeta y reinicia la sesión para cargar sus herramientas.
+5. Abre en el navegador la hoja de Google Sheets, conserva iniciadas las sesiones de Google y Abrir CRM, y escribe: `Usa $google-sheets-browser para inspeccionar esta hoja: URL_DE_LA_HOJA`.
 
-Codex detecta el skill desde el proyecto; no es necesario copiarlo al perfil del usuario. La IA debe ejecutarse localmente en la misma computadora que el navegador, porque el puente solo escucha en `127.0.0.1:17373`.
+Codex detecta el skill desde el proyecto; no es necesario copiarlo al perfil del usuario. La credencial MCP es revocable, se muestra una sola vez y el servidor conserva únicamente su hash.
 
-Para otro agente local con acceso a terminal, indícale que lea `.codex/skills/google-sheets-browser/SKILL.md` y use únicamente el script allí documentado como transporte. Un agente remoto sin acceso al equipo y a `127.0.0.1` no puede comunicarse con la extensión.
+El MCP puede ejecutarse local o remotamente, pero una operación solo se completa cuando el documento correspondiente está abierto en una extensión autenticada de la misma cuenta.
 
-## Conexión local con Codex
+## Conexión MCP con Codex
 
-La extensión incluye el skill `google-sheets-browser`, basado en el mismo principio de `claude-cowork-google-sheets`: usa la sesión de Google ya abierta en el navegador, lee mediante `htmlembed` y escribe mediante un único pegado TSV. No necesita Google Sheets API, OAuth ni cuentas de servicio.
+La extensión usa la sesión de Google ya abierta en el navegador, lee mediante las vistas disponibles de Sheets y escribe mediante el motor compartido de mutaciones. El MCP también puede crear, renombrar y eliminar hojas, además de poblarlas en el mismo lote ordenado. No necesita Google Sheets API, OAuth ni cuentas de servicio.
 
-La comunicación usa un servidor efímero limitado a `127.0.0.1:17373`. Solo existe mientras Codex ejecuta un comando y la extensión únicamente acepta las operaciones `info`, `read`, `inspect`, `write` y `clear`.
+El MCP envía ejecuciones breves a la API de Abrir CRM. El servidor avisa por WebSocket a las pestañas autenticadas; solo la pestaña del documento solicitado puede reclamar la ejecución. No hay sondeo periódico, archivos JSON temporales ni servidor localhost.
 
 El skill está incluido en `.codex/skills/google-sheets-browser`, por lo que Codex lo descubre al abrir este directorio como proyecto. Si se desea usarlo desde cualquier proyecto, se puede copiar esa carpeta a `%USERPROFILE%\.codex\skills\google-sheets-browser`.
 
-Ejemplo directo desde este proyecto:
+Ejemplo de configuración MCP en `config.toml`:
 
-```powershell
-npm run sheets -- read --url "https://docs.google.com/spreadsheets/d/.../edit#gid=0" --range "A1:D20"
+```toml
+[mcp_servers.abrir_crm_sheets]
+command = "node"
+args = ["C:/RUTA/AL/PROYECTO/mcp/server.mjs"]
+env = { ABRIR_CRM_API_TOKEN = "armcp_..." }
 ```
 
 ## Relaciones automáticas

@@ -61,6 +61,8 @@ export function createCloudAccountUi(options) {
     mode: "login",
     tab: "profile",
     plans: [],
+    integrationTokens: [],
+    createdIntegrationToken: "",
     adminAccounts: [],
     adminUsers: [],
     adminPlans: [],
@@ -143,6 +145,16 @@ export function createCloudAccountUi(options) {
   }
 
   function setSession(session) {
+    const previousIdentity = state.session?.authenticated
+      ? `${state.session.user?.id || ""}:${state.session.account?.id || ""}`
+      : "";
+    const nextIdentity = session?.authenticated
+      ? `${session.user?.id || ""}:${session.account?.id || ""}`
+      : "";
+    if (!nextIdentity || previousIdentity !== nextIdentity) {
+      state.integrationTokens = [];
+      state.createdIntegrationToken = "";
+    }
     state.session = session?.authenticated ? session : { authenticated: false };
     state.localAccess = false;
     state.mode = state.session.authenticated ? "profile" : "login";
@@ -176,6 +188,12 @@ export function createCloudAccountUi(options) {
     if (state.plans.length) return;
     const result = await request("billing.plans");
     state.plans = result.plans || [];
+  }
+
+  async function loadIntegrations() {
+    const result = await request("integration.tokens");
+    state.integrationTokens = result.tokens || [];
+    render();
   }
 
   function statusMessage() {
@@ -289,6 +307,7 @@ export function createCloudAccountUi(options) {
     const tabs = el(document, "div", "cloud-tabs");
     const definitions = [
       ["profile", "Mi cuenta"],
+      ["integrations", "Conexiones"],
       ...(state.session.user?.role === "superadmin" ? [["admin", "Administración"], ["plans", "Planes"]] : [])
     ];
     for (const [id, label] of definitions) {
@@ -301,6 +320,7 @@ export function createCloudAccountUi(options) {
         try {
           if (id === "admin") await loadAdmin();
           if (id === "plans") await loadAdminPlans();
+          if (id === "integrations") await loadIntegrations();
         } catch (error) { showError(error.message); }
       });
       tabs.appendChild(control);
@@ -404,6 +424,72 @@ export function createCloudAccountUi(options) {
     });
     card.append(confirmation.item, actionRow(back, remove));
     body.appendChild(card);
+  }
+
+  function renderIntegrations() {
+    heading.textContent = "Conexiones";
+    const create = el(document, "div", "cloud-card");
+    create.appendChild(el(document, "h3", "", "Codex y herramientas externas"));
+    create.appendChild(el(document, "p", "cloud-copy", "Crea una credencial revocable para conectar el servidor MCP. El valor completo solo se muestra una vez."));
+    const name = formInput({ name: "integrationName", label: "Nombre", value: "Codex", autocomplete: "off" });
+    const generate = button(document, "Crear conexión", "primary-button");
+    generate.addEventListener("click", async () => {
+      try {
+        const result = await request("integration.create", { name: name.control.value });
+        state.createdIntegrationToken = result.token || "";
+        const tokens = await request("integration.tokens");
+        state.integrationTokens = tokens.tokens || [];
+        showNotice("Conexión creada. Copia la credencial ahora; no volverá a mostrarse.");
+      } catch (error) { showError(error.message); }
+    });
+    create.append(name.item, actionRow(generate));
+    body.appendChild(create);
+
+    if (state.createdIntegrationToken) {
+      const secret = el(document, "div", "cloud-card");
+      secret.appendChild(el(document, "h3", "", "Credencial nueva"));
+      const value = formInput({
+        name: "integrationToken",
+        label: "Token",
+        value: state.createdIntegrationToken,
+        autocomplete: "off",
+        readOnly: true
+      });
+      const copy = button(document, "Copiar credencial", "primary-button");
+      copy.addEventListener("click", async () => {
+        try {
+          await document.defaultView.navigator.clipboard.writeText(state.createdIntegrationToken);
+          showNotice("Credencial copiada.");
+        } catch { showError("El navegador no permitió copiar la credencial."); }
+      });
+      secret.append(
+        value.item,
+        el(document, "p", "cloud-copy", "Guárdala como ABRIR_CRM_API_TOKEN en el entorno desde el que ejecutas Codex."),
+        actionRow(copy)
+      );
+      body.appendChild(secret);
+    }
+
+    const list = el(document, "div", "cloud-admin-list");
+    for (const connection of state.integrationTokens) {
+      const card = el(document, "div", "cloud-card cloud-admin-card");
+      card.appendChild(el(document, "h3", "", connection.name || `Conexión ${connection.id}`));
+      card.appendChild(el(document, "p", "cloud-copy", connection.lastUsedAt
+        ? `Último uso: ${dateLabel(connection.lastUsedAt)}`
+        : `Creada: ${dateLabel(connection.createdAt)}`));
+      const revoke = button(document, "Revocar", "danger-button");
+      revoke.addEventListener("click", async () => {
+        try {
+          await request("integration.revoke", { id: connection.id });
+          state.integrationTokens = state.integrationTokens.filter(item => item.id !== connection.id);
+          render();
+        } catch (error) { showError(error.message); }
+      });
+      card.appendChild(actionRow(revoke));
+      list.appendChild(card);
+    }
+    if (!state.integrationTokens.length) list.appendChild(el(document, "p", "cloud-copy", "No hay conexiones activas."));
+    body.appendChild(list);
   }
 
   function renderRenewal() {
@@ -550,6 +636,7 @@ export function createCloudAccountUi(options) {
     renderTabs();
     if (state.tab === "admin") renderAdmin();
     else if (state.tab === "plans") renderPlans();
+    else if (state.tab === "integrations") renderIntegrations();
     else if (state.tab === "renew") renderRenewal();
     else if (state.tab === "delete") renderDeleteAccount();
     else renderProfile();

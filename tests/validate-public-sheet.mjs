@@ -143,29 +143,10 @@ try {
   const writeScript = await readFile(path.join(extensionDir, "page-write.js"), "utf8");
   await cdp.evaluate(writeScript);
   await cdp.evaluate(`(() => {
-    globalThis.__codexBridgeTest = { delivered: false, result: null };
     globalThis.chrome = {
       runtime: {
         lastError: null,
-        sendMessage(message, callback) {
-          if (message?.source !== "sheets-row-drawer-codex") return callback(null);
-          if (message.type === "poll") {
-            if (globalThis.__codexBridgeTest.delivered) return callback({ command: null });
-            globalThis.__codexBridgeTest.delivered = true;
-            return callback({
-              command: {
-                id: "browser-read-test",
-                action: "read",
-                params: { gid: "0", range: "A1:F3", sheet: "" }
-              }
-            });
-          }
-          if (message.type === "result") {
-            globalThis.__codexBridgeTest.result = message.payload;
-            return callback({ ok: true });
-          }
-          callback(null);
-        }
+        sendMessage(message, callback) { callback(null); }
       }
     };
   })()`, isolated.executionContextId);
@@ -368,18 +349,6 @@ try {
   })()`);
   if (launcherMove.after - launcherMove.before !== 40 || launcherMove.hidden || !launcherMove.stillOutsideGoogleTree) {
     throw new Error(`El lanzador no siguió la barra mediante listeners: ${JSON.stringify(launcherMove)}`);
-  }
-
-  const bridgeDeadline = Date.now() + 15_000;
-  let bridgeResult;
-  while (Date.now() < bridgeDeadline) {
-    bridgeResult = await cdp.evaluate("globalThis.__codexBridgeTest.result", isolated.executionContextId);
-    if (bridgeResult) break;
-    await delay(100);
-  }
-  const bridgeValues = bridgeResult?.result?.rows?.flatMap((row) => row.values) || [];
-  if (!bridgeResult?.ok || !bridgeValues.includes("Alexandra")) {
-    throw new Error(`El ejecutor de Codex no leyó la hoja autenticada: ${JSON.stringify(bridgeResult)}`);
   }
 
   const isolation = await cdp.evaluate(`(() => {

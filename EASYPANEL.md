@@ -99,6 +99,8 @@ En la sección **Domains** de la App:
 4. Activa HTTPS y el resolvedor de certificados disponible en tu instalación, normalmente Let's Encrypt.
 5. Márcalo como dominio principal.
 
+Mantén habilitada la actualización de conexiones WebSocket para `/socket.io/`. Las ejecuciones del MCP usan ese canal para avisar a la pestaña abierta de Google Sheets y están configuradas sin transporte HTTP de sondeo.
+
 No publiques el puerto `3000` desde **Ports**. Para una API HTTP pública, EasyPanel debe recibir el tráfico mediante **Domains**.
 
 ## 6. Primer despliegue
@@ -109,7 +111,7 @@ Pulsa **Deploy** y revisa primero la acción de compilación y luego **Logs**. E
 Sheets Row Drawer API en http://localhost:3000/api/sheets-drawer
 ```
 
-Durante el primer inicio el servidor crea las tablas, los planes predeterminados y el usuario `superadmin` definido por `ADMIN_EMAIL` y `ADMIN_PASSWORD`.
+Durante el primer inicio el servidor crea las tablas, los planes predeterminados y el usuario `superadmin` definido por `ADMIN_EMAIL` y `ADMIN_PASSWORD`. Al desplegar esta migración también crea `integration_tokens` y `sheet_executions`; no se necesita ejecutar SQL manualmente.
 
 Comprueba desde el navegador:
 

@@ -1,68 +1,47 @@
 ---
 name: google-sheets-browser
-description: Read, inspect, populate, edit, or clear existing Google Sheets tabs through the Sheets Row Drawer extension and the user's authenticated browser session. Use when a user provides a Google Sheets URL or asks Codex to work directly with an open spreadsheet without Google APIs, OAuth, or service-account credentials.
+description: Read, inspect, populate, edit, or clear existing Google Sheets tabs through the configured Abrir CRM MCP tools and the user's authenticated browser session. Use when a user provides a Google Sheets URL or asks Codex to work directly with an open spreadsheet without Google APIs, OAuth, or service-account credentials.
 ---
 
 # Google Sheets Browser
 
-Use `scripts/sheets.mjs` as the only transport. It starts a short-lived server on `127.0.0.1:17373`; the browser extension picks up one command, executes it in the matching open spreadsheet, returns the result, and the server exits.
+Use only the direct Abrir CRM Sheets MCP tools. They submit short-lived executions to the cloud account configured by `ABRIR_CRM_API_TOKEN`; the matching open Google Sheets tab claims and runs them through Abrir CRM's shared mutation engine.
 
-The target spreadsheet must be open in a browser where Sheets Row Drawer is loaded and signed in with an active Sheets CRM account. Pass the user's exact Sheets URL so the bridge selects the correct document and `gid`.
+## Connection guard
 
-## Commands
+The expected tools are `profile`, `info`, `list_records`, `read_range`, `inspect_range`, and `apply_operations`. If they are unavailable in the current session, stop and ask the user to restart Codex so the configured MCP can load. Do not extract the token, launch a manual MCP client, create a localhost bridge, write temporary command files, or send operation payloads through a shell.
 
-Run these from the skill directory, or use the absolute path to this skill's script:
+The target document must already be open in a Chromium browser with the current Abrir CRM extension loaded and signed in to an active, unexpired account. “Continuar sin cuenta” cannot claim executions.
 
-```powershell
-node scripts/sheets.mjs info --url "SHEETS_URL"
-node scripts/sheets.mjs list --url "SHEETS_URL" --sheet "Servicios" --limit "100"
-node scripts/sheets.mjs list --url "SHEETS_URL" --sheet "Servicios" --where "Estado=Activo"
-node scripts/sheets.mjs read --url "SHEETS_URL" --range "A1:D20"
-node scripts/sheets.mjs inspect --url "SHEETS_URL" --range "M2"
-node scripts/sheets.mjs read --url "SHEETS_URL" --sheet "Servicios" --range "A1:F50"
-node scripts/sheets.mjs write --url "SHEETS_URL" --sheet "Servicios" --start "B2" --values-file "VALUES_JSON"
-node scripts/sheets.mjs append --url "SHEETS_URL" --sheet "Servicios" --set "ID=S-104" --set "Nombre=Instalación"
-node scripts/sheets.mjs update --url "SHEETS_URL" --sheet "Servicios" --row "8" --set "Estado=Completado" --set "Notas="
-node scripts/sheets.mjs update --url "SHEETS_URL" --sheet "Servicios" --where "ID=S-104" --set "Estado=Completado"
-node scripts/sheets.mjs clear --url "SHEETS_URL" --sheet "Servicios" --range "B2:D10"
-```
+## Read workflow
 
-Always use the exact Google Sheets URL supplied by the user. The URL identifies the spreadsheet and `gid`, so commands remain isolated to that document without depending on which Brave tab is active.
+1. Call `profile` before the first document operation to confirm the connected account.
+2. Call `info` with the exact Sheets URL to confirm that the intended document is open and discover visible sheet names.
+3. Prefer `list_records` for ordinary data because it returns objects keyed by existing headers and supports exact filters.
+4. Use `read_range` for bounded cell ranges. Use `inspect_range` only for up to 100 cells in the active sheet when the displayed value needs visual diagnostics.
 
-Prefer `list` for ordinary reads: it returns records as objects keyed by their column headers, accepts repeated `--where "Columna=valor"` filters, and avoids calculating an A1 range. It reads 100 records by default; use `--from-row` and `--limit` to page through up to 500 records at a time.
+Preserve strings exactly, including URLs, multiline text, leading zeroes, and empty values. Page `list_records` with `fromRow` and `limit` when more than 500 records are needed.
 
-Prefer `append` for a new record: it finds the next available row, matches each `--set` to the header name, and rejects unknown columns. Prefer `update` for an existing record: it changes only the named columns and can locate one unique record through repeated `--where` conditions, so a row number is usually unnecessary. An empty value such as `--set "Notas="` clears that cell. These commands avoid temporary files for ordinary record work.
+## Mutation workflow
 
-For a batch with named fields, pass `--records-file` or `--records` containing an array of objects. The CLI automatically splits append batches above 100 rows, 5,000 cells, or roughly 250 KiB into sequential verified chunks. Request and response bodies have a hard 1 MiB limit.
+Read [references/operations.md](references/operations.md) before constructing mutations.
 
-Use `write` for an exact cell range or a multi-row batch. Small matrices can be passed through `--values`; for complex or multiline batches, create a temporary UTF-8 JSON file containing a rectangular array, for example:
+- Use the exact Sheets URL supplied by the user. Names in `sheet`, `where`, `changes`, and records must match existing sheet names and headers.
+- Combine the changes for one request in one ordered `apply_operations` call when practical.
+- Use `create_sheet`, `rename_sheet`, and `delete_sheet` for tab lifecycle changes. A newly created sheet can be populated by a following `write` or `append` operation in the same ordered call.
+- Prefer `append` with named records for new rows and `update` with a unique `where` selector for existing rows. An empty string clears a named cell.
+- Use `write` only for an exact rectangular matrix and `clear` for an explicit bounded range.
+- Inspect every returned operation result and its `verified` value. After mutation, read the affected records or ranges and verify the requested values.
 
-```json
-[["C-1", "Limpieza", 25], ["C-2", "Entrega", 40]]
-```
+Operations run sequentially and are verified through Google Sheets. They are not transactional: if one operation fails, earlier operations in the same execution may already be applied. Read the reported partial result before deciding whether a retry is safe.
 
-Use `info` first when the active tab or available sheet names matter. Use bounded ranges for reads. When `--sheet` is present, reads and mutation verification are resolved by that sheet name even if Sheets changes the active tab during a write. Preserve strings exactly; do not replace URLs or reformat values.
+An explicit request to edit or clear specified data authorizes that operation. A read request does not authorize mutation. Resolve ambiguous targets or replacement values before writing.
 
-Use `inspect` only for a small range in the active sheet when a displayed value cannot be explained by `read`. It reports the sanitized HTML cell representation and Google Visualization value metadata, and accepts at most 100 cells.
+## Boundaries
 
-The skill keeps its own read-only discovery logic for headers, IDs, record matching, and the next append row. All changes from `write`, `append`, `update`, and `clear` must use the drawer's shared cell-mutation engine. That engine chooses horizontal, vertical, rectangular, or exact operations; consolidates adjacent empty cells into rectangular `clear` operations; safely batches large areas; verifies propagation; and retries only unconfirmed cells. Do not add a separate paste, clear, batching, or verification path for skill commands. Inspect the returned `verified` field and report a verification failure instead of assuming success.
-
-## Limitations
-
-- The spreadsheet must remain open and responsive in a Chromium browser with the unpacked extension loaded. The active Google session must already have access to the document and edit permission for mutations.
-- Sheets Row Drawer must have an authenticated, active, unexpired service account. Signed-out, suspended, or expired accounts do not poll the local bridge.
-- The bridge is local to the computer at `127.0.0.1:17373`. It accepts one command at a time; a second command fails while the port is occupied. The default command timeout is 30 seconds and can be changed with `--timeout`.
-- Supported operations are `info`, `list`, `read`, `inspect`, `write`, `append`, `update`, and `clear`. The skill only operates on existing sheets: it cannot create, rename, delete, format, protect, filter, or move sheets, rows, and columns.
-- Ranges must use A1 notation with one or two column letters (`A` through `ZZ`) and positive row numbers. Whole-column ranges, named ranges, disjoint ranges, and R1C1 notation are not accepted.
-- `write` requires a non-empty rectangular JSON matrix and a single starting cell. `clear` removes cell contents but preserves formatting and data validation.
-- `list`, `append`, and `update --where` require existing column headers. Field names match headers after case and accent normalization. `update --where` rejects zero matches and multiple matches instead of guessing which row to edit.
-- `read` returns displayed values rather than guaranteed underlying formulas. A completely empty range can produce no rows, so do not infer that a blank result contains records.
-- `inspect` works only on the active sheet and accepts at most 100 cells. It exposes sanitized cell HTML and available Visualization metadata, which may still omit internal Sheets state.
-- Bridge request and result bodies are limited to 1 MiB. Prefer bounded reads and split large data operations into sequential ranges.
-- Writes depend on Sheets UI events and are verified after the paste or clear. They are not transactional and have no automatic rollback; treat `verified: false`, a timeout, or a changed selection as an uncertain result and read the target range before retrying.
-- `info` discovers the sheet tabs visible in the current document UI. Hidden sheets or tabs that Google has not rendered may not be listed.
-- The bridge does not use Google APIs, service accounts, additional OAuth, or browser-cookie extraction. It cannot operate when the browser session is signed out, offline, blocked by a permission dialog, or unable to load the sheet.
-
-An explicit request to edit or clear specified data authorizes that operation. If the target sheet, range, or replacement values are ambiguous, resolve the ambiguity before mutating the document. Do not treat a read request as authorization to write.
-
-The matching spreadsheet must already be open. If the bridge times out, ask the user to activate or refresh that existing tab, verify that the extension was loaded from the latest `dist-extension` build and that its account session is active, then retry once. Do not open a duplicate tab, fall back to Google APIs, or attempt to read browser cookies.
+- The tools can create, rename, and delete visible sheet tabs. They do not format, protect, filter, reorder, hide, or move sheets, rows, or columns.
+- Ranges use A1 notation from `A` through `ZZ`; whole-column, named, disjoint, and R1C1 ranges are unsupported.
+- `list_records`, named `append`, and `update` require existing headers. `update` rejects missing or non-unique matches.
+- The extension reads displayed values and cannot guarantee access to underlying formulas or hidden Sheets internals.
+- Executions expire quickly. If one expires, have the user activate or refresh the existing document, verify the current extension build and authenticated account, then retry once.
+- Do not open a duplicate tab, use Google APIs, extract cookies, or fall back to browser automation outside the MCP tools.

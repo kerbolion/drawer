@@ -3,8 +3,12 @@ import mysql from "mysql2/promise";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import Stripe from "stripe";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { createServer } from "node:http";
+import { Server as SocketIOServer } from "socket.io";
 
 const app = express();
+const httpServer = createServer(app);
 const port = Number(process.env.PORT || 3000);
 const apiPrefix = String(process.env.API_PREFIX || "/api/sheets-drawer").replace(/\/$/, "");
 const publicUrl = String(process.env.PUBLIC_URL || `http://localhost:${port}`).replace(/\/$/, "");
@@ -14,6 +18,21 @@ const adminEmail = String(process.env.ADMIN_EMAIL || "").trim().toLowerCase();
 const adminPassword = String(process.env.ADMIN_PASSWORD || "");
 const stripe = process.env.STRIPE_SECRET_KEY ? new Stripe(process.env.STRIPE_SECRET_KEY) : null;
 const stripeWebhookSecret = String(process.env.STRIPE_WEBHOOK_SECRET || "");
+const publicOrigin = new URL(publicUrl).origin;
+const io = new SocketIOServer(httpServer, {
+  cors: {
+    origin(origin, callback) {
+      const allowed = !origin
+        || origin === publicOrigin
+        || origin.startsWith("chrome-extension://")
+        || origin === "https://docs.google.com";
+      callback(allowed ? null : new Error("Origen no permitido."), allowed);
+    },
+    methods: ["GET", "POST"]
+  },
+  transports: ["websocket"]
+});
+const executionWaiters = new Map();
 
 if (process.env.NODE_ENV === "production" && jwtSecret.length < 32) {
   throw new Error("JWT_SECRET debe tener al menos 32 caracteres en producción.");
@@ -78,6 +97,50 @@ const migrate = async () => {
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     CONSTRAINT fk_drawer_users_account FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE SET NULL
+  )`);
+
+  await pool.query(`CREATE TABLE IF NOT EXISTS integration_tokens (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    user_id BIGINT UNSIGNED NOT NULL,
+    account_id BIGINT UNSIGNED NOT NULL,
+    name VARCHAR(120) NOT NULL,
+    token_hash CHAR(64) NOT NULL UNIQUE,
+    last_used_at DATETIME NULL,
+    expires_at DATETIME NULL,
+    revoked_at DATETIME NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_drawer_integration_user (user_id, revoked_at),
+    CONSTRAINT fk_drawer_integration_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    CONSTRAINT fk_drawer_integration_account FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
+  )`);
+
+  await pool.query(`CREATE TABLE IF NOT EXISTS sheet_executions (
+    id CHAR(36) NOT NULL PRIMARY KEY,
+    account_id BIGINT UNSIGNED NOT NULL,
+    user_id BIGINT UNSIGNED NOT NULL,
+    integration_token_id BIGINT UNSIGNED NOT NULL,
+    spreadsheet_id VARCHAR(200) NOT NULL,
+    gid VARCHAR(80) NULL,
+    sheet_name VARCHAR(255) NULL,
+    command_json JSON NOT NULL,
+    result_json JSON NULL,
+    error_message TEXT NULL,
+    status ENUM('queued','claimed','succeeded','failed','expired') NOT NULL DEFAULT 'queued',
+    idempotency_key VARCHAR(120) NOT NULL,
+    claimed_by BIGINT UNSIGNED NULL,
+    claim_token_hash CHAR(64) NULL,
+    claimed_at DATETIME NULL,
+    lease_expires_at DATETIME NULL,
+    expires_at DATETIME NOT NULL,
+    completed_at DATETIME NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uniq_drawer_execution_idempotency (account_id, idempotency_key),
+    INDEX idx_drawer_execution_target (account_id, spreadsheet_id, status, expires_at),
+    CONSTRAINT fk_drawer_execution_account FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE,
+    CONSTRAINT fk_drawer_execution_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    CONSTRAINT fk_drawer_execution_integration FOREIGN KEY (integration_token_id) REFERENCES integration_tokens(id) ON DELETE CASCADE,
+    CONSTRAINT fk_drawer_execution_claimed_by FOREIGN KEY (claimed_by) REFERENCES users(id) ON DELETE SET NULL
   )`);
 
   await pool.query(`CREATE TABLE IF NOT EXISTS workspaces (
@@ -187,6 +250,86 @@ const parseJson = value => {
   if (typeof value === "object") return value;
   try { return JSON.parse(value); } catch { return {}; }
 };
+const integrationTokenHash = token => createHash("sha256").update(String(token)).digest("hex");
+const integrationTokenValue = () => `armcp_${randomBytes(32).toString("base64url")}`;
+const executionRoom = accountId => `account-${Number(accountId)}`;
+const executionActions = new Set(["info", "list", "read", "inspect", "write", "append", "update", "clear", "create_sheet", "rename_sheet", "delete_sheet"]);
+const executionMutationActions = new Set(["write", "append", "update", "clear", "create_sheet", "rename_sheet", "delete_sheet"]);
+const normalizeExecutionCommand = value => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const action = String(value.action || "");
+  if (action === "apply_operations") {
+    const operations = Array.isArray(value.operations) ? value.operations : [];
+    if (!operations.length || operations.length > 100) return null;
+    if (operations.some(operation => (
+      !operation
+      || typeof operation !== "object"
+      || Array.isArray(operation)
+      || !executionMutationActions.has(String(operation.action || ""))
+    ))) return null;
+    return { action, operations };
+  }
+  if (!executionActions.has(action)) return null;
+  const params = value.params && typeof value.params === "object" && !Array.isArray(value.params) ? value.params : {};
+  return { action, params };
+};
+const executionPayload = row => ({
+  id: row.id,
+  status: row.status,
+  target: {
+    spreadsheetId: row.spreadsheet_id,
+    gid: row.gid || "",
+    sheet: row.sheet_name || ""
+  },
+  result: row.result_json ? parseJson(row.result_json) : null,
+  error: row.error_message || "",
+  createdAt: row.created_at,
+  completedAt: row.completed_at || null,
+  expiresAt: row.expires_at
+});
+const notifyExecutionWaiters = id => {
+  const waiters = executionWaiters.get(String(id));
+  if (!waiters) return;
+  executionWaiters.delete(String(id));
+  for (const resolve of waiters) resolve();
+};
+const waitForExecutionSignal = (id, timeoutMs) => new Promise(resolve => {
+  const key = String(id);
+  const waiters = executionWaiters.get(key) || new Set();
+  let timer;
+  const finish = () => {
+    clearTimeout(timer);
+    waiters.delete(finish);
+    if (!waiters.size) executionWaiters.delete(key);
+    resolve();
+  };
+  waiters.add(finish);
+  executionWaiters.set(key, waiters);
+  timer = setTimeout(finish, timeoutMs);
+});
+const expireExecutions = async () => {
+  const [expired] = await pool.query(`SELECT id FROM sheet_executions
+    WHERE status IN ('queued','claimed') AND expires_at<=NOW()`);
+  if (expired.length) {
+    await pool.query(`UPDATE sheet_executions SET status='expired',error_message='La ejecución expiró antes de completarse.',completed_at=NOW(),command_json=JSON_OBJECT()
+      WHERE status IN ('queued','claimed') AND expires_at<=NOW()`);
+    for (const execution of expired) notifyExecutionWaiters(execution.id);
+  }
+  await pool.query(`DELETE FROM sheet_executions
+    WHERE status IN ('succeeded','failed','expired') AND completed_at<DATE_SUB(NOW(), INTERVAL 10 MINUTE)`);
+};
+const emitExecutionReady = row => {
+  io.to(executionRoom(row.account_id)).emit("sheets:execution-ready", {
+    id: row.id,
+    accountId: Number(row.account_id),
+    target: {
+      spreadsheetId: row.spreadsheet_id,
+      gid: row.gid || "",
+      sheet: row.sheet_name || ""
+    },
+    expiresAt: row.expires_at
+  });
+};
 const accountExpired = account => Boolean(account?.expires_at && new Date(account.expires_at).getTime() < Date.now());
 const signToken = user => jwt.sign({
   id: user.id,
@@ -259,10 +402,21 @@ const loadSession = async (request, response, { allowBlocked = false } = {}) => 
     return null;
   }
   try {
-    const payload = jwt.verify(token, jwtSecret || "sheets-row-drawer-development-only");
+    let payload;
+    let integrationTokenId = null;
+    if (token.startsWith("armcp_")) {
+      const [tokens] = await pool.query(`SELECT id,user_id,account_id FROM integration_tokens
+        WHERE token_hash=? AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at>NOW()) LIMIT 1`,
+      [integrationTokenHash(token)]);
+      if (!tokens.length) throw new Error("Credencial de integración inválida.");
+      payload = { id: tokens[0].user_id, accountId: tokens[0].account_id, role: "", impersonatedBy: null };
+      integrationTokenId = Number(tokens[0].id);
+    } else {
+      payload = jwt.verify(token, jwtSecret || "sheets-row-drawer-development-only");
+    }
     const [users] = await pool.query("SELECT * FROM users WHERE id = ? LIMIT 1", [payload.id]);
     const user = users[0];
-    if (!user || !user.active) {
+    if (!user || !user.active || (integrationTokenId && Number(user.account_id) !== Number(payload.accountId))) {
       response.status(401).json({ message: "Usuario inactivo." });
       return null;
     }
@@ -283,6 +437,10 @@ const loadSession = async (request, response, { allowBlocked = false } = {}) => 
     user.impersonatedBy = payload.impersonatedBy || null;
     request.user = user;
     request.account = account;
+    request.integrationTokenId = integrationTokenId;
+    if (integrationTokenId) {
+      await pool.query("UPDATE integration_tokens SET last_used_at=NOW() WHERE id=?", [integrationTokenId]);
+    }
     return { user, account };
   } catch {
     response.status(401).json({ message: "Sesión inválida." });
@@ -299,6 +457,49 @@ const superadmin = (request, response, next) => {
   if (request.user?.role !== "superadmin") return response.status(403).json({ message: "Permiso denegado." });
   next();
 };
+
+const loadSocketSession = async token => {
+  if (!token || String(token).startsWith("armcp_")) throw new Error("Se requiere una sesión interactiva.");
+  const payload = jwt.verify(String(token), jwtSecret || "sheets-row-drawer-development-only");
+  const [users] = await pool.query("SELECT * FROM users WHERE id=? LIMIT 1", [payload.id]);
+  const user = users[0];
+  if (!user || !user.active) throw new Error("Usuario inactivo.");
+  const [accounts] = user.account_id
+    ? await pool.query("SELECT * FROM accounts WHERE id=? LIMIT 1", [user.account_id])
+    : [[]];
+  const account = accounts[0] || null;
+  if (user.role !== "superadmin" && (!account || account.status !== "active" || accountExpired(account))) {
+    throw new Error("La cuenta no está disponible.");
+  }
+  const accountId = Number(user.account_id || account?.id);
+  if (!accountId) throw new Error("Cuenta no encontrada.");
+  return { user, account, accountId };
+};
+
+io.use(async (socket, next) => {
+  try {
+    const session = await loadSocketSession(socket.handshake.auth?.token || socket.handshake.query?.token);
+    socket.data.accountId = session.accountId;
+    socket.data.userId = Number(session.user.id);
+    next();
+  } catch {
+    next(new Error("No autenticado."));
+  }
+});
+
+io.on("connection", async socket => {
+  socket.join(executionRoom(socket.data.accountId));
+  try {
+    await expireExecutions();
+    await pool.query(`UPDATE sheet_executions SET status='queued',claimed_by=NULL,claim_token_hash=NULL,claimed_at=NULL,lease_expires_at=NULL
+      WHERE account_id=? AND status='claimed' AND lease_expires_at<NOW() AND expires_at>NOW()`, [socket.data.accountId]);
+    const [queued] = await pool.query(`SELECT id,account_id,spreadsheet_id,gid,sheet_name,expires_at FROM sheet_executions
+      WHERE account_id=? AND status='queued' AND expires_at>NOW() ORDER BY created_at`, [socket.data.accountId]);
+    for (const execution of queued) emitExecutionReady(execution);
+  } catch {
+    socket.disconnect(true);
+  }
+});
 
 app.disable("x-powered-by");
 app.use((request, response, next) => {
@@ -473,6 +674,181 @@ app.post(`${apiPrefix}/auth/login`, async (request, response) => {
 
 app.get(`${apiPrefix}/auth/me`, accountSession, (request, response) => {
   response.json({ user: publicUser(request.user), account: publicAccount(request.account) });
+});
+
+app.get(`${apiPrefix}/auth/integration-tokens`, accountSession, async (request, response) => {
+  if (request.integrationTokenId) return response.status(403).json({ message: "Administra las conexiones desde una sesión interactiva." });
+  const [tokens] = await pool.query(`SELECT id,name,last_used_at,expires_at,created_at FROM integration_tokens
+    WHERE user_id=? AND revoked_at IS NULL ORDER BY created_at DESC`, [request.user.id]);
+  response.json({
+    tokens: tokens.map(token => ({
+      id: Number(token.id),
+      name: token.name,
+      lastUsedAt: token.last_used_at,
+      expiresAt: token.expires_at,
+      createdAt: token.created_at
+    }))
+  });
+});
+
+app.post(`${apiPrefix}/auth/integration-tokens`, accountSession, async (request, response) => {
+  if (request.integrationTokenId) return response.status(403).json({ message: "Administra las conexiones desde una sesión interactiva." });
+  if (!request.account?.id) return response.status(400).json({ message: "La cuenta no admite integraciones." });
+  const name = String(request.body?.name || "Codex").trim().slice(0, 120);
+  if (!name) return response.status(400).json({ message: "La conexión requiere un nombre." });
+  const token = integrationTokenValue();
+  const [created] = await pool.query(`INSERT INTO integration_tokens (user_id,account_id,name,token_hash)
+    VALUES (?,?,?,?)`, [request.user.id, request.account.id, name, integrationTokenHash(token)]);
+  response.status(201).json({
+    token,
+    connection: { id: Number(created.insertId), name, createdAt: new Date().toISOString() }
+  });
+});
+
+app.delete(`${apiPrefix}/auth/integration-tokens/:id`, accountSession, async (request, response) => {
+  if (request.integrationTokenId) return response.status(403).json({ message: "Administra las conexiones desde una sesión interactiva." });
+  const tokenId = Number(request.params.id);
+  if (!Number.isInteger(tokenId) || tokenId <= 0) return response.status(400).json({ message: "Conexión inválida." });
+  const [result] = await pool.query("UPDATE integration_tokens SET revoked_at=NOW() WHERE id=? AND user_id=? AND revoked_at IS NULL", [tokenId, request.user.id]);
+  if (!result.affectedRows) return response.status(404).json({ message: "Conexión no encontrada." });
+  response.json({ ok: true, id: tokenId });
+});
+
+const loadIntegrationExecution = async (request, id) => {
+  const [rows] = await pool.query(`SELECT * FROM sheet_executions
+    WHERE id=? AND account_id=? AND integration_token_id=? LIMIT 1`,
+  [id, request.account.id, request.integrationTokenId]);
+  return rows[0] || null;
+};
+
+app.post(`${apiPrefix}/executions`, auth, async (request, response) => {
+  if (!request.integrationTokenId) return response.status(403).json({ message: "Crea ejecuciones con una credencial de integración." });
+  await expireExecutions();
+  const target = request.body?.target || {};
+  const spreadsheetId = normalizeSpreadsheetId(target.spreadsheetId);
+  const gid = String(target.gid || "").trim();
+  const sheetName = String(target.sheet || "").trim().slice(0, 255);
+  const command = normalizeExecutionCommand(request.body?.command);
+  const idempotencyKey = String(request.body?.idempotencyKey || "").trim();
+  if (!spreadsheetId) return response.status(400).json({ message: "El documento de Google Sheets es inválido." });
+  if (gid && !/^\d{1,30}$/.test(gid)) return response.status(400).json({ message: "El gid es inválido." });
+  if (!command) return response.status(400).json({ message: "La ejecución contiene una operación no admitida." });
+  if (!/^[A-Za-z0-9_-]{8,120}$/.test(idempotencyKey)) return response.status(400).json({ message: "La clave de idempotencia es inválida." });
+  const serializedCommand = JSON.stringify(command);
+  if (Buffer.byteLength(serializedCommand, "utf8") > 1024 * 1024) {
+    return response.status(413).json({ message: "La ejecución supera 1 MiB." });
+  }
+
+  let executionId = randomUUID();
+  try {
+    await pool.query(`INSERT INTO sheet_executions
+      (id,account_id,user_id,integration_token_id,spreadsheet_id,gid,sheet_name,command_json,idempotency_key,expires_at)
+      VALUES (?,?,?,?,?,?,?,?,?,DATE_ADD(NOW(), INTERVAL 2 MINUTE))`, [
+      executionId,
+      request.account.id,
+      request.user.id,
+      request.integrationTokenId,
+      spreadsheetId,
+      gid || null,
+      sheetName || null,
+      serializedCommand,
+      idempotencyKey
+    ]);
+  } catch (error) {
+    if (error?.code !== "ER_DUP_ENTRY") throw error;
+    const [existing] = await pool.query(`SELECT id FROM sheet_executions
+      WHERE account_id=? AND idempotency_key=? LIMIT 1`, [request.account.id, idempotencyKey]);
+    if (!existing.length) throw error;
+    executionId = existing[0].id;
+  }
+
+  let execution = await loadIntegrationExecution(request, executionId);
+  if (!execution) return response.status(404).json({ message: "Ejecución no encontrada." });
+  const waitMs = Math.min(25_000, Math.max(0, Number(request.body?.waitMs) || 0));
+  if (["queued", "claimed"].includes(execution.status)) {
+    const wait = waitMs ? waitForExecutionSignal(executionId, waitMs) : null;
+    if (execution.status === "queued") emitExecutionReady(execution);
+    if (wait) {
+      await wait;
+      await expireExecutions();
+      execution = await loadIntegrationExecution(request, executionId);
+    }
+  }
+  response.status(["queued", "claimed"].includes(execution.status) ? 202 : 200).json(executionPayload(execution));
+});
+
+app.get(`${apiPrefix}/executions/:id/wait`, auth, async (request, response) => {
+  if (!request.integrationTokenId) return response.status(403).json({ message: "Consulta ejecuciones con una credencial de integración." });
+  await expireExecutions();
+  let execution = await loadIntegrationExecution(request, request.params.id);
+  if (!execution) return response.status(404).json({ message: "Ejecución no encontrada." });
+  const timeoutMs = Math.min(25_000, Math.max(1_000, Number(request.query.timeoutMs) || 25_000));
+  if (["queued", "claimed"].includes(execution.status)) {
+    const wait = waitForExecutionSignal(execution.id, timeoutMs);
+    execution = await loadIntegrationExecution(request, execution.id);
+    if (["queued", "claimed"].includes(execution.status)) await wait;
+    else notifyExecutionWaiters(execution.id);
+    await expireExecutions();
+    execution = await loadIntegrationExecution(request, request.params.id);
+  }
+  response.status(["queued", "claimed"].includes(execution.status) ? 202 : 200).json(executionPayload(execution));
+});
+
+app.post(`${apiPrefix}/executions/:id/claim`, auth, async (request, response) => {
+  if (request.integrationTokenId) return response.status(403).json({ message: "La credencial MCP no puede ejecutar órdenes del navegador." });
+  await expireExecutions();
+  const spreadsheetId = normalizeSpreadsheetId(request.body?.spreadsheetId);
+  if (!spreadsheetId) return response.status(400).json({ message: "El documento es inválido." });
+  const claimToken = randomBytes(32).toString("base64url");
+  const [claimed] = await pool.query(`UPDATE sheet_executions
+    SET status='claimed',claimed_by=?,claim_token_hash=?,claimed_at=NOW(),lease_expires_at=expires_at
+    WHERE id=? AND account_id=? AND spreadsheet_id=? AND expires_at>NOW()
+      AND (status='queued' OR (status='claimed' AND lease_expires_at<NOW()))`, [
+    request.user.id,
+    integrationTokenHash(claimToken),
+    request.params.id,
+    request.account.id,
+    spreadsheetId
+  ]);
+  if (!claimed.affectedRows) {
+    const [rows] = await pool.query("SELECT status FROM sheet_executions WHERE id=? AND account_id=? LIMIT 1", [request.params.id, request.account.id]);
+    return response.json({ claimed: false, status: rows[0]?.status || "missing" });
+  }
+  const [rows] = await pool.query("SELECT * FROM sheet_executions WHERE id=? AND account_id=? LIMIT 1", [request.params.id, request.account.id]);
+  const execution = rows[0];
+  response.json({
+    claimed: true,
+    id: execution.id,
+    claimToken,
+    command: parseJson(execution.command_json),
+    target: executionPayload(execution).target
+  });
+});
+
+app.post(`${apiPrefix}/executions/:id/result`, auth, async (request, response) => {
+  if (request.integrationTokenId) return response.status(403).json({ message: "La credencial MCP no puede completar órdenes del navegador." });
+  const claimToken = String(request.body?.claimToken || "");
+  const ok = request.body?.ok === true;
+  const resultValue = request.body?.result === undefined ? null : request.body.result;
+  const serializedResult = resultValue === null ? null : JSON.stringify(resultValue);
+  if (!claimToken) return response.status(400).json({ message: "Falta la credencial de la ejecución." });
+  if (serializedResult && Buffer.byteLength(serializedResult, "utf8") > 1024 * 1024) {
+    return response.status(413).json({ message: "El resultado supera 1 MiB." });
+  }
+  const errorMessage = ok ? null : String(request.body?.error || "La ejecución falló.").slice(0, 8_000);
+  const [completed] = await pool.query(`UPDATE sheet_executions
+    SET status=?,result_json=?,error_message=?,completed_at=NOW(),command_json=JSON_OBJECT(),lease_expires_at=NULL
+    WHERE id=? AND account_id=? AND status='claimed' AND claim_token_hash=?`, [
+    ok ? "succeeded" : "failed",
+    serializedResult,
+    errorMessage,
+    request.params.id,
+    request.account.id,
+    integrationTokenHash(claimToken)
+  ]);
+  if (!completed.affectedRows) return response.status(409).json({ message: "La ejecución ya no puede completarse." });
+  notifyExecutionWaiters(request.params.id);
+  response.json({ ok: true, id: request.params.id, status: ok ? "succeeded" : "failed" });
 });
 
 app.put(`${apiPrefix}/auth/me`, accountSession, async (request, response) => {
@@ -699,4 +1075,5 @@ app.use((error, request, response, next) => {
 
 await connectDatabase();
 await migrate();
-app.listen(port, () => console.log(`Sheets Row Drawer API en http://localhost:${port}${apiPrefix}`));
+setInterval(() => void expireExecutions().catch(error => console.error("No se pudieron depurar las ejecuciones:", error)), 60_000).unref();
+httpServer.listen(port, () => console.log(`Sheets Row Drawer API en http://localhost:${port}${apiPrefix}`));

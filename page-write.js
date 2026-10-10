@@ -156,6 +156,207 @@
     return String(reference || "").trim().replace(/\$/g, "");
   }
 
+  function normalizedSheetName(value) {
+    return String(value || "").trim().normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+  }
+
+  function validateSheetName(value) {
+    const name = String(value || "").trim();
+    if (!name || name.length > 100 || /[:\\/?*\[\]]/.test(name)) {
+      throw new Error("El nombre de la hoja debe tener entre 1 y 100 caracteres y no puede contener : \\ / ? * [ ]");
+    }
+    return name;
+  }
+
+  function sheetTabs() {
+    return Array.from(document.querySelectorAll(".docs-sheet-tab")).filter((tab) => tab.querySelector(".docs-sheet-tab-name"));
+  }
+
+  function sheetTabName(tab) {
+    return String(tab?.querySelector(".docs-sheet-tab-name")?.textContent || "").trim();
+  }
+
+  function findSheetTab(name) {
+    const key = normalizedSheetName(name);
+    return sheetTabs().find((tab) => normalizedSheetName(sheetTabName(tab)) === key) || null;
+  }
+
+  function sheetTabGid(tab) {
+    const candidates = [
+      tab?.id,
+      tab?.getAttribute("data-gid"),
+      tab?.getAttribute("data-sheet-id"),
+      tab?.getAttribute("aria-controls"),
+      tab?.querySelector("[href*='gid=']")?.getAttribute("href")
+    ];
+    for (const candidate of candidates) {
+      const text = String(candidate || "");
+      const match = text.match(/sheet-button-(\d+)/i) || text.match(/(?:^|[?&#])gid=(\d+)/i) || text.match(/^(\d+)$/);
+      if (match) return match[1];
+    }
+    return "";
+  }
+
+  function elementVisible(element) {
+    if (!(element instanceof Element) || element.hidden || element.getAttribute("aria-hidden") === "true") return false;
+    const style = getComputedStyle(element);
+    return style.display !== "none" && style.visibility !== "hidden";
+  }
+
+  async function waitForElement(read, errorMessage, timeout = 8_000) {
+    const deadline = Date.now() + timeout;
+    while (Date.now() < deadline) {
+      const value = read();
+      if (value) return value;
+      await wait(60);
+    }
+    throw new Error(errorMessage);
+  }
+
+  function clickElement(element) {
+    element.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, button: 0 }));
+    element.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true, button: 0 }));
+    element.click();
+  }
+
+  function sheetActionMenuItem(action) {
+    const patterns = action === "rename"
+      ? ["cambiar nombre", "renombrar", "rename"]
+      : ["eliminar hoja", "borrar hoja", "delete sheet", "eliminar", "borrar", "delete"];
+    return Array.from(document.querySelectorAll(".goog-menuitem, [role='menuitem']")).find((item) => {
+      if (!elementVisible(item) || item.getAttribute("aria-disabled") === "true") return false;
+      const label = normalizedSheetName(`${item.getAttribute("aria-label") || ""} ${item.getAttribute("data-id") || ""} ${item.textContent || ""}`);
+      return patterns.some((pattern) => label.includes(pattern));
+    }) || null;
+  }
+
+  async function openSheetAction(tab, action) {
+    clickElement(tab.querySelector(".docs-sheet-tab-name") || tab);
+    await wait(80);
+    const dropdown = tab.querySelector(".docs-sheet-tab-dropdown, [aria-haspopup='menu']");
+    if (dropdown) clickElement(dropdown);
+    else tab.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, button: 2, buttons: 2 }));
+    const item = await waitForElement(
+      () => sheetActionMenuItem(action),
+      action === "rename" ? "No se encontró la opción para cambiar el nombre de la hoja" : "No se encontró la opción para eliminar la hoja"
+    );
+    clickElement(item);
+  }
+
+  function renameEditor() {
+    const active = document.activeElement;
+    if (active instanceof HTMLInputElement && active.id !== "t-name-box" && elementVisible(active)) return active;
+    const selectors = [
+      ".docs-sheet-tab input",
+      ".docs-sheet-tab [contenteditable='true']",
+      "[role='dialog'] input[type='text']",
+      ".modal-dialog input[type='text']"
+    ];
+    return Array.from(document.querySelectorAll(selectors.join(","))).find(elementVisible) || null;
+  }
+
+  function setEditorValue(editor, value) {
+    editor.focus();
+    if (editor instanceof HTMLInputElement) {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+      if (setter) setter.call(editor, value);
+      else editor.value = value;
+    } else {
+      editor.textContent = value;
+    }
+    editor.dispatchEvent(new Event("input", { bubbles: true }));
+    editor.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+
+  function confirmationButton(action) {
+    const patterns = action === "rename"
+      ? ["aceptar", "guardar", "cambiar nombre", "rename", "ok"]
+      : ["eliminar", "borrar", "delete", "aceptar", "ok"];
+    const dialogs = Array.from(document.querySelectorAll("[role='dialog'], .modal-dialog")).filter(elementVisible);
+    for (const dialog of dialogs) {
+      const button = Array.from(dialog.querySelectorAll("button, [role='button'], .goog-buttonset-action")).find((candidate) => {
+        if (!elementVisible(candidate)) return false;
+        const label = normalizedSheetName(`${candidate.getAttribute("aria-label") || ""} ${candidate.textContent || ""}`);
+        return patterns.some((pattern) => label === pattern || label.includes(pattern));
+      });
+      if (button) return button;
+    }
+    return null;
+  }
+
+  async function renameSheet(previousName, nextValue) {
+    const nextName = validateSheetName(nextValue);
+    const source = findSheetTab(previousName);
+    if (!source) throw new Error(`No se encontró la hoja ${previousName}`);
+    const duplicate = findSheetTab(nextName);
+    if (duplicate && duplicate !== source) throw new Error(`Ya existe una hoja llamada ${nextName}`);
+    if (sheetTabName(source) === nextName) {
+      return { name: sheetTabName(source), gid: sheetTabGid(source) };
+    }
+    await openSheetAction(source, "rename");
+    const editor = await waitForElement(renameEditor, "Sheets no abrió el editor del nombre de la hoja");
+    setEditorValue(editor, nextName);
+    editor.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", code: "Enter", keyCode: 13, which: 13, bubbles: true, cancelable: true }));
+    editor.dispatchEvent(new KeyboardEvent("keyup", { key: "Enter", code: "Enter", keyCode: 13, which: 13, bubbles: true, cancelable: true }));
+    await wait(120);
+    if (!findSheetTab(nextName)) {
+      const confirm = confirmationButton("rename");
+      if (confirm) clickElement(confirm);
+    }
+    const renamed = await waitForElement(() => findSheetTab(nextName), "Sheets no confirmó el nuevo nombre de la hoja");
+    return { name: sheetTabName(renamed), gid: sheetTabGid(renamed) };
+  }
+
+  async function createSheet(nameValue) {
+    const name = validateSheetName(nameValue);
+    if (findSheetTab(name)) throw new Error(`Ya existe una hoja llamada ${name}`);
+    const before = new Set(sheetTabs().map((tab) => normalizedSheetName(sheetTabName(tab))));
+    const add = document.querySelector([
+      "#docs-sheet-add-button",
+      "[aria-label='Añadir hoja']",
+      "[aria-label='Agregar hoja']",
+      "[aria-label='Add sheet']",
+      "[data-tooltip='Añadir hoja']",
+      "[data-tooltip='Agregar hoja']",
+      "[data-tooltip='Add sheet']"
+    ].join(","));
+    if (add) clickElement(add);
+    else {
+      document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "F11", code: "F11", shiftKey: true, bubbles: true, cancelable: true }));
+      document.body.dispatchEvent(new KeyboardEvent("keyup", { key: "F11", code: "F11", shiftKey: true, bubbles: true, cancelable: true }));
+    }
+    const created = await waitForElement(
+      () => sheetTabs().find((tab) => !before.has(normalizedSheetName(sheetTabName(tab)))),
+      "Sheets no creó la hoja"
+    );
+    return renameSheet(sheetTabName(created), name);
+  }
+
+  async function deleteSheet(nameValue) {
+    const name = validateSheetName(nameValue);
+    const tab = findSheetTab(name);
+    if (!tab) throw new Error(`No se encontró la hoja ${name}`);
+    if (sheetTabs().length <= 1) throw new Error("No se puede eliminar la única hoja del documento");
+    const gid = sheetTabGid(tab);
+    await openSheetAction(tab, "delete");
+    const deadline = Date.now() + 8_000;
+    while (Date.now() < deadline && findSheetTab(name)) {
+      const confirm = confirmationButton("delete");
+      if (confirm) clickElement(confirm);
+      await wait(80);
+    }
+    if (findSheetTab(name)) throw new Error("Sheets no confirmó la eliminación de la hoja");
+    return { name, gid };
+  }
+
+  async function runSheetOperation(operation) {
+    const action = String(operation?.action || "");
+    if (action === "create_sheet") return { action, ...(await createSheet(operation.name)) };
+    if (action === "rename_sheet") return { action, previousName: String(operation.sheet || "").trim(), ...(await renameSheet(operation.sheet, operation.name)) };
+    if (action === "delete_sheet") return { action, ...(await deleteSheet(operation.sheet)) };
+    throw new Error(`Operación de hoja no soportada: ${action}`);
+  }
+
   window.addEventListener("message", async (event) => {
     const message = event.data;
     if (event.source !== window || message?.source !== SOURCE) return;
@@ -171,6 +372,22 @@
         window.postMessage({
           source: SOURCE,
           type: "focus-result",
+          requestId: message.requestId,
+          ok: false,
+          error: error instanceof Error ? error.message : String(error)
+        }, location.origin);
+      }
+      return;
+    }
+
+    if (message?.type === "sheet-operation") {
+      try {
+        const result = await enqueueBridgeInteraction(() => runSheetOperation(message.operation));
+        window.postMessage({ source: SOURCE, type: "sheet-operation-result", requestId: message.requestId, ok: true, result }, location.origin);
+      } catch (error) {
+        window.postMessage({
+          source: SOURCE,
+          type: "sheet-operation-result",
           requestId: message.requestId,
           ok: false,
           error: error instanceof Error ? error.message : String(error)

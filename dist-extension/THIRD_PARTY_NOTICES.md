@@ -9,5 +9,6 @@ The distributed extension bundles the following open-source runtime libraries:
 - dnd kit — [MIT License](https://github.com/clauderic/dnd-kit/blob/master/LICENSE)
 - Day.js — [MIT License](https://github.com/iamkun/dayjs/blob/dev/LICENSE)
 - Lucide — [ISC License](https://github.com/lucide-icons/lucide/blob/main/LICENSE)
+- Socket.IO Client 4.8.1 — [MIT License](https://github.com/socketio/socket.io-client/blob/main/LICENSE)
 
 These notices apply only to the listed libraries and do not attribute Abrir CRM's implementation to another project.

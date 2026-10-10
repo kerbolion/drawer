@@ -1,4 +1,4 @@
-import React from "react";
+﻿import React from "react";
 import { createPortal, flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
 import { StyleProvider } from "@ant-design/cssinjs";
@@ -52,6 +52,7 @@ import esES from "antd/es/locale/es_ES.js";
 import dayjs from "dayjs";
 import "dayjs/locale/es.js";
 import { CircleDollarSign, Clock3, Hash, ListChecks, Type } from "lucide-react";
+import { io as createSocket } from "socket.io-client";
 import {
   antdTokens,
   darkAntdTokens,
@@ -100,7 +101,6 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
 
   const MAX_COLUMN = "ZZ";
   const POLL_MS = 250;
-  const CODEX_BRIDGE_POLL_MS = 1_500;
   const CACHE_PREFIX = "srd:v2";
   const CACHE_INDEX_KEY = `${CACHE_PREFIX}:index`;
   const WORKSPACE_PREFIX = "srd:workspace:v2";
@@ -110,6 +110,11 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
   const THEME_STORAGE_KEY = "srd:theme-mode";
   const MAX_PERSISTENT_ENTRIES = 120;
   const SHEET_MEMORY_TTL = 5_000;
+  const EXECUTION_CLIENT_ID = globalThis.crypto?.randomUUID?.() || `srd-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  let executionSocket = null;
+  let executionSocketAccountId = "";
+  let executionQueue = Promise.resolve();
+  const pendingExecutionIds = new Set();
   const FIELD_TYPES = [
     { value: "text", label: "Texto" },
     { value: "longText", label: "Área de texto" },
@@ -1549,6 +1554,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     autocomplete = "off",
     min,
     disabled = false,
+    readOnly = false,
     options = [],
     onChange
   }) {
@@ -1613,6 +1619,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
           type: type === "email" ? "email" : undefined,
           autoComplete: autocomplete,
           disabled: isDisabled,
+          readOnly: Boolean(readOnly),
           onChange: (event) => updateValue(event.target.value),
           style: fullWidth
         });
@@ -4325,6 +4332,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     host.dataset.cloudAccess = cloudAccessAllowed(session) ? "allowed" : session?.serviceError ? "unavailable" : "blocked";
     if (previousOwner !== nextOwner) resetWorkspaceForAccount();
     if (!cloudAccessAllowed(session)) {
+      stopExecutionRealtime();
       state.request?.abort();
       ui.fields.replaceChildren();
       clearRelations();
@@ -4332,6 +4340,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
       return;
     }
     ui.cloudAccountUi?.close();
+    void syncExecutionRealtime();
     void activateWorkspaceContext(true);
   }
 
@@ -4339,6 +4348,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     const previousOwner = workspaceOwner();
     state.cloudLocalMode = true;
     state.cloudSession = { authenticated: false, local: true };
+    stopExecutionRealtime();
     if (previousOwner !== workspaceOwner()) resetWorkspaceForAccount();
     ui.accountButton.dataset.authenticated = "false";
     ui.accountButton.dataset.local = "true";
@@ -7381,6 +7391,38 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     });
   }
 
+  function runSheetOperation(operation) {
+    state.writeInteractionDepth += 1;
+    return new Promise((resolve, reject) => {
+      const requestId = `${Date.now()}-${++state.writeRequest}`;
+      let settled = false;
+      const finish = () => {
+        if (settled) return false;
+        settled = true;
+        state.writeInteractionDepth = Math.max(0, state.writeInteractionDepth - 1);
+        return true;
+      };
+      const timeout = setTimeout(() => {
+        if (!finish()) return;
+        window.removeEventListener("message", receive);
+        reject(new Error("Sheets no respondió a la operación de hoja"));
+      }, 15_000);
+
+      function receive(event) {
+        const message = event.data;
+        if (event.source !== window || message?.source !== "sheets-row-drawer" || message?.type !== "sheet-operation-result" || message.requestId !== requestId) return;
+        if (!finish()) return;
+        clearTimeout(timeout);
+        window.removeEventListener("message", receive);
+        if (message.ok) resolve(message.result || {});
+        else reject(new Error(message.error || "No se pudo completar la operación de hoja"));
+      }
+
+      window.addEventListener("message", receive);
+      window.postMessage({ source: "sheets-row-drawer", type: "sheet-operation", requestId, operation }, location.origin);
+    });
+  }
+
   function hasPendingWriteVerification() {
     return state.pendingWrites.size > 0
       || state.sheetViewWrites.size > 0
@@ -8201,7 +8243,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     await persistChanges(preparePrimaryWrite(), [...state.relatedDrafts.values()]);
   }
 
-  function normalizedBridgeRange(value, label = "rango") {
+  function normalizedSheetsRange(value, label = "rango") {
     const range = String(value || "").trim().replace(/\$/g, "").toUpperCase();
     if (!/^[A-Z]{1,2}[1-9]\d*(?::[A-Z]{1,2}[1-9]\d*)?$/.test(range)) {
       throw new Error(`El ${label} debe usar notación A1, por ejemplo A1:D20`);
@@ -8209,21 +8251,21 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     return range;
   }
 
-  function bridgeColumnNumber(column) {
+  function sheetsColumnNumber(column) {
     return [...column].reduce((total, letter) => total * 26 + letter.charCodeAt(0) - 64, 0);
   }
 
-  function bridgeWriteRange(start, rows) {
-    const reference = normalizedBridgeRange(start, "inicio");
+  function sheetsWriteRange(start, rows) {
+    const reference = normalizedSheetsRange(start, "inicio");
     if (reference.includes(":")) throw new Error("El inicio de escritura debe ser una sola celda");
     const match = reference.match(/^([A-Z]+)([1-9]\d*)$/);
     const width = rows[0].length;
-    const firstColumn = bridgeColumnNumber(match[1]);
+    const firstColumn = sheetsColumnNumber(match[1]);
     const firstRow = Number(match[2]);
     return `${reference}:${columnName(firstColumn + width - 1)}${firstRow + rows.length - 1}`;
   }
 
-  function bridgeRows(values) {
+  function sheetsRows(values) {
     if (!Array.isArray(values) || !values.length) throw new Error("values debe contener al menos una fila");
     const rows = Array.isArray(values[0]) ? values : [values];
     const width = rows[0]?.length || 0;
@@ -8233,7 +8275,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     return rows.map((row) => row.map((value) => value === null || value === undefined ? "" : String(value)));
   }
 
-  function bridgeValueEquivalent(actualValue, expectedValue) {
+  function sheetsValueEquivalent(actualValue, expectedValue) {
     const actual = String(actualValue ?? "").trim();
     const expected = String(expectedValue ?? "").trim();
     if (actual === expected) return true;
@@ -8250,12 +8292,12 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     return plainNumber.test(actual) && plainNumber.test(expected) && Number(actual) === Number(expected);
   }
 
-  async function bridgeSheetHeaders(sheetName) {
-    const rows = await readNamedBridgeRange(sheetName, `A1:${MAX_COLUMN}1`, undefined);
+  async function sheetsHeaders(sheetName) {
+    const rows = await readNamedSheetsRange(sheetName, `A1:${MAX_COLUMN}1`, undefined);
     return rows.find((row) => row.number === 1)?.cells || [];
   }
 
-  function bridgeHeaderIndexes(headers) {
+  function sheetsHeaderIndexes(headers) {
     const indexes = new Map();
     headers.forEach((header, index) => {
       const key = normalizedColumn(header);
@@ -8264,11 +8306,11 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     return indexes;
   }
 
-  function bridgeRecordRow(record, headers) {
+  function sheetsRecordRow(record, headers) {
     if (!record || typeof record !== "object" || Array.isArray(record)) {
       throw new Error("El registro debe contener pares Columna=valor");
     }
-    const indexes = bridgeHeaderIndexes(headers);
+    const indexes = sheetsHeaderIndexes(headers);
     const lastColumn = headers.reduce((last, header, index) => String(header || "").trim() ? index : last, -1);
     if (lastColumn < 0) throw new Error("La hoja no tiene encabezados configurados");
     const row = Array(lastColumn + 1).fill("");
@@ -8280,7 +8322,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     return row;
   }
 
-  async function nextBridgeAppendRow(sheetName) {
+  async function nextSheetsAppendRow(sheetName) {
     const table = await readSheetTable(sheetName, `A1:${MAX_COLUMN}`, undefined);
     let lastUsedRow = table.headers.some((value) => String(value || "").trim()) ? 1 : 0;
     for (const row of table.rows) {
@@ -8289,10 +8331,10 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     return Math.max(2, lastUsedRow + 1);
   }
 
-  async function bridgeSheetRecords(sheetName, options = {}) {
+  async function sheetsRecords(sheetName, options = {}) {
     const table = await readSheetTable(sheetName, `A1:${MAX_COLUMN}`, undefined);
     const headers = table.headers;
-    const indexes = bridgeHeaderIndexes(headers);
+    const indexes = sheetsHeaderIndexes(headers);
     const where = options.where && typeof options.where === "object" ? options.where : {};
     const conditions = Object.entries(where).map(([column, value]) => {
       const columnIndex = indexes.get(normalizedColumn(column));
@@ -8304,7 +8346,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     const records = table.rows
       .filter((row) => row.number >= fromRow && row.cells.some((value) => String(value || "").trim()))
       .filter((row) => conditions.every((condition) =>
-        bridgeValueEquivalent(row.cells[condition.columnIndex] ?? "", condition.value)
+        sheetsValueEquivalent(row.cells[condition.columnIndex] ?? "", condition.value)
       ))
       .slice(0, limit)
       .map((row) => ({
@@ -8316,7 +8358,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     return { headers: headers.filter((header) => String(header || "").trim()), records };
   }
 
-  async function readNamedBridgeRange(sheetName, range, signal) {
+  async function readNamedSheetsRange(sheetName, range, signal) {
     const table = await readSheetTable(sheetName, range, signal);
     const firstRow = Number(range.match(/[A-Z]+(\d+)/)?.[1] || 1);
     return [
@@ -8325,13 +8367,13 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     ].filter((row) => row.cells.length);
   }
 
-  async function readBridgeRange(params, signal) {
-    const range = normalizedBridgeRange(params.range);
+  async function readSheetsRange(params, signal) {
+    const range = normalizedSheetsRange(params.range);
     const requestedSheet = String(params.sheet || "").trim();
     const activeName = activeSheetName();
     const requestedSheetIsActive = requestedSheet && normalizedColumn(requestedSheet) === normalizedColumn(activeName);
     const rows = requestedSheet
-      ? await readNamedBridgeRange(requestedSheet, range, signal)
+      ? await readNamedSheetsRange(requestedSheet, range, signal)
       : await readRange(range, signal, String(params.gid || currentGid()));
     return {
       spreadsheetId: spreadsheetId(),
@@ -8342,19 +8384,19 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     };
   }
 
-  function bridgeRangeBounds(range) {
+  function sheetsRangeBounds(range) {
     const [start, end = start] = range.split(":");
     const startMatch = start.match(/^([A-Z]+)(\d+)$/);
     const endMatch = end.match(/^([A-Z]+)(\d+)$/);
     return {
-      firstColumn: bridgeColumnNumber(startMatch[1]),
-      lastColumn: bridgeColumnNumber(endMatch[1]),
+      firstColumn: sheetsColumnNumber(startMatch[1]),
+      lastColumn: sheetsColumnNumber(endMatch[1]),
       firstRow: Number(startMatch[2]),
       lastRow: Number(endMatch[2])
     };
   }
 
-  function bridgeCellDiagnostics(cell, columnIndex, structuredCell, structuredColumn) {
+  function sheetsCellDiagnostics(cell, columnIndex, structuredCell, structuredColumn) {
     return {
       column: columnName(columnIndex),
       value: cell ? readableCellText(cell) : "",
@@ -8375,8 +8417,8 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     };
   }
 
-  async function inspectBridgeRange(params, signal) {
-    const range = normalizedBridgeRange(params.range);
+  async function inspectSheetsRange(params, signal) {
+    const range = normalizedSheetsRange(params.range);
     const requestedSheet = String(params.sheet || "").trim();
     const activeName = activeSheetName();
     const sheetName = requestedSheet || activeName;
@@ -8384,7 +8426,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
       throw new Error("La inspección HTML requiere que la hoja solicitada sea la pestaña activa");
     }
 
-    const bounds = bridgeRangeBounds(range);
+    const bounds = sheetsRangeBounds(range);
     const width = bounds.lastColumn - bounds.firstColumn + 1;
     const height = bounds.lastRow - bounds.firstRow + 1;
     if (width <= 0 || height <= 0) throw new Error("El rango de inspección está invertido");
@@ -8421,7 +8463,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
       const structuredCells = table?.rows?.[rowOffset]?.c || [];
       return {
         row: rowNumber,
-        cells: Array.from({ length: width }, (_, columnOffset) => bridgeCellDiagnostics(
+        cells: Array.from({ length: width }, (_, columnOffset) => sheetsCellDiagnostics(
           visualCells[columnOffset],
           bounds.firstColumn + columnOffset,
           structuredCells[columnOffset],
@@ -8440,7 +8482,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     };
   }
 
-  function bridgeMutationGid(params, sheetName) {
+  function sheetsMutationGid(params, sheetName) {
     return String(
       visibleSheets().find((sheet) => normalizedColumn(sheet.name) === normalizedColumn(sheetName))?.gid
       || params.gid
@@ -8448,9 +8490,9 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     );
   }
 
-  function bridgeRangeMutations(params, sheetName, range, rows) {
-    const bounds = bridgeRangeBounds(range);
-    const gid = bridgeMutationGid(params, sheetName);
+  function sheetsRangeMutations(params, sheetName, range, rows) {
+    const bounds = sheetsRangeBounds(range);
+    const gid = sheetsMutationGid(params, sheetName);
     return rows.flatMap((row, rowOffset) => row.map((value, columnOffset) => ({
       gid,
       sheetName,
@@ -8460,9 +8502,9 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     })));
   }
 
-  function bridgeMutationValues(verification, mutations, range, expectedRows) {
+  function sheetsMutationValues(verification, mutations, range, expectedRows) {
     if (!verification.unconfirmed.length) return expectedRows;
-    const bounds = bridgeRangeBounds(range);
+    const bounds = sheetsRangeBounds(range);
     const groupKey = `${mutations[0]?.gid || ""}:${encodeURIComponent(mutations[0]?.sheetName || "")}`;
     return expectedRows.map((row, rowOffset) => {
       const observed = verification.observedRows.get(`${groupKey}:${bounds.firstRow + rowOffset}`) || [];
@@ -8470,16 +8512,16 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     });
   }
 
-  async function executeBridgeMutations(params, sheetName, mutations, selectionReference = "") {
+  async function executeSheetsMutations(params, sheetName, mutations, selectionReference = "") {
     await writeRanges(cellMutationOperations(mutations), selectionReference);
     state.headerCache.clear();
     state.sheetCache.clear();
     return verifyCellMutations(mutations, {
       delays: [500, 1_000, 2_000],
-      valuesEqual: bridgeValueEquivalent,
+      valuesEqual: sheetsValueEquivalent,
       selectionReference,
       readGroup: async (_group, firstRow, lastRow) => {
-        const result = await readBridgeRange({
+        const result = await readSheetsRange({
           ...params,
           sheet: sheetName,
           range: `A${firstRow}:${MAX_COLUMN}${lastRow}`
@@ -8489,22 +8531,22 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     });
   }
 
-  function bridgeMutationResult(verification, mutations, range, expectedRows) {
+  function sheetsMutationResult(verification, mutations, range, expectedRows) {
     return {
       verified: verification.unconfirmed.length === 0,
-      values: bridgeMutationValues(verification, mutations, range, expectedRows),
+      values: sheetsMutationValues(verification, mutations, range, expectedRows),
       retried: verification.retried
     };
   }
 
-  function visibleBridgeSheets() {
+  function visibleSheetsTabs() {
     return visibleSheetNames().map((name) => ({
       name,
       gid: normalizedColumn(name) === normalizedColumn(activeSheetName()) ? currentGid() : null
     }));
   }
 
-  async function executeCodexBridgeCommand(command) {
+  async function executeSheetsCommand(command) {
     const params = command?.params || {};
     if (command.action === "info") {
       return {
@@ -8512,8 +8554,8 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
         gid: currentGid(),
         sheet: activeSheetName(),
         selection: nameBoxValue(),
-        sheets: visibleBridgeSheets(),
-        capabilities: ["list", "read", "inspect", "write", "append", "update", "clear"]
+        sheets: visibleSheetsTabs(),
+        capabilities: ["list", "read", "inspect", "write", "append", "update", "clear", "create_sheet", "rename_sheet", "delete_sheet"]
       };
     }
     if (command.action === "list") {
@@ -8521,11 +8563,20 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
       return {
         spreadsheetId: spreadsheetId(),
         sheet,
-        ...(await bridgeSheetRecords(sheet, params))
+        ...(await sheetsRecords(sheet, params))
       };
     }
-    if (command.action === "read") return readBridgeRange(params, undefined);
-    if (command.action === "inspect") return inspectBridgeRange(params, undefined);
+    if (command.action === "read") return readSheetsRange(params, undefined);
+    if (command.action === "inspect") return inspectSheetsRange(params, undefined);
+    if (["create_sheet", "rename_sheet", "delete_sheet"].includes(command.action)) {
+      const result = await runSheetOperation({ action: command.action, ...params });
+      state.headerCache.clear();
+      state.sheetCache.clear();
+      state.sheetDataRevision += 1;
+      state.lastSelection = "";
+      renderSheetViewActions();
+      return { spreadsheetId: spreadsheetId(), ...result, verified: true };
+    }
     if (command.action !== "write" && command.action !== "append" && command.action !== "update" && command.action !== "clear") {
       throw new Error(`Operación no soportada: ${command.action}`);
     }
@@ -8534,15 +8585,15 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
 
     if (command.action === "append") {
       const recordList = params.records || (params.record ? [params.record] : null);
-      const headers = recordList ? await bridgeSheetHeaders(targetSheet) : null;
+      const headers = recordList ? await sheetsHeaders(targetSheet) : null;
       const expectedRows = recordList
-        ? recordList.map((record) => bridgeRecordRow(record, headers))
-        : bridgeRows(params.values);
-      const startRow = await nextBridgeAppendRow(targetSheet);
+        ? recordList.map((record) => sheetsRecordRow(record, headers))
+        : sheetsRows(params.values);
+      const startRow = await nextSheetsAppendRow(targetSheet);
       const start = `A${startRow}`;
-      const range = bridgeWriteRange(start, expectedRows);
-      const mutations = bridgeRangeMutations(params, targetSheet, range, expectedRows);
-      const verification = await executeBridgeMutations(
+      const range = sheetsWriteRange(start, expectedRows);
+      const mutations = sheetsRangeMutations(params, targetSheet, range, expectedRows);
+      const verification = await executeSheetsMutations(
         params,
         targetSheet,
         mutations,
@@ -8554,14 +8605,14 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
         sheet: targetSheet,
         start,
         range,
-        ...bridgeMutationResult(verification, mutations, range, expectedRows)
+        ...sheetsMutationResult(verification, mutations, range, expectedRows)
       };
     }
 
     if (command.action === "update") {
       let rowNumber = Number(params.row);
       if (params.where && typeof params.where === "object" && Object.keys(params.where).length) {
-        const matches = (await bridgeSheetRecords(targetSheet, { where: params.where, limit: 2 })).records;
+        const matches = (await sheetsRecords(targetSheet, { where: params.where, limit: 2 })).records;
         if (!matches.length) throw new Error("No se encontró ningún registro que coincida con --where");
         if (matches.length > 1) throw new Error("--where coincide con más de un registro; usa una condición única");
         rowNumber = matches[0].row;
@@ -8571,8 +8622,8 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
       if (!changes || typeof changes !== "object" || Array.isArray(changes) || !Object.keys(changes).length) {
         throw new Error("No hay cambios para aplicar");
       }
-      const headers = await bridgeSheetHeaders(targetSheet);
-      const indexes = bridgeHeaderIndexes(headers);
+      const headers = await sheetsHeaders(targetSheet);
+      const indexes = sheetsHeaderIndexes(headers);
       const cells = Object.entries(changes).map(([column, value]) => {
         const columnIndex = indexes.get(normalizedColumn(column));
         if (columnIndex === undefined) throw new Error(`La columna ${column} no existe en la hoja`);
@@ -8582,7 +8633,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
           value: value === null || value === undefined ? "" : String(value)
         };
       });
-      const targetGid = bridgeMutationGid(params, targetSheet);
+      const targetGid = sheetsMutationGid(params, targetSheet);
       const mutations = cells.map((cell) => ({
         gid: targetGid,
         sheetName: targetSheet,
@@ -8593,7 +8644,7 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
       const firstColumn = Math.min(...cells.map((cell) => cell.columnIndex));
       const lastColumn = Math.max(...cells.map((cell) => cell.columnIndex));
       const range = `${columnName(firstColumn + 1)}${rowNumber}:${columnName(lastColumn + 1)}${rowNumber}`;
-      const verification = await executeBridgeMutations(
+      const verification = await executeSheetsMutations(
         params,
         targetSheet,
         mutations,
@@ -8619,21 +8670,21 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     let range;
     let expectedRows;
     if (command.action === "write") {
-      expectedRows = bridgeRows(params.values);
-      range = bridgeWriteRange(params.start, expectedRows);
+      expectedRows = sheetsRows(params.values);
+      range = sheetsWriteRange(params.start, expectedRows);
     } else {
-      range = normalizedBridgeRange(params.range);
+      range = normalizedSheetsRange(params.range);
       const [start, end = start] = range.split(":");
       const startMatch = start.match(/^([A-Z]+)(\d+)$/);
       const endMatch = end.match(/^([A-Z]+)(\d+)$/);
-      const width = bridgeColumnNumber(endMatch[1]) - bridgeColumnNumber(startMatch[1]) + 1;
+      const width = sheetsColumnNumber(endMatch[1]) - sheetsColumnNumber(startMatch[1]) + 1;
       const height = Number(endMatch[2]) - Number(startMatch[2]) + 1;
       if (width <= 0 || height <= 0) throw new Error("El rango de limpieza está invertido");
       expectedRows = Array.from({ length: height }, () => Array(width).fill(""));
     }
 
-    const mutations = bridgeRangeMutations(params, targetSheet, range, expectedRows);
-    const verification = await executeBridgeMutations(
+    const mutations = sheetsRangeMutations(params, targetSheet, range, expectedRows);
+    const verification = await executeSheetsMutations(
       params,
       targetSheet,
       mutations,
@@ -8644,61 +8695,109 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
       gid: String(params.gid || currentGid()),
       sheet: targetSheet,
       range,
-      ...bridgeMutationResult(verification, mutations, range, expectedRows)
+      ...sheetsMutationResult(verification, mutations, range, expectedRows)
     };
   }
 
-  function runtimeBridgeMessage(type, payload) {
-    const runtime = globalThis.chrome?.runtime;
-    if (!runtime?.sendMessage) return Promise.resolve(null);
-    return new Promise((resolve, reject) => {
+  async function executeSheetsExecution(command) {
+    if (command?.action !== "apply_operations") return executeSheetsCommand(command);
+    const operations = Array.isArray(command.operations) ? command.operations : [];
+    if (!operations.length) throw new Error("La ejecución no contiene operaciones.");
+    const results = [];
+    for (let index = 0; index < operations.length; index += 1) {
+      const operation = operations[index];
+      const { action, ...params } = operation || {};
       try {
-        runtime.sendMessage({ source: "sheets-row-drawer-codex", type, payload }, (response) => {
-          const runtimeError = globalThis.chrome?.runtime?.lastError;
-          if (runtimeError) reject(new Error(runtimeError.message));
-          else resolve(response || null);
-        });
+        results.push({ index, action, ok: true, result: await executeSheetsCommand({ action, params }) });
       } catch (error) {
-        reject(error);
+        const executionError = new Error(error instanceof Error ? error.message : String(error));
+        executionError.partialResult = {
+          completed: index,
+          failedAt: index,
+          operations: [...results, { index, action, ok: false, error: executionError.message }]
+        };
+        throw executionError;
       }
-    });
+    }
+    return { completed: operations.length, operations: results };
   }
 
-  async function pollCodexBridge() {
+  function stopExecutionRealtime() {
+    executionSocket?.removeAllListeners();
+    executionSocket?.disconnect();
+    executionSocket = null;
+    executionSocketAccountId = "";
+    pendingExecutionIds.clear();
+  }
+
+  async function handleExecutionReady(event) {
+    const id = String(event?.id || "");
+    const targetSpreadsheetId = String(event?.target?.spreadsheetId || "");
+    if (!id || targetSpreadsheetId !== spreadsheetId() || pendingExecutionIds.has(id) || !cloudAccessAllowed()) return;
+    pendingExecutionIds.add(id);
     try {
-      if (!cloudAccessAllowed()) {
-        setTimeout(pollCodexBridge, CODEX_BRIDGE_POLL_MS);
-        return;
-      }
-      const response = await runtimeBridgeMessage("poll", {
+      const claimed = await cloudMessage("execution.claim", {
+        id,
         spreadsheetId: spreadsheetId(),
         gid: currentGid(),
-        sheet: activeSheetName()
+        sheet: activeSheetName(),
+        clientId: EXECUTION_CLIENT_ID
       });
-      if (response?.accessBlocked) {
-        ui.cloudAccountUi?.setSession(response.session || {
-          authenticated: false,
-          serviceError: response.error || "Se requiere una sesión activa para usar el acceso de IA."
+      if (!claimed?.ok || !claimed.claimed) return;
+      try {
+        if (!cloudAccessAllowed()) throw new Error("Se requiere una sesión activa de Abrir CRM para ejecutar esta orden.");
+        const result = await executeSheetsExecution(claimed.command);
+        await cloudMessage("execution.result", {
+          id,
+          claimToken: claimed.claimToken,
+          ok: true,
+          result
         });
-        ui.cloudAccountUi?.open();
-        return;
+      } catch (error) {
+        await cloudMessage("execution.result", {
+          id,
+          claimToken: claimed.claimToken,
+          ok: false,
+          result: error?.partialResult || null,
+          error: error instanceof Error ? error.message : String(error)
+        });
       }
-      const command = response?.command;
-      if (command) {
-        try {
-          if (!cloudAccessAllowed()) throw new Error("Se requiere una sesión activa de Abrir CRM para ejecutar esta orden.");
-          const result = await executeCodexBridgeCommand(command);
-          await runtimeBridgeMessage("result", { id: command.id, ok: true, result });
-        } catch (error) {
-          await runtimeBridgeMessage("result", {
-            id: command.id,
-            ok: false,
-            error: error instanceof Error ? error.message : String(error)
-          });
-        }
-      }
-    } catch {}
-    setTimeout(pollCodexBridge, CODEX_BRIDGE_POLL_MS);
+    } finally {
+      pendingExecutionIds.delete(id);
+    }
+  }
+
+  function enqueueExecution(event) {
+    executionQueue = executionQueue
+      .catch(() => {})
+      .then(() => handleExecutionReady(event));
+  }
+
+  async function syncExecutionRealtime() {
+    if (!state.cloudRequired || state.cloudLocalMode || !cloudAccessAllowed()) {
+      stopExecutionRealtime();
+      return;
+    }
+    const connection = await cloudMessage("execution.connection");
+    if (!connection?.ok || !connection.token || !connection.endpoint || !cloudAccessAllowed()) {
+      stopExecutionRealtime();
+      return;
+    }
+    const accountId = String(connection.accountId || "");
+    if (executionSocket && executionSocketAccountId === accountId && executionSocket.io?.uri === connection.endpoint) return;
+    stopExecutionRealtime();
+    executionSocketAccountId = accountId;
+    executionSocket = createSocket(connection.endpoint, {
+      auth: { token: connection.token },
+      transports: ["websocket"],
+      reconnection: true,
+      reconnectionDelay: 500,
+      reconnectionDelayMax: 5_000
+    });
+    executionSocket.on("sheets:execution-ready", event => {
+      if (String(event?.accountId || "") !== executionSocketAccountId) return;
+      enqueueExecution(event);
+    });
   }
 
   async function refreshOpenSheetData() {
@@ -8802,6 +8901,8 @@ import { WorkspaceSheetView } from "./workspace-sheet-view.jsx";
     renderSheetViewActions();
     setInterval(pollSelection, POLL_MS);
     pollSelection();
-    void pollCodexBridge();
+    void syncExecutionRealtime();
   });
+
+  window.addEventListener("pagehide", stopExecutionRealtime, { once: true });
 })();

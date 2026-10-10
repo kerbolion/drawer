@@ -1,8 +1,6 @@
 (() => {
   "use strict";
 
-  const BRIDGE_ORIGIN = "http://127.0.0.1:17373";
-  const BRIDGE_HEADER = "sheets-row-drawer-v1";
   const CLOUD_SOURCE = "sheets-row-drawer-cloud";
   const API_BASE_DEFAULT = "https://abrircrm.com/api/sheets-drawer";
   const STORAGE_KEYS = {
@@ -44,47 +42,19 @@
     return String(stored[STORAGE_KEYS.apiBase] || API_BASE_DEFAULT).replace(/\/$/, "");
   }
 
-  async function bridgePost(path, body) {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 1_200);
-    try {
-      const response = await fetch(`${BRIDGE_ORIGIN}${path}`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Sheets-Row-Drawer-Bridge": BRIDGE_HEADER
-        },
-        body: JSON.stringify(body),
-        cache: "no-store",
-        signal: controller.signal
-      });
-      if (!response.ok) return null;
-      return response.json();
-    } catch {
-      return null;
-    } finally {
-      clearTimeout(timeout);
-    }
-  }
-
-  function bridgeAccessAllowed(session) {
+  function cloudAccessAllowed(session) {
     if (!session?.ok || !session.authenticated || !session.user || session.user.active === false) return false;
     if (session.user.role === "superadmin") return true;
     return session.account?.status === "active" && !session.account?.expired;
   }
 
-  function bridgeAccessError(session) {
+  function cloudAccessError(session) {
     if (!session?.ok) return session?.error || "No se pudo validar la sesión de Abrir CRM.";
     if (!session.authenticated || !session.user) return "Inicia sesión en Abrir CRM para usar el acceso de IA.";
     if (session.user.active === false) return "El usuario de Abrir CRM está inactivo.";
     if (session.account?.status !== "active") return "La cuenta de Abrir CRM está suspendida.";
     if (session.account?.expired) return "La suscripción de Abrir CRM está vencida.";
     return "La cuenta no tiene acceso al servicio.";
-  }
-
-  function bridgeSessionPayload(session, error) {
-    if (session?.ok && session.authenticated) return session;
-    return { authenticated: false, serviceError: error };
   }
 
   function isSheetsSender(sender) {
@@ -190,6 +160,18 @@
         const result = await cloudRequest("/auth/me", { method: "PUT", body: payload });
         return result.ok ? { ok: true, ...result.data } : result;
       }
+      case "integration.tokens": {
+        const result = await cloudRequest("/auth/integration-tokens");
+        return result.ok ? { ok: true, tokens: result.data.tokens || [] } : result;
+      }
+      case "integration.create": {
+        const result = await cloudRequest("/auth/integration-tokens", { method: "POST", body: payload });
+        return result.ok ? { ok: true, ...result.data } : result;
+      }
+      case "integration.revoke": {
+        const result = await cloudRequest(`/auth/integration-tokens/${encodeURIComponent(payload.id)}`, { method: "DELETE" });
+        return result.ok ? { ok: true, ...result.data } : result;
+      }
       case "account.clear": {
         const result = await cloudRequest("/account/data", {
           method: "DELETE",
@@ -238,6 +220,44 @@
       case "workspace.list": {
         const result = await cloudRequest("/workspaces");
         return result.ok ? { ok: true, workspaces: result.data.workspaces || [] } : result;
+      }
+      case "execution.connection": {
+        const session = await cloudCommand("session");
+        if (!cloudAccessAllowed(session)) {
+          return { ok: false, status: session.status || 403, code: "CLOUD_ACCESS_REQUIRED", error: cloudAccessError(session) };
+        }
+        const stored = await storageGet(STORAGE_KEYS.token);
+        return {
+          ok: true,
+          token: stored[STORAGE_KEYS.token] || "",
+          endpoint: new URL(await apiBase()).origin,
+          accountId: session.user?.accountId || session.account?.id || null
+        };
+      }
+      case "execution.claim": {
+        const result = await cloudRequest(`/executions/${encodeURIComponent(payload.id)}/claim`, {
+          method: "POST",
+          body: {
+            spreadsheetId: payload.spreadsheetId,
+            gid: payload.gid || "",
+            sheet: payload.sheet || "",
+            clientId: payload.clientId || "",
+            extensionVersion: chrome.runtime.getManifest().version
+          }
+        });
+        return result.ok ? { ok: true, ...result.data } : result;
+      }
+      case "execution.result": {
+        const result = await cloudRequest(`/executions/${encodeURIComponent(payload.id)}/result`, {
+          method: "POST",
+          body: {
+            claimToken: payload.claimToken,
+            ok: payload.ok === true,
+            result: payload.result,
+            error: payload.error || ""
+          }
+        });
+        return result.ok ? { ok: true, ...result.data } : result;
       }
       case "admin.accounts": {
         const result = await cloudRequest("/admin/accounts");
@@ -309,53 +329,11 @@
   }
 
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    if (message?.source === "sheets-row-drawer-codex") {
-      if (!isSheetsSender(sender)) {
-        sendResponse({ command: null, accessBlocked: true, error: "Origen del puente no permitido." });
+    if (message?.source === CLOUD_SOURCE) {
+      if (String(message.type || "").startsWith("execution.") && !isSheetsSender(sender)) {
+        sendResponse({ ok: false, status: 403, code: "INVALID_ORIGIN", error: "Origen de ejecución no permitido." });
         return false;
       }
-      const route = message.type === "poll" ? "/v1/poll" : message.type === "result" ? "/v1/result" : "";
-      if (!route) return false;
-      void (async () => {
-        const bridgePayload = {
-          ...message.payload,
-          extensionVersion: chrome.runtime.getManifest().version
-        };
-        const result = await bridgePost(route, bridgePayload);
-        if (message.type !== "poll" || !result?.command) {
-          sendResponse(result || { command: null });
-          return;
-        }
-
-        const session = await cloudCommand("session");
-        if (bridgeAccessAllowed(session)) {
-          sendResponse(result);
-          return;
-        }
-
-        const error = bridgeAccessError(session);
-        await bridgePost("/v1/result", {
-          id: result.command.id,
-          ok: false,
-          error,
-          code: "CLOUD_ACCESS_REQUIRED",
-          extensionVersion: chrome.runtime.getManifest().version
-        });
-        sendResponse({
-          command: null,
-          accessBlocked: true,
-          error,
-          session: bridgeSessionPayload(session, error)
-        });
-      })().catch(error => sendResponse({
-        command: null,
-        accessBlocked: true,
-        error: error?.message || "No se pudo validar el acceso del puente."
-      }));
-      return true;
-    }
-
-    if (message?.source === CLOUD_SOURCE) {
       void cloudCommand(message.type, message.payload || {})
         .then(sendResponse)
         .catch(error => sendResponse({ ok: false, status: 0, error: error?.message || "Error del servicio." }));
